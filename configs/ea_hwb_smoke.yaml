@@ -1,0 +1,3 @@
+extends: configs/hwb_smoke.yaml
+modules:
+  entity_attention: {enabled: true, entity_dim: 32, attention_heads: 2}

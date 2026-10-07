@@ -1,0 +1,9 @@
+extends: configs/modular_mappo_persistent.yaml
+training:
+  total_sampled_steps: 300000
+  evaluation_interval_sampled_steps: 50000
+implementation:
+  checkpoint_interval_sampled_steps: 100000
+modules:
+  warm_start: {enabled: true, mode: actor_only}
+  policy_anchor: {enabled: false, coefficient: 0.01, schedule: constant}

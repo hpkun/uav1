@@ -1,0 +1,41 @@
+extends: configs/modular_mappo_persistent.yaml
+training:
+  actor_learning_rate: 0.0003
+  critic_learning_rate: 0.0003
+  gamma: 0.999
+  gae_lambda: 0.95
+  clip_ratio: 0.2
+  value_loss_coefficient: 0.5
+  entropy_coefficient: 0.01
+  max_grad_norm: 0.5
+  rollout_steps: 256
+  ppo_epochs: 10
+  minibatch_size: 512
+  num_train_envs: 24
+  total_sampled_steps: 400000
+  evaluation_episodes: 20
+  evaluation_interval_sampled_steps: 100000
+  device: cuda
+  seed: 4101
+implementation:
+  evaluation_seed_base: 32000000
+  checkpoint_interval_sampled_steps: 400000
+modules:
+  wave_context: {enabled: false, context_target: critic_only, max_waves: 3}
+  recurrent_memory: {enabled: false, mode: actor_critic_gru, hidden_dim: 128, sequence_length: 32}
+  popart: {enabled: false, beta: 0.999, epsilon: 0.00001}
+  multi_wave_reward: {enabled: false, mode: none, bonuses: {wave1: 1.0, wave2: 1.5, wave3: 2.0}, survivor_scale: 0.1}
+  wave_balancing: {enabled: false, loss_target: actor_critic, frequency_basis: alive_agent, max_weight: 3.0, epsilon: 0.000001}
+  warm_start: {enabled: false, mode: none}
+  curriculum: {enabled: false, stage_mode: fixed_steps, stage1_end: 500000, stage2_end: 1000000}
+  policy_anchor: {enabled: false, coefficient: 0.01, schedule: constant}
+  entity_attention: {enabled: false, entity_dim: 32, attention_heads: 2}
+  advantage_priority: {enabled: false}
+  ppo_stabilization: {enabled: false}
+  actor_lr_decay: {enabled: false}
+development_protocol:
+  role: development_only
+  checkpoint_selection: {primary: latest_at_budget, budget: 400000, best_eval_role: secondary_diagnostic_only}
+  validation: {role: NEW_ARCHITECTURE_DEVELOPMENT_VALIDATION, seed_start: 32000000, seed_end: 32000019, episodes: 20}
+  reserved_future_final_test: {role: RESERVED_UNTOUCHED_FUTURE_FINAL_TEST, seed_start: 33000000, seed_end: 33000199, episodes: 200, executed: false}
+

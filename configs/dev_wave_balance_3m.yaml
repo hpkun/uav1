@@ -1,0 +1,10 @@
+extends: configs/diag_mappo_learnability_common_3m.yaml
+development_method: wave_balance_mappo
+modules:
+  wave_balancing:
+    enabled: true
+    loss_target: actor_critic
+    frequency_basis: alive_agent
+    max_weight: 3.0
+    epsilon: 0.000001
+

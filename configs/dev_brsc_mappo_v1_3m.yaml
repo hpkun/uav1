@@ -1,0 +1,30 @@
+extends: configs/diag_mappo_learnability_common_3m.yaml
+development_method: brsc_mappo_v1
+modules:
+  inter_wave_credit: {enabled: false}
+  counterfactual_inter_wave_credit: {enabled: false}
+  boundary_redistributed_segment_credit:
+    enabled: true
+    max_waves: 3
+    outcome_critic_learning_rate: 0.0003
+    train_boundaries_per_class: 256
+    validation_boundaries_per_wave: 256
+    prior_window_boundaries_per_wave: 512
+    critic_samples_per_class_per_task: 64
+    critic_updates_per_rollout: 4
+    min_train_boundaries_per_class: 8
+    validation_interval_updates: 10
+    min_validation_boundaries: 64
+    min_validation_positive: 16
+    min_validation_negative: 16
+    min_validation_auroc: 0.60
+    min_validation_brier_skill: 0.0
+    readiness_consecutive_passes: 3
+    auxiliary_gradient_ratio_cap: 0.25
+    prior_probability_epsilon: 0.0001
+development_protocol:
+  role: BRSC_MAPPO_V1_DEVELOPMENT_ONLY
+  primary_checkpoint: 3000000
+  best_checkpoint_role: diagnostic_only
+  validation: {seed_start: 44000000, seed_end: 44000049, episodes: 50, deterministic: true, common_scenarios: true, is_holdout: false}
+  reserved_future_final_test: {seed_start: 45000000, seed_end: 45000199, executed: false}

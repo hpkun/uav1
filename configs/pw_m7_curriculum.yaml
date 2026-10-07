@@ -1,0 +1,2 @@
+extends: configs/modular_mappo_persistent.yaml
+modules: {curriculum: {enabled: true, stage_mode: fixed_steps, stage1_end: 500000, stage2_end: 1000000}}

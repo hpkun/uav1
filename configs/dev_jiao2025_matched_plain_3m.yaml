@@ -1,0 +1,31 @@
+extends: configs/diag_mappo_learnability_common_3m.yaml
+development_method: jiao2025_matched_plain_3m
+training:
+  actor_learning_rate: 0.0005
+  critic_learning_rate: 0.0005
+  gamma: 0.99
+  clip_ratio: 0.1
+modules:
+  actor_lr_decay: {enabled: false}
+  actor_kl_guard: {enabled: false}
+  actor_gradient_clipping: {enabled: false}
+  mission_film: {enabled: false}
+  inter_wave_credit: {enabled: false}
+  counterfactual_inter_wave_credit: {enabled: false}
+  boundary_redistributed_segment_credit: {enabled: false}
+  hierarchical_temporal_abstraction: {enabled: false}
+  hta_worker_consolidation: {enabled: false}
+  sequential_wave_gradient_projection: {enabled: false}
+  team_mean_credit: {enabled: false}
+  persistent_wave_trajectory_replay: {enabled: false}
+  wave_entry_curriculum: {enabled: false}
+  wave1_sensitivity_gating: {enabled: false}
+  wave_specific_actor_isolation: {enabled: false}
+  wave_specific_mean_heads: {enabled: false}
+  deployment_aligned_wave_exploration: {enabled: false}
+  reference_variance: {enabled: false}
+  milestone_aware_retention_credit: {enabled: false, version: 2, deployment_distill_coefficient: 0.0}
+jiao_transfer:
+  source_doi: 10.1049/cth2.12781
+  role: paper_aligned_transfer_not_exact_simulator_reproduction
+  primary_result: exact_3000000_final_evaluation

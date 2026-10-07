@@ -1,0 +1,15 @@
+extends: configs/dev_marc_credit_balance_1m.yaml
+development_method: marc_mappo_state_memory_v1
+training:
+  total_sampled_steps: 2000000
+modules:
+  recurrent_memory:
+    enabled: true
+    mode: wave_state_memory_actor_gru
+    hidden_dim: 128
+    sequence_length: 32
+    wave_context_dim: 3
+    initial_hidden: zeros
+development_protocol:
+  role: marc_state_memory_v1_development_only_not_final_holdout
+  primary_checkpoints: [900000, 1000000, 1500000, 2000000]

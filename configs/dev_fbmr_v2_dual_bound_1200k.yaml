@@ -1,0 +1,28 @@
+extends: configs/dev_fbmr_stage2_common_1200k.yaml
+training:
+  actor_learning_rate: 0.0001
+modules:
+  actor_lr_decay: {enabled: false}
+  entity_attention:
+    enabled: true
+    mode: frozen_base_dual_bounded_mean_residual
+    entity_dim: 32
+    attention_heads: 2
+    alpha_abs: 0.25
+    alpha_rel: 0.25
+development_protocol:
+  validation: {role: FBMR_V2_DEVELOPMENT_VALIDATION, seed_start: 34000000, seed_end: 34000019, episodes: 20}
+development_branch:
+  intervention: frozen_base_dual_bounded_mean_residual
+  source_sampled_steps: 900000
+  additional_sampled_steps: 300000
+  target_sampled_steps: 1200000
+  actor_optimizer_restore: false
+  actor_optimizer_reason: new_trainable_parameter_set
+  critic_optimizer_restore: true
+  rng_restore: true
+  base_actor_frozen: true
+  log_std_source: frozen_baseline
+  dual_bound_enabled: true
+  alpha_abs: 0.25
+  alpha_rel: 0.25

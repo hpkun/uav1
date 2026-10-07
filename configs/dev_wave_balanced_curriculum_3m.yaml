@@ -1,0 +1,20 @@
+extends: configs/diag_mappo_learnability_common_3m.yaml
+development_method: wave_balanced_curriculum_mappo
+modules:
+  wave_balancing:
+    enabled: true
+    loss_target: actor_critic
+    frequency_basis: alive_agent
+    max_weight: 3.0
+    epsilon: 0.000001
+  wave_entry_curriculum:
+    enabled: true
+    mode: adaptive_deficit
+    recent_natural_window: 200
+    min_natural_episodes_for_adaptation: 50
+    target_reach_w2: 0.75
+    target_reach_w3: 0.50
+    max_curriculum_fraction: 0.50
+    min_bank_entries: 8
+    capacity_per_wave: 256
+    sampling: uniform

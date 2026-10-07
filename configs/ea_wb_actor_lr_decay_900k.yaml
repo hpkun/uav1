@@ -1,0 +1,9 @@
+extends: configs/ea_wb_1p5m.yaml
+modules:
+  actor_lr_decay:
+    enabled: true
+    schedule: delayed_linear
+    start_step: 600000
+    end_step: 900000
+    start_lr: 0.0003
+    end_lr: 0.0001

@@ -1,0 +1,5 @@
+extends: configs/jiao2025_paper_core.yaml
+
+# Architecture-only transfer: training reward remains the frozen environment reward.
+modules:
+  multi_wave_reward: {enabled: false, mode: none}

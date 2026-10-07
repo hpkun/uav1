@@ -1,0 +1,3 @@
+extends: configs/pw_m6_screen_control_300k.yaml
+modules:
+  policy_anchor: {enabled: true, coefficient: 0.03, schedule: constant}

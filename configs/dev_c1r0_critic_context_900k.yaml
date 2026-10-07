@@ -1,0 +1,3 @@
+extends: configs/dev_critic_mission_context_common_900k.yaml
+modules:
+  wave_context: {enabled: true, context_target: critic_only, encoding: mission_markov, max_waves: 3}

@@ -1,0 +1,5 @@
+extends: configs/jiao2025_paper_core.yaml
+
+# Full paper-aligned stack: Eq. (12) replaces, rather than augments, env reward.
+modules:
+  multi_wave_reward: {enabled: true, mode: jiao_r2_replacement}

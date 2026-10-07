@@ -1,0 +1,3 @@
+extends: configs/ea_mappo_smoke.yaml
+modules:
+  wave_balancing: {enabled: true, loss_target: actor_critic, frequency_basis: alive_agent, max_weight: 3.0, epsilon: 0.000001}

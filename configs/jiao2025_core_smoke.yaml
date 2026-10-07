@@ -1,0 +1,8 @@
+extends: configs/jiao2025_core_1p5m.yaml
+
+# Focused infrastructure smoke only. This range is disjoint from training
+# validation, the 38M fresh comparison, contaminated 37M, and the 20M holdout.
+training:
+  seed: 99100000
+implementation:
+  evaluation_seed_base: 99000000

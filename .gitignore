@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Generated experiment outputs (keep only the directory placeholder).
+outputs/*
+!outputs/.gitkeep
+
+# Temporary local files.
+tmp/
+
+# Model checkpoints
+*.pt
+*.pth
+*.ckpt
+
+# Test/runtime artifacts.
+.pytest_tmp/
+.pytest_cache/

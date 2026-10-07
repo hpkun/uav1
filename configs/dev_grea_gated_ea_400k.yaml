@@ -1,0 +1,4 @@
+extends: configs/dev_grea_common_400k.yaml
+modules:
+  entity_attention: {enabled: true, mode: gated_residual, entity_dim: 32, attention_heads: 2, initial_gate: 0.05}
+

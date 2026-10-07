@@ -1,0 +1,3 @@
+extends: configs/hwb_1p5m.yaml
+modules:
+  entity_attention: {enabled: true, entity_dim: 32, attention_heads: 2}

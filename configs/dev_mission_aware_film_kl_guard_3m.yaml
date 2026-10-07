@@ -1,0 +1,7 @@
+extends: configs/dev_mission_aware_film_3m.yaml
+development_method: mission_aware_film_kl_guard
+modules:
+  actor_kl_guard:
+    enabled: true
+    hard_kl: 0.05
+    actor_early_stop: true

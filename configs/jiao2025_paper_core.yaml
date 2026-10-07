@@ -1,0 +1,38 @@
+extends: configs/modular_mappo_persistent.yaml
+
+# Paper-aligned Recurrent-MAPPO core on the frozen persistent_wave_v2 project
+# backbone. See docs/jiao2025_reproduction.md for source/adaptation labels.
+training:
+  actor_learning_rate: 0.0005
+  critic_learning_rate: 0.0005
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_ratio: 0.1
+  entropy_coefficient: 0.01
+  rollout_steps: 150
+  ppo_epochs: 10
+  minibatch_size: 512
+  num_train_envs: 24
+  total_sampled_steps: 1500000
+  evaluation_episodes: 20
+  device: cuda
+  seed: 2023
+implementation:
+  evaluation_seed_base: 10000000
+modules:
+  wave_context:
+    enabled: true
+    context_target: actor_critic
+    encoding: scalar_round
+    max_waves: 3
+  recurrent_memory:
+    enabled: true
+    mode: actor_critic_gru
+    hidden_dim: 128
+    sequence_length: 32
+  popart: {enabled: true, beta: 0.999, epsilon: 0.00001}
+  multi_wave_reward: {enabled: false, mode: none}
+  wave_balancing: {enabled: false, loss_target: actor_critic, frequency_basis: alive_agent, max_weight: 3.0, epsilon: 0.000001}
+  warm_start: {enabled: false, mode: none}
+  curriculum: {enabled: false, stage_mode: fixed_steps, stage1_end: 500000, stage2_end: 1000000}
+  policy_anchor: {enabled: false, coefficient: 0.01, schedule: constant}

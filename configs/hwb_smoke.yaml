@@ -1,0 +1,6 @@
+extends: configs/modular_mappo_persistent.yaml
+training: {total_sampled_steps: 8192, num_train_envs: 4, rollout_steps: 128, ppo_epochs: 2, minibatch_size: 512, evaluation_episodes: 2, evaluation_interval_sampled_steps: 4096}
+implementation: {checkpoint_interval_sampled_steps: 4096}
+modules:
+  wave_balancing: {enabled: true, loss_target: actor_critic, frequency_basis: alive_agent, max_weight: 3.0, epsilon: 0.000001}
+  advantage_priority: {enabled: true, source: raw_gae, scope: within_wave, positive_only: true, alpha: 0.5, z_clip: 2.0, actor_only: true, final_weight_cap: 4.0, epsilon: 0.00000001, mean_preserving: true}

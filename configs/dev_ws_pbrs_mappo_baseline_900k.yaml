@@ -1,0 +1,3 @@
+extends: configs/dev_ws_pbrs_common_900k.yaml
+modules:
+  wave_survival_pbrs: {enabled: false, coefficient: 1.0, potential: progress_times_survival, terminal_zero: true}

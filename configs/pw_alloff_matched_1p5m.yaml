@@ -1,0 +1,10 @@
+extends: configs/modular_mappo_persistent.yaml
+modules:
+  wave_context: {enabled: false, context_target: critic_only, max_waves: 3}
+  recurrent_memory: {enabled: false, mode: actor_critic_gru, hidden_dim: 128, sequence_length: 32}
+  popart: {enabled: false, beta: 0.999, epsilon: 0.00001}
+  multi_wave_reward: {enabled: false, mode: none, bonuses: {wave1: 1.0, wave2: 1.5, wave3: 2.0}, survivor_scale: 0.1}
+  wave_balancing: {enabled: false, loss_target: actor_critic, frequency_basis: alive_agent, max_weight: 3.0, epsilon: 0.000001}
+  warm_start: {enabled: false, mode: none}
+  curriculum: {enabled: false, stage_mode: fixed_steps, stage1_end: 500000, stage2_end: 1000000}
+  policy_anchor: {enabled: false, coefficient: 0.01, schedule: constant}

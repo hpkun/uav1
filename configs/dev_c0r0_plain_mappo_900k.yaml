@@ -1,0 +1,1 @@
+extends: configs/dev_critic_mission_context_common_900k.yaml

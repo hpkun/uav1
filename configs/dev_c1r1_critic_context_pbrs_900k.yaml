@@ -1,0 +1,4 @@
+extends: configs/dev_critic_mission_context_common_900k.yaml
+modules:
+  wave_context: {enabled: true, context_target: critic_only, encoding: mission_markov, max_waves: 3}
+  wave_survival_pbrs: {enabled: true, coefficient: 1.0, potential: progress_times_survival, terminal_zero: true}

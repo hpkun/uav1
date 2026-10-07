@@ -1,0 +1,22 @@
+extends: configs/diag_mappo_learnability_common_3m.yaml
+development_method: wsai_mappo
+development_branch:
+  intervention: wave_specific_actor_isolation
+  source_sampled_steps: 1505280
+  additional_sampled_steps: 300000
+  target_sampled_steps: 1805280
+  actor_optimizer_restore: true
+  critic_optimizer_restore: true
+  rng_restore: true
+training:
+  total_sampled_steps: 1805280
+modules:
+  wave_specific_actor_isolation:
+    enabled: true
+    total_waves: 3
+    actor_routing: environment_wave
+    shared_critic: true
+    initialization: clone_source_actor
+    optimizer_initialization: clone_source_actor_optimizer
+    natural_wave_weighting: true
+    global_actor_grad_clip: true

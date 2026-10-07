@@ -1,0 +1,4 @@
+extends: configs/formal_eawb_common_900k.yaml
+modules:
+  entity_attention: {enabled: true, entity_dim: 32, attention_heads: 2}
+

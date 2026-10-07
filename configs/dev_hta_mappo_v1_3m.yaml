@@ -1,0 +1,19 @@
+extends: configs/diag_mappo_learnability_common_3m.yaml
+development_method: hta_mappo_v1
+modules:
+  hierarchical_temporal_abstraction:
+    enabled: true
+    num_options: 4
+    decision_interval_steps: 16
+  inter_wave_credit: {enabled: false}
+  counterfactual_inter_wave_credit: {enabled: false}
+  boundary_redistributed_segment_credit: {enabled: false}
+  mission_film: {enabled: false}
+  actor_kl_guard: {enabled: false}
+development_protocol:
+  role: HTA_MAPPO_V1_DEVELOPMENT_ONLY
+  primary_checkpoint: 3000000
+  best_checkpoint_role: diagnostic_only
+  validation: {seed_start: 44000000, seed_end: 44000049, episodes: 50, deterministic: true, common_scenarios: true, is_holdout: false}
+  reserved_future_final_test: {seed_start: 45000000, seed_end: 45000199, executed: false}
+

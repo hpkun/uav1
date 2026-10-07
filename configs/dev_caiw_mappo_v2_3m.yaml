@@ -1,0 +1,36 @@
+extends: configs/diag_mappo_learnability_common_3m.yaml
+development_method: caiw_mappo_v2
+modules:
+  inter_wave_credit: {enabled: false}
+  counterfactual_inter_wave_credit:
+    enabled: true
+    max_waves: 3
+    outcome_critic_learning_rate: 0.0003
+    train_segments_per_class: 128
+    validation_segments_per_wave: 256
+    prior_window_segments_per_wave: 512
+    max_states_per_segment: 64
+    train_states_per_class_per_task: 64
+    critic_updates_per_rollout: 4
+    min_train_segments_per_class: 8
+    freshness_ratio_low: 0.8
+    freshness_ratio_high: 1.2
+    min_fresh_states_per_validation_segment: 4
+    validation_interval_updates: 10
+    min_validation_segments: 64
+    min_validation_positive_segments: 16
+    min_validation_negative_segments: 16
+    min_validation_auroc: 0.60
+    min_validation_brier_skill: 0.0
+    readiness_consecutive_passes: 3
+    counterfactual_samples: 4
+    counterfactual_batch_size: 512
+    auxiliary_gradient_ratio_cap: 0.25
+    gradient_projection: asymmetric_tactical_preserving
+    prior_probability_epsilon: 0.0001
+development_protocol:
+  role: CAIW_MAPPO_V2_DEVELOPMENT_ONLY
+  primary_checkpoint: 3000000
+  best_checkpoint_role: diagnostic_only
+  validation: {seed_start: 44000000, seed_end: 44000049, episodes: 50, deterministic: true, common_scenarios: true, is_holdout: false}
+  reserved_future_final_test: {seed_start: 45000000, seed_end: 45000199, executed: false}

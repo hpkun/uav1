@@ -1,0 +1,24 @@
+extends: configs/diag_mappo_learnability_common_3m.yaml
+development_method: fire_ready_plain
+network:
+  observation_dim: 53
+  action_dim: 3
+  num_agents: 4
+  actor_hidden_layers: [256, 256]
+  critic_hidden_layers: [256, 256]
+  attention_heads: 2
+modules:
+  inter_wave_credit: {enabled: false}
+  counterfactual_inter_wave_credit: {enabled: false}
+  boundary_redistributed_segment_credit: {enabled: false}
+  mission_film: {enabled: false}
+  actor_kl_guard: {enabled: false}
+  hierarchical_temporal_abstraction: {enabled: false}
+  hta_worker_consolidation: {enabled: false}
+development_protocol:
+  role: FIRE_READY_PLAIN_DEVELOPMENT_ONLY
+  primary_checkpoint: 3000000
+  best_checkpoint_role: diagnostic_only
+  observation_schema: fire_ready_v1
+  validation: {seed_start: 44000000, seed_end: 44000049, episodes: 50, deterministic: true, common_scenarios: true, is_holdout: false}
+  reserved_future_final_test: {seed_start: 45000000, seed_end: 45000199, executed: false}

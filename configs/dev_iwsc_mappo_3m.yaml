@@ -1,0 +1,33 @@
+extends: configs/diag_mappo_learnability_common_3m.yaml
+development_method: iwsc_mappo
+modules:
+  inter_wave_credit:
+    enabled: true
+    max_waves: 3
+    quality_critic_learning_rate: 0.0003
+    actor_credit_coefficient: 1.0
+    replay_segments_per_wave: 128
+    max_states_per_segment: 64
+    critic_minibatch_size: 512
+    critic_updates_per_rollout: 4
+    min_completed_segments_per_wave: 16
+    min_target_std: 0.05
+    huber_delta: 1.0
+    wave_balanced_supervision: true
+    wave_balanced_actor_loss: true
+    gradient_projection: asymmetric_tactical_preserving
+development_protocol:
+  role: IWSC_MAPPO_DEVELOPMENT_ONLY
+  primary_checkpoint: 3000000
+  best_checkpoint_role: diagnostic_only
+  validation:
+    seed_start: 44000000
+    seed_end: 44000049
+    episodes: 50
+    deterministic: true
+    common_scenarios: true
+    is_holdout: false
+  reserved_future_final_test:
+    seed_start: 45000000
+    seed_end: 45000199
+    executed: false

@@ -1,0 +1,4 @@
+extends: configs/dev_grea_common_400k.yaml
+modules:
+  entity_attention: {enabled: false, entity_dim: 32, attention_heads: 2}
+

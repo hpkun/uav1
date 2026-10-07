@@ -1,0 +1,9 @@
+extends: configs/diag_mappo_learnability_common_3m.yaml
+
+development_method: swgp_mappo
+
+modules:
+  sequential_wave_gradient_projection:
+    enabled: true
+    mode: ordered_upstream_pairwise
+    epsilon: 1.0e-12

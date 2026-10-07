@@ -1,0 +1,16 @@
+extends: configs/dev_hta_mappo_v1_3m.yaml
+development_method: hta_mappo_v2
+modules:
+  hta_worker_consolidation:
+    enabled: true
+    schedule: progressive_linear
+    start_step: 1500000
+    end_step: 2500000
+    final_lr_multiplier: 0.25
+development_protocol:
+  role: HTA_MAPPO_V2_DEVELOPMENT_ONLY
+  primary_checkpoint: 3000000
+  best_checkpoint_role: diagnostic_only
+  validation: {seed_start: 44000000, seed_end: 44000049, episodes: 50, deterministic: true, common_scenarios: true, is_holdout: false}
+  reserved_future_final_test: {seed_start: 45000000, seed_end: 45000199, executed: false}
+

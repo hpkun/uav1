@@ -1,0 +1,8 @@
+extends: configs/diag_mappo_learnability_common_3m.yaml
+development_method: actor_mission_context
+modules:
+  wave_context:
+    enabled: true
+    context_target: actor_only
+    encoding: mission_markov
+    max_waves: 3

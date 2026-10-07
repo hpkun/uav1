@@ -1,0 +1,7 @@
+extends: configs/dev_fbmr_stage2_common_1200k.yaml
+development_branch:
+  intervention: mappo_continuation
+  source_sampled_steps: 900000
+  additional_sampled_steps: 300000
+  target_sampled_steps: 1200000
+

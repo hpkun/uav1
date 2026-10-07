@@ -1,0 +1,15 @@
+extends: configs/diag_mappo_learnability_common_3m.yaml
+development_method: mission_aware_film
+modules:
+  wave_context:
+    enabled: true
+    context_target: actor_only
+    encoding: mission_markov
+    max_waves: 3
+  mission_film:
+    enabled: true
+    mode: bounded_augmented_film
+    encoder_hidden_dim: 32
+    alpha: 0.2
+    augmented_residual: true
+    identity_init: true

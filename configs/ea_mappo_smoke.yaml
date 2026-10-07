@@ -1,0 +1,5 @@
+extends: configs/modular_mappo_persistent.yaml
+training: {total_sampled_steps: 8192, num_train_envs: 4, rollout_steps: 128, ppo_epochs: 2, minibatch_size: 512, evaluation_episodes: 2, evaluation_interval_sampled_steps: 4096}
+implementation: {checkpoint_interval_sampled_steps: 4096}
+modules:
+  entity_attention: {enabled: true, entity_dim: 32, attention_heads: 2}

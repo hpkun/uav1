@@ -1,0 +1,2 @@
+extends: configs/modular_mappo_persistent.yaml
+modules: {popart: {enabled: true, beta: 0.999, epsilon: 0.00001}}

@@ -1,0 +1,12 @@
+extends: configs/diag_mappo_learnability_common_3m.yaml
+development_method: swgp_mappo
+development_branch:
+  intervention: sequential_wave_gradient_projection
+  source_training_seed: 5302
+  source_sampled_steps: 1505280
+  source_checkpoint: outputs/diag_mappo_learnability/l3_seed5302/checkpoint_1505280.pt
+modules:
+  sequential_wave_gradient_projection:
+    enabled: true
+    mode: ordered_upstream_pairwise
+    epsilon: 1.0e-12

@@ -1,0 +1,4 @@
+extends: configs/modular_mappo_persistent.yaml
+modules:
+  wave_balancing: {enabled: true, loss_target: actor_critic, frequency_basis: alive_agent, max_weight: 3.0, epsilon: 0.000001}
+  advantage_priority: {enabled: true, source: raw_gae, scope: within_wave, positive_only: true, alpha: 0.5, z_clip: 2.0, actor_only: true, final_weight_cap: 4.0, epsilon: 0.00000001, mean_preserving: true}

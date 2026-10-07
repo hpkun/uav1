@@ -1,0 +1,2 @@
+extends: configs/modular_mappo_persistent.yaml
+modules: {multi_wave_reward: {enabled: true, mode: wave_clear_bonus, bonuses: {wave1: 1.0, wave2: 1.5, wave3: 2.0}, survivor_scale: 0.1}}

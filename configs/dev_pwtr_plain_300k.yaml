@@ -1,0 +1,12 @@
+extends: configs/diag_mappo_learnability_common_3m.yaml
+development_method: pwtr_plain_matched_control
+development_branch:
+  intervention: pwtr_plain_control
+  source_sampled_steps: 1505280
+  additional_sampled_steps: 300000
+  target_sampled_steps: 1805280
+  actor_optimizer_restore: true
+  critic_optimizer_restore: true
+  rng_restore: true
+training:
+  total_sampled_steps: 1805280

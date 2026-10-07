@@ -1,0 +1,3 @@
+extends: configs/formal_eawb_ea_wb_900k.yaml
+modules:
+  actor_lr_decay: {enabled: false, schedule: delayed_linear, start_step: 600000, end_step: 900000, start_lr: 0.0003, end_lr: 0.0001}

@@ -1,0 +1,55 @@
+algorithm: madsac
+network:
+  observation_dim: 52
+  action_dim: 3
+  num_agents: 4
+  actor_hidden_layers: [256, 256]
+  critic_hidden_layers: [256, 256]
+  attention_heads: 2
+training:
+  optimizer: Adam
+  actor_learning_rate: 0.0001
+  critic_learning_rate: 0.0001
+  gamma: 0.99
+  alpha: 0.1
+  tau: 0.001
+  replay_capacity: 1000000
+  minibatch_size: 1024
+  learning_starts: 10000
+  gradient_steps_per_vector_step: 1
+  policy_delay: 2
+  num_train_envs: 24
+  total_sampled_steps: 3000000
+  evaluation_episodes: 50
+  evaluation_interval_sampled_steps: 100000
+  device: cuda
+  seed: 5301
+runtime_logging:
+  console_interval_sampled_steps: 20000
+  recent_episode_window: 100
+implementation:
+  actor_activation: relu
+  critic_activation: relu
+  log_std_min: -5.0
+  log_std_max: 2.0
+  evaluation_seed_base: 44000000
+  evaluation_policy_seed: 770001
+  evaluation_mode: stochastic
+  checkpoint_interval_sampled_steps: 300000
+metadata:
+  paper_reported:
+    actor_learning_rate: 0.0001
+    critic_learning_rate: 0.0001
+    gamma: 0.99
+    alpha: 0.1
+    tau: 0.001
+    replay_capacity: 1000000
+    minibatch_size: 1024
+    hidden_dim: 256
+    attention_heads: 2
+  project_implementation_choice:
+    learning_starts: 10000
+    gradient_steps_per_vector_step: 1
+    policy_delay: 2
+    matched_total_sampled_steps_3m: 3000000
+    note: policy_delay=2 is an explicit project choice; the paper states delayed updates but does not report d.
