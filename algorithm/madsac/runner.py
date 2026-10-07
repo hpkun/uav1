@@ -4,13 +4,12 @@ from __future__ import annotations
 from copy import deepcopy
 import csv
 import json
-import math
 from pathlib import Path
 from typing import Any
 import numpy as np
 
 from algorithm.common.checkpoint import evaluation_selection_key
-from algorithm.common.evaluator import episode_return_metrics
+from algorithm.common.evaluator import episode_return_metrics, aggregate_combat_records
 from algorithm.common.protocol import config_sha256
 from algorithm.common.vector_env import ParallelVectorEnv, VectorStep
 from env.config import ENVIRONMENT_VERSION
@@ -20,7 +19,6 @@ from .replay_buffer import JointReplayBuffer
 from .trainer import MADSACTrainer, MADSAC_IMPL_VERSION
 
 
-FUTURE_FINAL_45M = tuple(range(45_000_000, 45_000_200))
 
 
 def advance_sampled_steps(current: int, num_envs: int) -> int:
@@ -77,9 +75,9 @@ class MADSACTrainingRunner:
         self.evaluation_seeds = tuple(range(evaluation_base, evaluation_base + evaluation_count))
         self.evaluation_policy_seed = int(implementation["evaluation_policy_seed"])
         self.evaluation_mode = str(implementation["evaluation_mode"])
-        forbidden = (*range(44_000_000, 44_000_050), *FUTURE_FINAL_45M)
+        forbidden = self.evaluation_seeds
         if any(self.seed <= value <= self.seed + self.total_sampled_steps for value in forbidden):
-            raise ValueError("configured training seed interval overlaps development/future-final seeds")
+            raise ValueError("configured training seed interval overlaps evaluation seeds")
         self.vector = ParallelVectorEnv(self.num_envs, self.env_config, self.seed, forbidden)
         self.observations = self.vector.reset()
         self.alive_masks = self.vector.current_alive_masks.copy()
@@ -117,8 +115,6 @@ class MADSACTrainingRunner:
             "minibatch_size": self.minibatch_size,
             "evaluation_mode": self.evaluation_mode,
             "evaluation_policy_seed": self.evaluation_policy_seed,
-            "environment_variant": self.env_config["environment_variant"],
-            "total_waves": int(self.env_config["persistent_waves"]["total_waves"]),
             "max_steps": int(self.env_config["simulation"]["max_steps"]),
             "sampled_steps_unit": "environment_transitions_not_agent_transitions",
             "formal_exact_resume_supported": False,
@@ -162,12 +158,15 @@ class MADSACTrainingRunner:
             "mean_step_reward": float(np.mean(result.rewards)),
             "completed_episodes_this_step": len(rows),
             "team_episode_return": mean("team_episode_return"),
-            "average_waves_cleared": mean("waves_cleared"),
             "red_loss": mean("red_losses"), "blue_loss": mean("blue_losses"),
             "red_boundary_exits": mean("red_boundary_exits"),
             "red_ground_losses": mean("red_ground_losses"),
             "replay_size": len(self.replay), **self.last_metrics,
         }
+        if rows:
+            record.update(aggregate_combat_records(rows))
+        for name in ("r1", "r2", "r3", "r4"):
+            record[f"mean_{name}_reward"] = float(np.mean([info[f"{name}_rewards"] for info in result.infos]))
         with (self.output_dir / "training_metrics.jsonl").open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(record) + "\n")
 
@@ -184,7 +183,7 @@ class MADSACTrainingRunner:
             writer.writeheader(); writer.writerows(self.evaluation_history)
 
     def _evaluation_key(self, row):
-        return evaluation_selection_key(row, self.env_config["environment_variant"])
+        return evaluation_selection_key(row)
 
     def evaluate(self):
         row = {"sampled_steps": self.trainer.sampled_steps,
@@ -200,16 +199,12 @@ class MADSACTrainingRunner:
             self.best_sampled_steps = self.trainer.sampled_steps
             self.save_checkpoint(self.output_dir / "best_eval.pt")
         print(f"[EVAL] steps={self.trainer.sampled_steps} | mode={self.evaluation_mode} "
-              f"| W1/W2/W3={row['clear_wave_1_probability']:.2f}/"
-              f"{row['clear_wave_2_probability']:.2f}/{row['clear_wave_3_probability']:.2f} "
-              f"| waves={row['average_waves_cleared']:.2f} | R={row['average_return']:.2f}", flush=True)
+              f"| win={row['red_win_rate']:.2f} | R={row['average_return']:.2f}", flush=True)
         return row
 
     def checkpoint_extra(self):
-        training = self.algorithm_config["training"]
         return {
             "environment_version": ENVIRONMENT_VERSION,
-            "environment_variant": self.env_config["environment_variant"],
             "environment_config": deepcopy(self.env_config),
             "algorithm_config": deepcopy(self.algorithm_config),
             "environment_config_sha256": config_sha256(self.env_config),
@@ -251,7 +246,6 @@ class MADSACTrainingRunner:
             "sampled_steps_unit": "environment_transitions_not_agent_transitions",
             "paper_reported": deepcopy(self.algorithm_config["metadata"]["paper_reported"]),
             "project_implementation_choice": deepcopy(self.algorithm_config["metadata"]["project_implementation_choice"]),
-            "future_final_45m_untouched": True,
             "formal_exact_resume_supported": False,
             "replay_buffer_in_checkpoint": False,
         }
@@ -263,7 +257,6 @@ class MADSACTrainingRunner:
         rows = self.completed_records[-self.recent_episode_window:]
         return {
             "return": None if not rows else float(np.mean([r["team_episode_return"] for r in rows])),
-            "waves": None if not rows else float(np.mean([r.get("waves_cleared", 0) for r in rows])),
         }
 
     def run(self):
@@ -290,7 +283,7 @@ class MADSACTrainingRunner:
                     recent = self.recent_metrics()
                     print(f"[TRAIN] steps={self.trainer.sampled_steps}/{self.total_sampled_steps} "
                           f"| episodes={len(self.completed_records)} | recent_return={recent['return']} "
-                          f"| recent_waves={recent['waves']} | replay={len(self.replay)} "
+                          f"| replay={len(self.replay)} "
                           f"| critic_updates={self.trainer.critic_update_count} "
                           f"| actor_updates={self.trainer.actor_update_count}", flush=True)
                     while self.next_console <= self.trainer.sampled_steps:
@@ -330,10 +323,9 @@ class MADSACTrainingRunner:
             "sampled_steps_unit": "environment_transitions_not_agent_transitions",
             "formal_exact_resume_supported": False,
             "replay_buffer_in_checkpoint": False,
-            "future_final_45m_untouched": True,
             "protocol": self.startup_summary(),
             "final_optimization_metrics": deepcopy(self.last_metrics),
         }
 
 
-__all__ = ["FUTURE_FINAL_45M", "MADSACTrainingRunner", "advance_sampled_steps"]
+__all__ = ["MADSACTrainingRunner", "advance_sampled_steps"]

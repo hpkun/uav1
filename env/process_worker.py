@@ -1,4 +1,4 @@
-"""Subprocess entry point for one persistent combat environment."""
+"""Subprocess entry point for one long-lived combat environment."""
 from __future__ import annotations
 
 import os
@@ -15,9 +15,6 @@ def combat_environment_worker(connection: Any, config: Any) -> None:
         connection.send(("ready", {
             "pid": os.getpid(),
             "environment_class": environment.__class__.__name__,
-            "environment_variant": getattr(
-                environment, "environment_variant", "direct_v2_3"
-            ),
             "fixed_policy_class": environment.fixed_policy.__class__.__name__,
             "observation_dim": int(environment.observation_dim),
             "action_dim": int(environment.action_dim),
@@ -30,16 +27,6 @@ def combat_environment_worker(connection: Any, config: Any) -> None:
                 connection.send(("ok", (observation, environment.red_alive_mask)))
             elif command == "step":
                 connection.send(("ok", environment.step(payload)))
-            elif command == "export_curriculum_state":
-                exporter = getattr(environment, "export_curriculum_state", None)
-                if exporter is None:
-                    raise RuntimeError("environment does not support curriculum snapshots")
-                connection.send(("ok", exporter()))
-            elif command == "restore_curriculum_state":
-                restorer = getattr(environment, "restore_curriculum_state", None)
-                if restorer is None:
-                    raise RuntimeError("environment does not support curriculum snapshots")
-                connection.send(("ok", restorer(payload)))
             elif command == "close":
                 connection.send(("ok", None))
                 break

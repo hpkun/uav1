@@ -217,7 +217,7 @@ def rule_based_validation(config: dict, episodes: int = 100) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--output", default="outputs/paper_environment_v2_2_validation.json"
+        "--output", default="outputs/combat_environment_validation.json"
     )
     parser.add_argument("--episodes", type=int, default=100)
     parser.add_argument("--weapon-trials", type=int, default=100_000)

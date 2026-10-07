@@ -1,6 +1,0 @@
-extends: configs/dev_jiao2025_matched_plain_3m.yaml
-development_method: jiao2025_core_3m
-modules:
-  wave_context: {enabled: true, context_target: actor_critic, encoding: scalar_round, max_waves: 3}
-  recurrent_memory: {enabled: true, mode: actor_critic_gru, hidden_dim: 128, sequence_length: 32}
-  popart: {enabled: true, beta: 0.999, epsilon: 0.00001}

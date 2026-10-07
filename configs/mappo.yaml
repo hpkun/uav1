@@ -23,7 +23,7 @@ training:
   total_sampled_steps: 8000000
   evaluation_episodes: 20
   evaluation_interval_sampled_steps: 100000
-  device: cpu
+  device: cuda
   seed: 0
 runtime_logging:
   console_interval_sampled_steps: 20000

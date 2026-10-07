@@ -1,2 +1,0 @@
-extends: configs/modular_mappo_persistent.yaml
-modules: {warm_start: {enabled: true, mode: actor_only}}

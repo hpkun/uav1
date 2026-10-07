@@ -1,4 +1,4 @@
-"""Verify that training environments are persistent independent processes."""
+"""Verify that training environments are long-lived independent processes."""
 from __future__ import annotations
 
 import argparse
@@ -43,9 +43,6 @@ def main() -> None:
         print("worker_pids=" + ",".join(map(str, vector.worker_pids)))
         print("worker_environment_classes=" + ",".join(
             vector.worker_environment_classes
-        ))
-        print("worker_environment_variants=" + ",".join(
-            vector.worker_environment_variants
         ))
         print(f"unique_worker_pids={len(set(vector.worker_pids))}")
         print(f"batch_steps={args.steps}")

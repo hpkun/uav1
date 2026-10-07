@@ -23,8 +23,8 @@ def resolved(path):
 
 def build_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env-config", default="configs/persistent_wave_v2_environment.yaml")
-    parser.add_argument("--algorithm-config", default="configs/madsac_persistent_wave_v2_3m.yaml")
+    parser.add_argument("--env-config", default="configs/combat_environment.yaml")
+    parser.add_argument("--algorithm-config", default="configs/madsac.yaml")
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--device", choices=("cpu", "cuda"))
     parser.add_argument("--seed", type=int)
@@ -49,28 +49,31 @@ def main():
                         ("algorithm_config.yaml", algorithm_config)):
         (output / name).write_text(yaml.safe_dump(value, sort_keys=False), encoding="utf-8")
     training = algorithm_config["training"]
+    num_envs = int(args.num_envs or training["num_train_envs"])
+    smoke_steps = num_envs * max(8, (32 + num_envs - 1) // num_envs)
     run_config = {
         "algorithm": "madsac", "seed": int(training["seed"] if args.seed is None else args.seed),
         "device": str(args.device or training["device"]),
-        "num_envs": int(args.num_envs or training["num_train_envs"]),
-        "total_sampled_steps": int(args.total_sampled_steps or training["total_sampled_steps"]),
-        "smoke": bool(args.smoke), "environment_variant": env_config["environment_variant"],
+        "num_envs": num_envs,
+        "total_sampled_steps": int(args.total_sampled_steps or (smoke_steps if args.smoke else training["total_sampled_steps"])),
+        "smoke": bool(args.smoke), "effective_hidden_dim": 32 if args.smoke else int(algorithm_config["network"]["actor_hidden_layers"][0]),
+        "training_gamma": float(training["gamma"]),
         "environment_config_path": str(env_path), "algorithm_config_path": str(algorithm_path),
         "environment_config_sha256": config_sha256(env_config),
         "algorithm_config_sha256": config_sha256(algorithm_config),
         "formal_exact_resume_supported": False, "replay_buffer_in_checkpoint": False,
         "sampled_steps_unit": "environment_transitions_not_agent_transitions",
-        "primary_evaluation_mode": "stochastic", "evaluation_policy_seed": 770001,
+        "primary_evaluation_mode": algorithm_config["implementation"]["evaluation_mode"],
+        "evaluation_policy_seed": algorithm_config["implementation"]["evaluation_policy_seed"],
         "actor_policy_gradient": "own_action_only_other_joint_actions_detached",
         "objective_reduction": "per_transition_agent_sum_then_replay_batch_mean",
         "evaluation_policy_rng": "independent_deterministic_stream_per_environment_seed",
-        "future_final_45m_untouched": True,
         "paper_reported": algorithm_config["metadata"]["paper_reported"],
         "project_implementation_choice": algorithm_config["metadata"]["project_implementation_choice"],
     }
     (output / "run_config.json").write_text(json.dumps(run_config, indent=2), encoding="utf-8")
     runner = MADSACTrainingRunner(
-        env_config, algorithm_config, args.num_envs, args.total_sampled_steps,
+        env_config, algorithm_config, run_config["num_envs"], run_config["total_sampled_steps"],
         args.device, args.seed, output, args.smoke,
     )
     summary = runner.run()

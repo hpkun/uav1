@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
 from algorithm.madsac.evaluation import evaluate_madsac
 from algorithm.madsac.protocol import validate_madsac_checkpoint
 from algorithm.madsac.trainer import MADSACTrainer
+from algorithm.common.protocol import config_sha256
 
 
 def resolved(path):
@@ -27,8 +28,10 @@ def main():
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--mode", choices=("stochastic", "deterministic"), default="stochastic")
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cuda")
-    parser.add_argument("--env-config", default="configs/persistent_wave_v2_environment.yaml")
-    parser.add_argument("--algorithm-config", default="configs/madsac_persistent_wave_v2_3m.yaml")
+    parser.add_argument("--env-config", default="configs/combat_environment.yaml")
+    parser.add_argument("--algorithm-config", default="configs/madsac.yaml")
+    parser.add_argument("--seed-base", type=int)
+    parser.add_argument("--episodes", type=int)
     parser.add_argument("--output")
     args = parser.parse_args()
     if args.device == "cuda" and not torch.cuda.is_available():
@@ -55,15 +58,39 @@ def main():
         training_seed, i["actor_activation"], i["critic_activation"], i["log_std_min"], i["log_std_max"],
     )
     trainer.load_for_evaluation(checkpoint)
-    seeds = tuple(range(44_000_000, 44_000_050))
-    result = {"checkpoint": str(checkpoint), "mode": args.mode,
+    base = int(i["evaluation_seed_base"] if args.seed_base is None else args.seed_base)
+    count = int(t["evaluation_episodes"] if args.episodes is None else args.episodes)
+    if count <= 0:
+        raise ValueError("episodes must be positive")
+    seeds = tuple(range(base, base + count))
+    extra = state["extra"]
+    result = {"algorithm": "madsac", "checkpoint": str(checkpoint), "mode": args.mode,
               "environment_seed_range": [seeds[0], seeds[-1]],
-              "policy_seed": 770001 if args.mode == "stochastic" else None,
-              "future_final_45m_untouched": True,
-              **evaluate_madsac(trainer, env_config, seeds, args.mode, 770001)}
+              "policy_seed": i["evaluation_policy_seed"] if args.mode == "stochastic" else None,
+              "implementation_version": state["implementation_version"],
+              "protocol_complete": True,
+              "checkpoint_sampled_steps": int(state["sampled_steps"]),
+              "checkpoint_training_seed": training_seed,
+              "checkpoint_training_gamma": extra["gamma"],
+              "checkpoint_training_num_envs": extra["training_num_envs"],
+              "checkpoint_training_total_sampled_steps": extra["training_total_sampled_steps"],
+              "checkpoint_training_smoke": extra["training_smoke"],
+              "checkpoint_effective_hidden_dim": hidden_dim,
+              "checkpoint_environment_version": extra["environment_version"],
+              "evaluation_environment_version": env_config["environment_version"],
+              "checkpoint_environment_config_sha256": extra["environment_config_sha256"],
+              "checkpoint_algorithm_config_sha256": extra["algorithm_config_sha256"],
+              "evaluation_environment_config_sha256": config_sha256(env_config),
+              "provided_algorithm_config_sha256": config_sha256(algorithm_config),
+              "observation_dim": n["observation_dim"], "action_dim": n["action_dim"],
+              "num_agents": n["num_agents"], "device": args.device,
+              "holdout_seed_base": seeds[0], "holdout_seed_end": seeds[-1],
+              **evaluate_madsac(trainer, env_config, seeds, args.mode, i["evaluation_policy_seed"])}
     text = json.dumps(result, indent=2)
     if args.output:
-        resolved(args.output).write_text(text, encoding="utf-8")
+        output = resolved(args.output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(text, encoding="utf-8")
     print(text)
 
 

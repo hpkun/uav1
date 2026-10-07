@@ -1,2 +1,0 @@
-extends: configs/modular_mappo_persistent.yaml
-modules: {policy_anchor: {enabled: true, coefficient: 0.01, schedule: constant}}

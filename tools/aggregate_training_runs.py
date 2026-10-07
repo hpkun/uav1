@@ -30,7 +30,6 @@ CI_METHOD = "two-sided 95% Student t interval; df 1-30 table, df > 30 uses 1.96"
 TRAINING_PROTOCOL_FIELDS = (
     "algorithm",
     "environment_version",
-    "environment_variant",
     "training_gamma",
     "environment_config_sha256",
     "algorithm_config_sha256",
@@ -104,9 +103,6 @@ def read_run_protocol(run_dir: Path) -> dict[str, Any]:
     return {
         "algorithm": run_config.get("algorithm"),
         "environment_version": str(environment.get("environment_version")),
-        "environment_variant": str(
-            environment.get("environment_variant", "direct_v2_3")
-        ),
         "environment_config_sha256": config_sha256(environment),
         "algorithm_config_sha256": config_sha256(algorithm),
         "num_envs": int(run_config["num_envs"]),

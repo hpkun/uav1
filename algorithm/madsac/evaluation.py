@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import numpy as np
 import torch
-from algorithm.common.evaluator import episode_return_metrics, persistent_mission_metrics
+from algorithm.common.evaluator import episode_return_metrics, aggregate_combat_records
 from env.factory import make_combat_environment
 
 
@@ -40,27 +40,8 @@ def evaluate_madsac_episode(trainer, env_config, seed: int, mode="stochastic",
 
 
 def aggregate_madsac_records(records):
-    mean = lambda key: float(np.mean([row[key] for row in records]))
-    result = {
-        "average_return": mean("episode_return"),
-        "average_agent_return": mean("mean_agent_episode_return"),
-        "win_rate": mean("red_success"), "loss_rate": mean("blue_win"),
-        "draw_rate": mean("draw"),
-        "timeout_rate": float(np.mean([row["termination_reason"] == "red_failure_timeout" for row in records])),
-        "average_red_loss": mean("red_losses"), "average_blue_loss": mean("blue_losses"),
-        "average_red_boundary_exits": mean("red_boundary_exits"),
-        "average_red_ground_losses": mean("red_ground_losses"),
-        "average_episode_length": mean("episode_length"),
-        "evaluation_episodes": len(records), **persistent_mission_metrics(records),
-    }
-    for wave in (1, 2, 3):
-        current = result[f"clear_wave_{wave}_probability"]
-        previous = result[f"clear_wave_{wave-1}_probability"] if wave > 1 else None
-        if wave == 2:
-            result["Q2"] = None if previous == 0 else current / previous
-        elif wave == 3:
-            result["Q3"] = None if previous == 0 else current / previous
-    return result
+    return aggregate_combat_records(records)
+
 
 
 def evaluate_madsac(trainer, env_config, seeds, mode="stochastic", policy_seed=770001,

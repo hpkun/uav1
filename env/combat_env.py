@@ -1,18 +1,18 @@
-"""Paper-Constrained Direct 4v4 Combat Environment V2.3."""
+"""Multi-UAV Combat Environment V2.3."""
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
 import numpy as np
 
-from .config import ENVIRONMENT_VERSION, aircraft_spec, load_config
+from .config import ENVIRONMENT_VERSION, aircraft_spec, load_config, validate_config
 from .dynamics import PointMassDynamics
 from .integrator import RK4Integrator
 from .models import AircraftState
 from .control import action_to_control
 from .fixed_policy import NearestTargetPursuitPolicy
 from .geometry import engagement_geometry
-from .observation import OBSERVATION_DIM, build_team_observations, observation_dim_from_config
+from .observation import OBSERVATION_DIM, build_team_observations
 from .reward import paper_state_reward_components
 from .scenario import random_combat_states
 from .weapon import FireState, WeaponEnvelope
@@ -31,11 +31,8 @@ class MultiUAVCombatEnv:
     def __init__(
         self, config: str | Path | dict[str, Any] = DEFAULT_COMBAT_CONFIG
     ) -> None:
-        self.config = load_config(config) if not isinstance(config, dict) else config
-        if str(self.config.get("environment_version")) != ENVIRONMENT_VERSION:
-            raise ValueError(f"environment_version must be {ENVIRONMENT_VERSION}")
+        self.config = load_config(config) if not isinstance(config, dict) else validate_config(config)
         self.spec = aircraft_spec(self.config)
-        self.observation_dim = observation_dim_from_config(self.config["observation"])
         self.dt = float(self.config["simulation"]["dt"])
         self.max_steps = int(self.config["simulation"]["max_steps"])
         self.arena_radius = float(self.config["arena"]["radius"])
@@ -104,8 +101,6 @@ class MultiUAVCombatEnv:
         return build_team_observations(
             self.red, self.blue, self.config["observation"],
             self.red_last_executed_phi,
-            np.asarray([state.armed for state in self.red_fire_states], dtype=np.float32)
-            if self.observation_dim > OBSERVATION_DIM else None,
         )
 
     @staticmethod

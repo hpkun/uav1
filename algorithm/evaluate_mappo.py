@@ -22,15 +22,13 @@ def resolved(path: str) -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--algorithm", choices=("mappo",), default="mappo")
     parser.add_argument("--checkpoint", required=True)
-    parser.add_argument("--env-config", required=True)
-    parser.add_argument("--algorithm-config", required=True)
+    parser.add_argument("--env-config", default="configs/combat_environment.yaml")
+    parser.add_argument("--algorithm-config", default="configs/mappo.yaml")
     parser.add_argument("--seed-base", type=int, required=True)
     parser.add_argument("--episodes", type=int, required=True)
-    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    parser.add_argument("--device", choices=("cpu", "cuda"), default="cuda")
     parser.add_argument("--output", required=True)
-    parser.add_argument("--allow-cross-variant", action="store_true")
     args = parser.parse_args()
     if args.episodes <= 0:
         raise ValueError("episodes must be positive")
@@ -47,7 +45,6 @@ def main() -> None:
         env_config,
         args.device,
         seeds,
-        allow_cross_variant=args.allow_cross_variant,
     )
     output = resolved(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)

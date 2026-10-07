@@ -19,11 +19,11 @@ from tools.aggregate_training_runs import CI_METHOD, summarize_values
 PROTOCOL_FIELDS = (
     "algorithm",
     "checkpoint_environment_version",
-    "checkpoint_environment_variant",
     "evaluation_environment_version",
-    "evaluation_environment_variant",
-    "cross_variant_evaluation",
     "mappo_impl_version",
+    "implementation_version",
+    "mode",
+    "policy_seed",
     "observation_dim",
     "action_dim",
     "num_agents",
@@ -46,6 +46,7 @@ NUMERIC_METADATA_FIELDS = set(PROTOCOL_FIELDS) | {
     "checkpoint_training_seed",
     "device",
     "checkpoint",
+    "environment_seed_range",
 }
 
 

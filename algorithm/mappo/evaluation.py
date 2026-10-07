@@ -19,7 +19,6 @@ def evaluate_mappo_checkpoint(
     environment_config: dict[str, Any],
     device: str,
     evaluation_seeds: Iterable[int],
-    allow_cross_variant: bool = False,
 ) -> dict[str, Any]:
     """Load one checkpoint and evaluate it under an explicit target protocol."""
     checkpoint = Path(checkpoint_path)
@@ -35,12 +34,10 @@ def evaluate_mappo_checkpoint(
         state,
         environment_config,
         algorithm_config,
-        allow_cross_variant=allow_cross_variant,
     )
     extra = state.get("extra", {})
     required_protocol_fields = (
         "environment_version",
-        "environment_variant",
         "observation_dim",
         "action_dim",
         "num_agents",
@@ -92,10 +89,6 @@ def evaluate_mappo_checkpoint(
     result: dict[str, Any] = dict(
         evaluate(trainer, environment_config, seeds)
     )
-    checkpoint_variant = str(extra.get("environment_variant", "direct_v2_3"))
-    evaluation_variant = str(
-        environment_config.get("environment_variant", "direct_v2_3")
-    )
     network = algorithm_config["network"]
     result.update({
         "algorithm": "MAPPO",
@@ -121,12 +114,9 @@ def evaluate_mappo_checkpoint(
         "provided_algorithm_config_sha256": provided_algorithm_hash,
         "protocol_complete": protocol_complete,
         "checkpoint_environment_version": extra.get("environment_version"),
-        "checkpoint_environment_variant": checkpoint_variant,
         "evaluation_environment_version": str(
             environment_config["environment_version"]
         ),
-        "evaluation_environment_variant": evaluation_variant,
-        "cross_variant_evaluation": checkpoint_variant != evaluation_variant,
         "mappo_impl_version": state.get("mappo_impl_version"),
         "holdout_seed_base": seeds[0],
         "holdout_seed_end": seeds[-1],

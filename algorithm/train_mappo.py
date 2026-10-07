@@ -348,8 +348,8 @@ def main() -> None:
     parser.add_argument("--num-envs", type=int)
     parser.add_argument("--output-dir")
     parser.add_argument("--resume")
-    parser.add_argument("--env-config", default="configs/persistent_wave_v2_environment.yaml")
-    parser.add_argument("--algorithm-config", default="configs/mappo_persistent_wave.yaml")
+    parser.add_argument("--env-config", default="configs/combat_environment.yaml")
+    parser.add_argument("--algorithm-config", default="configs/mappo.yaml")
     parser.add_argument("--smoke", action="store_true", default=None)
     args = parser.parse_args()
     env_path = resolved(args.env_config)
@@ -427,7 +427,6 @@ def main() -> None:
         "smoke": runner.smoke,
         "environment_config_path": str(env_path),
         "algorithm_config_path": str(algorithm_path),
-        "environment_variant": startup["environment_variant"],
         "environment_version": str(env_config["environment_version"]),
         "algorithm": "MAPPO",
         "effective_hidden_dim": startup["effective_hidden_dim"],

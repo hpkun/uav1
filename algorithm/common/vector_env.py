@@ -1,4 +1,4 @@
-"""Synchronous batch API backed by persistent parallel environment workers."""
+"""Synchronous batch API backed by long-lived parallel environment workers."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -28,7 +28,7 @@ class VectorStep:
 
 
 class ParallelVectorEnv:
-    """One persistent spawn subprocess per environment with synchronous batches."""
+    """One long-lived spawn subprocess per environment with synchronous batches."""
 
     backend = "multiprocess_spawn"
 
@@ -72,9 +72,6 @@ class ParallelVectorEnv:
             self.worker_pids = [int(row["pid"]) for row in self.worker_metadata]
             self.worker_environment_classes = [
                 str(row["environment_class"]) for row in self.worker_metadata
-            ]
-            self.worker_environment_variants = [
-                str(row["environment_variant"]) for row in self.worker_metadata
             ]
             self.worker_fixed_policy_classes = [
                 str(row["fixed_policy_class"]) for row in self.worker_metadata
@@ -188,46 +185,7 @@ class ParallelVectorEnv:
         result = self.step_batch(actions)
         return result.observations, result.rewards, result.terminated, result.truncated, result.infos
 
-    def export_curriculum_states(self, env_ids) -> dict[int, dict[str, Any]]:
-        """Export explicit dynamic-state snapshots from selected live workers."""
-        self._ensure_open()
-        ids = [int(value) for value in env_ids]
-        if len(set(ids)) != len(ids) or any(value < 0 or value >= self.num_envs for value in ids):
-            raise ValueError("invalid or duplicate curriculum export env id")
-        for env_id in ids:
-            self._connections[env_id].send(("export_curriculum_state", None))
-        return {
-            env_id: self._receive(self._connections[env_id], "export_curriculum_state")
-            for env_id in ids
-        }
 
-    def restore_curriculum_states(
-        self, snapshots: dict[int, dict[str, Any]]
-    ) -> dict[int, dict[str, Any]]:
-        """Restore selected workers and synchronize vector-side live state."""
-        self._ensure_open()
-        ids = [int(value) for value in snapshots]
-        if len(set(ids)) != len(ids) or any(value < 0 or value >= self.num_envs for value in ids):
-            raise ValueError("invalid or duplicate curriculum restore env id")
-        for env_id in ids:
-            self._connections[env_id].send(
-                ("restore_curriculum_state", snapshots[env_id])
-            )
-        results = {
-            env_id: dict(self._receive(
-                self._connections[env_id], "restore_curriculum_state"
-            )) for env_id in ids
-        }
-        for env_id, result in results.items():
-            observation = np.asarray(result["observation"], dtype=np.float32)
-            expected = (self.team_size, self.observation_dim)
-            if observation.shape != expected or not np.all(np.isfinite(observation)):
-                raise RuntimeError("worker restored an invalid curriculum observation")
-            self.current_observations[env_id] = observation
-            self.current_alive_masks[env_id] = np.asarray(
-                result["red_alive_mask"], dtype=np.float32
-            )
-        return results
 
     def _ensure_open(self) -> None:
         if self._closed:

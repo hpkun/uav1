@@ -1,4 +1,4 @@
-"""On-policy MAPPO runner using persistent parallel combat environments."""
+"""On-policy MAPPO runner using long-lived parallel combat environments."""
 from __future__ import annotations
 
 import csv
@@ -15,7 +15,7 @@ from .trainer import MAPPO_IMPL_VERSION, MAPPOTrainer, RolloutBatch
 from algorithm.common.evaluator import (
     episode_return_metrics,
     evaluate,
-    persistent_mission_metrics,
+    aggregate_combat_records,
 )
 from algorithm.common.vector_env import ParallelVectorEnv
 from algorithm.common.checkpoint import (
@@ -98,7 +98,6 @@ class MAPPOTrainingRunner:
         self.next_checkpoint = self.checkpoint_interval
 
     def startup_summary(self) -> dict[str, Any]:
-        wave_config = self.env_config.get("persistent_waves", {})
         return {
             "algorithm": "MAPPO", "mode": "smoke" if self.smoke else "formal",
             "device": self.device, "observation_dim": self.observation_dim,
@@ -117,10 +116,7 @@ class MAPPOTrainingRunner:
             "gamma": self.trainer.gamma, "gae_lambda": self.trainer.gae_lambda,
             "clip_ratio": self.trainer.clip_ratio,
             "entropy_coefficient": self.trainer.entropy_coefficient,
-            "environment_variant": self.env_config.get(
-                "environment_variant", "direct_v2_3"
-            ),
-            "total_waves": int(wave_config.get("total_waves", 1)),
+            "environment_version": ENVIRONMENT_VERSION,
             "max_steps": int(self.env_config["simulation"]["max_steps"]),
         }
 
@@ -134,7 +130,6 @@ class MAPPOTrainingRunner:
                 f"| total={s['total_sampled_steps']} | rollout={s['rollout_steps']} "
                 f"| epochs={s['ppo_epochs']} | minibatch={s['minibatch_size']} "
                 f"| gamma={s['gamma']} | lambda={s['gae_lambda']} | clip={s['clip_ratio']} "
-                f"| variant={s['environment_variant']} | waves={s['total_waves']} "
                 f"| max_steps={s['max_steps']}")
 
     @staticmethod
@@ -232,6 +227,8 @@ class MAPPOTrainingRunner:
                 "actor_loss", "value_loss", "entropy", "approx_kl", "clip_fraction",
                 "value", "explained_variance", "actor_grad_norm", "critic_grad_norm")},
         }
+        if rows:
+            record.update(aggregate_combat_records(rows))
         with (self.output_dir / "training_metrics.jsonl").open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(record) + "\n")
 
@@ -322,10 +319,7 @@ class MAPPOTrainingRunner:
                 writer.writeheader(); writer.writerows(self.evaluation_history)
 
     def _evaluation_key(self, record: dict[str, float]) -> tuple[float, ...]:
-        return evaluation_selection_key(
-            record,
-            self.env_config.get("environment_variant", "direct_v2_3"),
-        )
+        return evaluation_selection_key(record)
 
     def _consider_best_evaluation(self, record: dict[str, float]) -> bool:
         if (
@@ -339,7 +333,6 @@ class MAPPOTrainingRunner:
 
     def save_checkpoint(self, path: str | Path) -> None:
         self.trainer.save(path, {"environment_version": ENVIRONMENT_VERSION,
-            "environment_variant": self.env_config.get("environment_variant", "direct_v2_3"),
             "mappo_impl_version": MAPPO_IMPL_VERSION,
             "observation_dim": self.observation_dim,
             "action_dim": self.action_dim,
@@ -351,6 +344,11 @@ class MAPPOTrainingRunner:
             "training_smoke": self.smoke,
             "effective_hidden_dim": self.effective_hidden_dim,
             "critic_type":self.trainer.critic_type,
+            "network_architecture": {
+                "hidden_dim": self.effective_hidden_dim,
+                "attention_heads": self.trainer.attention_heads,
+                "critic_type": self.trainer.critic_type,
+            },
             "actor_parameter_count":sum(p.numel() for p in self.trainer.actor.parameters()),
             "critic_parameter_count":sum(p.numel() for p in self.trainer.critic.parameters()),
             "total_parameter_count":sum(p.numel() for p in self.trainer.actor.parameters())+sum(p.numel() for p in self.trainer.critic.parameters()),
@@ -366,6 +364,8 @@ class MAPPOTrainingRunner:
             state, self.env_config, self.algorithm_config
         )
         extra = self.trainer.load(path)
+        if extra.get("training_seed") is not None and int(extra["training_seed"]) != self.seed:
+            raise RuntimeError("checkpoint training_seed mismatch")
         previous = np.asarray(extra.get("episode_indices", [0] * self.num_envs), dtype=np.int64)
         if previous.shape != (self.num_envs,):
             raise RuntimeError("checkpoint environment count mismatch")
@@ -398,7 +398,6 @@ class MAPPOTrainingRunner:
             **{f"{side}_{event}_episode_rate": float(np.mean([r[f"{side}_first_{event}_step"] is not None for r in self.completed_records])) if self.completed_records else 0.0
                for side in ("red", "blue") for event in ("fire_window", "attempt", "hit", "kill")},
             **{f"average_episode_{name}_total": mean(f"episode_{name}_total") for name in ("r1", "r2", "r3", "r4")},
-            **persistent_mission_metrics(self.completed_records),
             "last_update_metrics": self.last_metrics, "evaluation_history": self.evaluation_history,
             "best_evaluation_steps": best.get("sampled_steps"),
             "best_evaluation_win_rate": best.get("win_rate"),

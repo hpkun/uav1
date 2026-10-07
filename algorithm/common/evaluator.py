@@ -19,38 +19,39 @@ def episode_return_metrics(agent_returns: np.ndarray) -> tuple[float, float]:
     return float(values.sum()), float(values.mean())
 
 
-def persistent_mission_metrics(records: list[dict[str, Any]]) -> dict[str, float]:
-    """Aggregate mission/wave metrics only when records use the wave variant."""
-    if not records or "waves_cleared" not in records[0]:
-        return {}
-    total_waves = int(records[0]["total_waves"])
-    result: dict[str, float] = {
-        "average_waves_cleared": float(np.mean([
-            row["waves_cleared"] for row in records
-        ])),
+def aggregate_combat_records(records: list[dict[str, Any]]) -> dict[str, float]:
+    """Aggregate completed episodes with equal weight per episode."""
+    if not records:
+        raise ValueError("evaluation records must not be empty")
+    mean = lambda key: float(np.mean([row[key] for row in records]))
+    result = {
+        "average_return": mean("episode_return"),
+        "average_agent_return": mean("mean_agent_episode_return"),
+        "win_rate": mean("red_success"), "red_win_rate": mean("red_success"),
+        "loss_rate": mean("blue_win"), "blue_win_rate": mean("blue_win"),
+        "draw_rate": mean("draw"),
+        "timeout_rate": float(np.mean([row["termination_reason"] == "red_failure_timeout" for row in records])),
+        "episode_return": mean("episode_return"), "episode_length": mean("episode_length"),
+        "average_episode_length": mean("episode_length"),
+        "average_red_loss": mean("red_losses"), "average_blue_loss": mean("blue_losses"),
+        "red_losses": mean("red_losses"), "blue_losses": mean("blue_losses"),
+        "red_survivors": mean("red_survivors"), "blue_survivors": mean("blue_survivors"),
+        "evaluation_episodes": len(records),
+        "evaluation_boundary_exit_rate": float(np.mean([row["red_boundary_exits"] > 0 for row in records])),
     }
-    for wave_index in range(1, total_waves + 1):
-        result[f"clear_wave_{wave_index}_probability"] = float(np.mean([
-            row["waves_cleared"] >= wave_index for row in records
-        ]))
-        survivor_values = [
-            wave["red_survivors_end"]
-            for row in records
-            for wave in row.get("per_wave_metrics", [])
-            if wave["wave_index"] == wave_index
-            and wave.get("wave_cleared", True)
-        ]
-        result[f"average_red_survivors_after_wave_{wave_index}"] = (
-            float(np.mean(survivor_values)) if survivor_values else 0.0
-        )
-    total_blue_losses = float(sum(row["blue_losses"] for row in records))
-    total_red_losses = float(sum(row["red_losses"] for row in records))
-    result.update({
-        "total_blue_losses": total_blue_losses,
-        "total_red_losses": total_red_losses,
-        "kill_loss_ratio": total_blue_losses / max(total_red_losses, 1.0),
-    })
+    for side in ("red", "blue"):
+        for event in ("fire_attempts", "weapon_hits", "attack_kills", "boundary_exits", "ground_losses"):
+            result[f"{side}_{event}"] = mean(f"{side}_{event}")
+            result[f"average_{side}_{event}"] = result[f"{side}_{event}"]
+        for event in ("fire_window", "attempt", "hit", "kill"):
+            result[f"{side}_{event}_episode_rate"] = float(np.mean([
+                row[f"{side}_first_{event}_step"] is not None for row in records]))
+    for event in ("fire_attempts", "weapon_hits", "attack_kills", "boundary_exits", "ground_losses"):
+        result[event] = result[f"red_{event}"] + result[f"blue_{event}"]
+    for name in ("r1", "r2", "r3", "r4"):
+        result[f"average_episode_{name}_total"] = mean(f"episode_{name}_total")
     return result
+
 
 
 def evaluate(actor, config=DEFAULT_COMBAT_CONFIG, seeds=range(10_000_000, 10_000_020)) -> dict[str, float]:
@@ -76,42 +77,7 @@ def evaluate(actor, config=DEFAULT_COMBAT_CONFIG, seeds=range(10_000_000, 10_000
                     **info,
                 })
                 break
-    mean = lambda key: float(np.mean([record[key] for record in records]))
-    result = {
-        "average_return": mean("episode_return"),
-        "average_agent_return": mean("mean_agent_episode_return"),
-        "win_rate": mean("red_success"),
-        "loss_rate": mean("blue_win"),
-        "draw_rate": mean("draw"),
-        "timeout_rate": float(np.mean([
-            record["termination_reason"] == "red_failure_timeout" for record in records
-        ])),
-        "average_red_loss": mean("red_losses"),
-        "average_blue_loss": mean("blue_losses"),
-        **{
-            f"{side}_{event}_episode_rate": float(np.mean([
-                record[f"{side}_first_{event}_step"] is not None for record in records
-            ]))
-            for side in ("red", "blue")
-            for event in ("fire_window", "attempt", "hit", "kill")
-        },
-        "average_red_attack_kills": mean("red_attack_kills"),
-        "average_blue_attack_kills": mean("blue_attack_kills"),
-        "average_red_boundary_exits": mean("red_boundary_exits"),
-        "evaluation_boundary_exit_rate": float(np.mean([
-            record["red_boundary_exits"] > 0 for record in records
-        ])),
-        "average_blue_boundary_exits": mean("blue_boundary_exits"),
-        "average_red_ground_losses": mean("red_ground_losses"),
-        "average_blue_ground_losses": mean("blue_ground_losses"),
-        "average_episode_length": mean("episode_length"),
-        **{
-            f"average_episode_{name}_total": mean(f"episode_{name}_total")
-            for name in ("r1", "r2", "r3", "r4")
-        },
-        "evaluation_episodes": len(records),
-        **persistent_mission_metrics(records),
-    }
+    result = aggregate_combat_records(records)
     if policy_rows:
         result.update({
             key: float(np.mean([row[key] for row in policy_rows]))
@@ -121,5 +87,5 @@ def evaluate(actor, config=DEFAULT_COMBAT_CONFIG, seeds=range(10_000_000, 10_000
 
 
 __all__ = [
-    "episode_return_metrics", "evaluate", "persistent_mission_metrics",
+    "episode_return_metrics", "evaluate", "aggregate_combat_records",
 ]

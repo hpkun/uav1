@@ -1,7 +1,0 @@
-extends: configs/dev_marc_credit_balance_1m.yaml
-development_method: marc_core_factorial_v1
-factorial_variant: none
-training: {total_sampled_steps: 3000000}
-modules:
-  milestone_aware_retention_credit: {continuation_alpha: 0.0, wave_balance_temperature: 0.0}
-development_protocol: {primary_checkpoints: [900000, 3000000]}

@@ -1,8 +1,0 @@
-extends: configs/dev_marc_mappo_v2_1m.yaml
-development_method: marc_credit_balance_ablation
-modules:
-  milestone_aware_retention_credit:
-    deployment_distill_coefficient: 0.0
-development_protocol:
-  role: development_only_not_final_holdout
-  primary_checkpoints: [900000, 1000000]

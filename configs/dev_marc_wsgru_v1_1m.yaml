@@ -1,8 +1,0 @@
-extends: configs/dev_marc_credit_balance_1m.yaml
-development_method: marc_mappo_wsgru_v1
-modules:
-  recurrent_memory:
-    enabled: true
-    mode: wave_segmented_actor_gru
-    hidden_dim: 128
-    sequence_length: 32
