@@ -1,6 +1,6 @@
 # Multi-UAV Cooperative Air Combat
 
-这是一个面向 multi-UAV cooperative air combat 的多智能体强化学习研究代码库。任务为普通单回合 **4v4** 空战：4 架 Red UAV 使用共享的 learned policy，4 架 Blue UAV 使用确定性的 nearest-target pursuit policy。项目提供 **MAPPO** 和 **MADSAC** 两个独立 baseline。
+这是一个面向 multi-UAV cooperative air combat 的多智能体强化学习研究代码库。任务为普通单回合 **4v4** 空战：4 架 Red UAV 使用共享的 learned policy，4 架 Blue UAV 使用确定性的 nearest-target pursuit policy。项目提供 **MAPPO** 和 **MADSAC** 两个独立 baseline，以及 Actor 使用实体注意力与 GRU 的独立变体 **STEA-MAPPO**。
 
 环境使用 NED 坐标下的 3DOF point-mass dynamics、RK4 integration 和 `dt=0.1 s`。每个 Red agent 接收 **52D observation**，输出 **3D continuous action**：heading、pitch、speed 的相对指令。物理环境技术版本为 **2.3**。
 
@@ -26,14 +26,18 @@ algorithm/
     common/                  # 并行环境、指标、checkpoint 与配置指纹
     mappo/                   # 共享 actor、集中式 critic、PPO/GAE
     madsac/                  # 共享 actor、双 attention Q critic、joint replay
+    stea_mappo/               # 实体注意力 Actor、GRU、连续序列 recurrent PPO
     train_mappo.py
     evaluate_mappo.py
     train_madsac.py
     evaluate_madsac.py
+    train_stea_mappo.py
+    evaluate_stea_mappo.py
 configs/
     combat_environment.yaml  # 唯一正式环境配置
     mappo.yaml
     madsac.yaml
+    stea_mappo.yaml
 tools/                       # 环境验证、结果汇总、episode recording/rendering
 tests/                       # 环境、算法、训练协议、checkpoint、可视化回归
 docs/                        # 环境规范与记录工具说明
@@ -83,6 +87,16 @@ python algorithm/evaluate_mappo.py --checkpoint outputs/mappo_smoke/latest.pt --
 ```
 
 使用训练运行保存的配置快照评估自定义实验时，加上 `--env-config <run>/env_config.yaml --algorithm-config <run>/algorithm_config.yaml`。Smoke checkpoint 会按保存的有效网络宽度加载。MAPPO 使用 deterministic evaluation。
+
+## STEA-MAPPO training and evaluation
+
+```bash
+python algorithm/train_stea_mappo.py --smoke --device cuda --seed 1 --num-envs 2 --total-sampled-steps 96 --output-dir outputs/stea_smoke
+python algorithm/train_stea_mappo.py --device cuda --seed 1 --num-envs 16 --total-sampled-steps 2000000 --output-dir outputs/stea_mappo_seed1_2m
+python algorithm/evaluate_stea_mappo.py --checkpoint outputs/stea_mappo_seed1_2m/latest.pt --device cuda --seed-base 30000000 --episodes 20 --output outputs/stea_mappo_seed1_2m/holdout.json
+```
+
+正式 YAML 默认 24 环境，比较当前 16 环境的 MAPPO 运行时双方应统一为 16。STEA 使用 32 步连续 chunk，512 transitions 的 minibatch 包含 16 个 chunk；最后不足 32 步的 chunk 使用显式 padding mask。Smoke 保留正式 Actor 尺寸，Critic 宽度缩为 64，rollout=32、epochs=2、minibatch=64，评估两回合。STEA checkpoint 与 MAPPO 互不加载；resume 使用 `--resume <run>/latest.pt`，从零 recurrent state 的新回合继续。详细结构、状态生命周期和设计启发见 [STEA-MAPPO 说明](docs/stea_mappo.md)。
 
 ## MADSAC training
 

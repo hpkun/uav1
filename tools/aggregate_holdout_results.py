@@ -21,6 +21,8 @@ PROTOCOL_FIELDS = (
     "checkpoint_environment_version",
     "evaluation_environment_version",
     "mappo_impl_version",
+    "stea_mappo_impl_version",
+    "network_architecture",
     "implementation_version",
     "mode",
     "policy_seed",
