@@ -128,6 +128,8 @@ python tools/check_parallel_env.py --num-envs 2 --steps 10
 
 ## Experiment outputs
 
+新增独立 [v2.4 8v8 协议](docs/combat_environment_v24.md)，使用 `configs/combat_environment_v24.yaml` 配合 `configs/mappo_8v8.yaml` 或 `configs/stea_mappo_8v8.yaml`；默认环境与旧实验仍是 v2.3 4v4。正式参数的难度审计与 CUDA 小规模闭环由对应 audit/smoke 工具验证，未自动启动 2M 训练。
+
 每次训练使用独立的空目录；入口拒绝覆盖已有非空输出。通常包含：
 
 ```text

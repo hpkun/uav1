@@ -16,9 +16,9 @@ def evaluate(trainer, env_config, seeds):
     for seed in seeds:
         env = make_combat_environment(env_config)
         observation,_ = env.reset(int(seed))
-        hidden = np.zeros((4,trainer.actor.gru_hidden_dim),dtype=np.float32)
+        hidden = np.zeros((env.team_size,trainer.actor.gru_hidden_dim),dtype=np.float32)
         start = np.array(1.,dtype=np.float32)
-        returns = np.zeros(4)
+        returns = np.zeros(env.team_size)
         while True:
             actions,_,_,hidden,stats = trainer.act(observation,env.red_alive_mask,
                 hidden,start,deterministic=True,return_diagnostics=True)
@@ -67,5 +67,5 @@ def evaluate_stea_mappo_checkpoint(checkpoint_path, algorithm_config, environmen
         "checkpoint_environment_version":extra["environment_version"],
         "evaluation_environment_version":environment_config["environment_version"],
         "holdout_seed_base":seeds[0],"holdout_seed_end":seeds[-1],"evaluation_episodes":len(seeds),
-        "device":str(device),"observation_dim":52,"action_dim":3,"num_agents":4})
+        "device":str(device),"observation_dim":trainer.observation_dim,"action_dim":trainer.action_dim,"num_agents":trainer.num_agents})
     return result

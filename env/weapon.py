@@ -12,6 +12,17 @@ class FireState:
     armed: bool = True
 
 
+class PairFireState:
+    """v2.4 pair-local entry state; only the selected eligible pair disarms."""
+    def __init__(self, team_size: int):
+        if team_size <= 0:
+            raise ValueError("PairFireState team_size must be positive")
+        self.armed = np.ones((team_size, team_size), dtype=bool)
+
+    def reset(self):
+        self.armed.fill(True)
+
+
 @dataclass(frozen=True)
 class WeaponEnvelope:
     range_min: float
@@ -55,4 +66,20 @@ class WeaponEnvelope:
         )
 
 
-__all__ = ["FireState", "WeaponEnvelope"]
+@dataclass(frozen=True)
+class RearAspectWeaponEnvelope(WeaponEnvelope):
+    target_aspect_angle_max: float
+
+    def __post_init__(self):
+        super().__post_init__()
+        if not 0 < self.target_aspect_angle_max <= np.pi:
+            raise ValueError("target aspect angle must be in (0, pi]")
+
+    def qualifies(self, geometry: EngagementGeometry, attacker_speed: float,
+                  target_speed: float) -> bool:
+        return bool(self.in_fire_window(geometry)
+                    and geometry.target_aspect <= self.target_aspect_angle_max
+                    and attacker_speed >= target_speed)
+
+
+__all__ = ["FireState", "PairFireState", "WeaponEnvelope", "RearAspectWeaponEnvelope"]

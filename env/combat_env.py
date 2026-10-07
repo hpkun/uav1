@@ -1,11 +1,12 @@
-"""Multi-UAV Combat Environment V2.3."""
+"""Version-isolated Multi-UAV Combat Environments v2.3 and v2.4."""
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+import math
 import numpy as np
 
-from .config import ENVIRONMENT_VERSION, aircraft_spec, load_config, validate_config
+from .config import ENVIRONMENT_VERSION, aircraft_spec, load_config, validate_config, environment_dimensions
 from .dynamics import PointMassDynamics
 from .integrator import RK4Integrator
 from .models import AircraftState
@@ -15,7 +16,7 @@ from .geometry import engagement_geometry
 from .observation import OBSERVATION_DIM, build_team_observations
 from .reward import paper_state_reward_components
 from .scenario import random_combat_states
-from .weapon import FireState, WeaponEnvelope
+from .weapon import FireState, WeaponEnvelope, PairFireState, RearAspectWeaponEnvelope
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -23,7 +24,7 @@ DEFAULT_COMBAT_CONFIG = PROJECT_ROOT / "configs/combat_environment.yaml"
 
 
 class MultiUAVCombatEnv:
-    """Four learned Red UAVs versus deterministic nearest-target Blue UAVs."""
+    """Versioned N-vs-N combat; the default remains v2.3 4v4."""
 
     team_size, observation_dim, action_dim = 4, OBSERVATION_DIM, 3
     environment_version = ENVIRONMENT_VERSION
@@ -32,6 +33,8 @@ class MultiUAVCombatEnv:
         self, config: str | Path | dict[str, Any] = DEFAULT_COMBAT_CONFIG
     ) -> None:
         self.config = load_config(config) if not isinstance(config, dict) else validate_config(config)
+        self.environment_version = str(self.config["environment_version"])
+        self.observation_dim, self.action_dim, self.team_size = environment_dimensions(self.config)
         self.spec = aircraft_spec(self.config)
         self.dt = float(self.config["simulation"]["dt"])
         self.max_steps = int(self.config["simulation"]["max_steps"])
@@ -41,18 +44,24 @@ class MultiUAVCombatEnv:
         self.fixed_policy = NearestTargetPursuitPolicy(
             self.config["blue_policy"], self.config["action"]
         )
-        self.weapon = WeaponEnvelope(**self.config["weapon"])
+        weapon_class = WeaponEnvelope if self.environment_version == "2.3" else RearAspectWeaponEnvelope
+        self.weapon = weapon_class(**self.config["weapon"])
         self.rng = np.random.default_rng()
         self.red: list[AircraftState] = []
         self.blue: list[AircraftState] = []
-        self.red_fire_states = [FireState() for _ in range(self.team_size)]
-        self.blue_fire_states = [FireState() for _ in range(self.team_size)]
+        self.red_fire_states = self._new_fire_states()
+        self.blue_fire_states = self._new_fire_states()
         self.red_last_executed_phi = np.zeros(self.team_size, dtype=np.float32)
         self.blue_last_executed_phi = np.zeros(self.team_size, dtype=np.float32)
         self.steps = 0
         self.combat_counts: dict[str, dict[str, int]] = {}
         self.first_steps: dict[str, dict[str, int | None]] = {}
         self.episode_reward_components: dict[str, np.ndarray] = {}
+
+    def _new_fire_states(self):
+        if self.environment_version == "2.4":
+            return PairFireState(self.team_size)
+        return [FireState() for _ in range(self.team_size)]
 
     @property
     def red_alive_mask(self) -> np.ndarray:
@@ -84,14 +93,14 @@ class MultiUAVCombatEnv:
         self.red, self.blue, radial_angle = random_combat_states(
             self.rng, **self.config["scenario"]
         )
-        self.red_fire_states = [FireState() for _ in range(self.team_size)]
-        self.blue_fire_states = [FireState() for _ in range(self.team_size)]
+        self.red_fire_states = self._new_fire_states()
+        self.blue_fire_states = self._new_fire_states()
         self.red_last_executed_phi.fill(0.0)
         self.blue_last_executed_phi.fill(0.0)
         self.steps = 0
         self._reset_metrics()
         return self._observations(), {
-            "environment_version": ENVIRONMENT_VERSION,
+            "environment_version": self.environment_version,
             "radial_angle": radial_angle,
             "red_alive_mask": self.red_alive_mask,
             "blue_alive_mask": self.blue_alive_mask,
@@ -139,6 +148,19 @@ class MultiUAVCombatEnv:
         return results[0], results[1], results[2], results[3]
 
     def _in_fire_window(self, attacker: AircraftState, target: AircraftState) -> bool:
+        if self.environment_version == "2.4":
+            # Reject cheap necessary conditions before the full 3-D geometry.
+            if not attacker.alive or not target.alive or attacker.v < target.v:
+                return False
+            dx, dy, dz = target.x-attacker.x, target.y-attacker.y, target.z-attacker.z
+            distance = math.sqrt(dx*dx+dy*dy+dz*dz)
+            if not self.weapon.range_min <= distance <= self.weapon.range_max:
+                return False
+            los = math.atan2(dy,dx) if dx or dy else attacker.psi
+            aspect = abs((target.psi-los+math.pi) % (2*math.pi)-math.pi)
+            if aspect > self.weapon.target_aspect_angle_max:
+                return False
+            return self.weapon.qualifies(engagement_geometry(attacker,target),attacker.v,target.v)
         return bool(
             attacker.alive and target.alive
             and self.weapon.in_fire_window(engagement_geometry(attacker, target))
@@ -169,6 +191,8 @@ class MultiUAVCombatEnv:
         fire_states: list[FireState],
         side: str,
     ) -> list[tuple[int, int, bool]]:
+        if self.environment_version == "2.4":
+            return self._pair_entry_attempts(attackers, targets, fire_states, side)
         attempts: list[tuple[int, int, bool]] = []
         for attacker_index, attacker in enumerate(attackers):
             fire_state = fire_states[attacker_index]
@@ -192,6 +216,30 @@ class MultiUAVCombatEnv:
         if attempt_count and self.first_steps[side]["attempt"] is None:
             self.first_steps[side]["attempt"] = self.steps
         if hit_count and self.first_steps[side]["hit"] is None:
+            self.first_steps[side]["hit"] = self.steps
+        return attempts
+
+    def _pair_entry_attempts(self, attackers, targets, fire_states: PairFireState, side):
+        attempts = []
+        for attacker_index, attacker in enumerate(attackers):
+            candidates = []
+            for target_index, target in enumerate(targets):
+                qualified = self._in_fire_window(attacker, target)
+                if not qualified:
+                    fire_states.armed[attacker_index, target_index] = True
+                elif fire_states.armed[attacker_index, target_index]:
+                    geometry = engagement_geometry(attacker, target)
+                    candidates.append((geometry.distance, target_index, geometry))
+            if candidates:
+                _, target_index, geometry = min(candidates, key=lambda row: (row[0], row[1]))
+                fire_states.armed[attacker_index, target_index] = False
+                attempts.append((attacker_index, target_index, self.weapon.attempt_hit(geometry, self.rng)))
+        self.combat_counts[side]["fire_attempts"] += len(attempts)
+        hits = sum(hit for _, _, hit in attempts)
+        self.combat_counts[side]["weapon_hits"] += hits
+        if attempts and self.first_steps[side]["attempt"] is None:
+            self.first_steps[side]["attempt"] = self.steps
+        if hits and self.first_steps[side]["hit"] is None:
             self.first_steps[side]["hit"] = self.steps
         return attempts
 
@@ -283,7 +331,7 @@ class MultiUAVCombatEnv:
         red_survivors = int(self.red_alive_mask.sum())
         blue_survivors = int(self.blue_alive_mask.sum())
         info: dict[str, Any] = {
-            "environment_version": ENVIRONMENT_VERSION,
+            "environment_version": self.environment_version,
             "red_success": red_win,
             "red_win": red_win,
             "blue_win": blue_win,
@@ -333,14 +381,14 @@ class MultiUAVCombatEnv:
         if red_actions.shape != (self.team_size, self.action_dim) or not np.all(
             np.isfinite(red_actions)
         ):
-            raise ValueError("red_actions must be finite with shape (4, 3)")
+            raise ValueError(f"red_actions must be finite with shape ({self.team_size}, 3)")
         if blue_actions is None:
             blue_actions = self.fixed_policy.team_actions(self.blue, self.red)
         blue_actions = np.asarray(blue_actions, dtype=np.float32)
         if blue_actions.shape != (self.team_size, self.action_dim) or not np.all(
             np.isfinite(blue_actions)
         ):
-            raise ValueError("blue_actions must be finite with shape (4, 3)")
+            raise ValueError(f"blue_actions must be finite with shape ({self.team_size}, 3)")
 
         executed_red = np.clip(red_actions, -1.0, 1.0) * self.red_alive_mask[:, None]
         executed_blue = np.clip(blue_actions, -1.0, 1.0) * self.blue_alive_mask[:, None]

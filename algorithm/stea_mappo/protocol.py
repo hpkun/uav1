@@ -1,6 +1,6 @@
 """Strict independent checkpoint identity, architecture and config provenance."""
 from algorithm.common.protocol import config_sha256
-from env.config import ENVIRONMENT_VERSION
+from env.config import environment_dimensions
 from .trainer import STEA_MAPPO_IMPL_VERSION
 from .factory import validate_config
 
@@ -21,6 +21,10 @@ def architecture_from_config(config, smoke=False):
 
 def validate_checkpoint(state, env_config, algorithm_config):
     validate_config(algorithm_config)
+    dimensions = environment_dimensions(env_config)
+    network = algorithm_config["network"]
+    if dimensions != tuple(network[key] for key in ("observation_dim","action_dim","num_agents")):
+        raise RuntimeError("STEA-MAPPO network/environment dimensions mismatch")
     if state.get("algorithm") != "STEA-MAPPO":
         raise RuntimeError("checkpoint is not a STEA-MAPPO checkpoint")
     if state.get("stea_mappo_impl_version") != STEA_MAPPO_IMPL_VERSION:
@@ -32,7 +36,7 @@ def validate_checkpoint(state, env_config, algorithm_config):
         "stea_mappo_impl_version","actor_parameter_count","critic_parameter_count","total_parameter_count")
     if any(key not in extra for key in required):
         raise RuntimeError("incomplete STEA-MAPPO checkpoint protocol metadata")
-    expected = {"environment_version":ENVIRONMENT_VERSION,"observation_dim":52,"action_dim":3,"num_agents":4,
+    expected = {"environment_version":env_config["environment_version"],"observation_dim":dimensions[0],"action_dim":dimensions[1],"num_agents":dimensions[2],
         "training_gamma":float(algorithm_config["training"]["gamma"]),
         "environment_config_sha256":config_sha256(env_config),
         "algorithm_config_sha256":config_sha256(algorithm_config),

@@ -19,8 +19,8 @@ def random_combat_states(
     team_size: int = 4,
 ) -> tuple[list[AircraftState], list[AircraftState], float]:
     """Place opposing formations at the ends of a random 8-km diameter."""
-    if team_size != 4 or len(formation_offsets) != team_size:
-        raise ValueError("this benchmark requires four aircraft per team")
+    if team_size <= 0 or len(formation_offsets) != team_size:
+        raise ValueError("formation_offsets must match positive team_size")
     radial_angle = float(rng.uniform(-np.pi, np.pi))
     radial = np.array([np.cos(radial_angle), np.sin(radial_angle)])
     lateral = np.array([-radial[1], radial[0]])

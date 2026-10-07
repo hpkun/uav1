@@ -5,7 +5,7 @@ import torch
 from algorithm.mappo.runner import MAPPOTrainingRunner
 from algorithm.common.vector_env import ParallelVectorEnv
 from algorithm.common.protocol import config_sha256
-from env.config import ENVIRONMENT_VERSION
+from env.config import environment_dimensions
 from .factory import build_stea_mappo_trainer, validate_config
 from .protocol import require_cuda, validate_checkpoint
 from .trainer import RecurrentRolloutBatch, STEA_MAPPO_IMPL_VERSION
@@ -21,7 +21,9 @@ class STEAMAPPOTrainingRunner(MAPPOTrainingRunner):
         t,n,i = (algorithm_config[key] for key in ("training","network","implementation"))
         self.device = str(t["device"] if device is None else device)
         require_cuda(self.device)
-        self.observation_dim,self.action_dim,self.num_agents = 52,3,4
+        self.observation_dim,self.action_dim,self.num_agents = environment_dimensions(env_config)
+        if (n["observation_dim"],n["action_dim"],n["num_agents"]) != (self.observation_dim,self.action_dim,self.num_agents):
+            raise ValueError("STEA-MAPPO network/environment dimension mismatch")
         self.num_envs = int(t["num_train_envs"] if num_envs is None else num_envs)
         self.total_sampled_steps = int(t["total_sampled_steps"] if total_sampled_steps is None else total_sampled_steps)
         self.seed = int(t["seed"] if seed is None else seed)
@@ -47,7 +49,7 @@ class STEAMAPPOTrainingRunner(MAPPOTrainingRunner):
         self.next_console_log,self.next_evaluation,self.next_checkpoint = self.console_interval,self.evaluation_interval,self.checkpoint_interval
         self.completed_records,self.evaluation_history = [],[]
         self.last_metrics,self.best_evaluation = {},None
-        self.agent_episode_returns = np.zeros((self.num_envs,4),dtype=float)
+        self.agent_episode_returns = np.zeros((self.num_envs,self.num_agents),dtype=float)
         self.vector = ParallelVectorEnv(self.num_envs,env_config,self.seed,self.evaluation_seeds)
         try:
             self.observations = self.vector.reset()
@@ -55,7 +57,7 @@ class STEAMAPPOTrainingRunner(MAPPOTrainingRunner):
             self.vector.close()
             raise
         self.alive_masks = self.vector.current_alive_masks.copy()
-        self.actor_hidden_states = np.zeros((self.num_envs,4,int(n["gru_hidden_dim"])),dtype=np.float32)
+        self.actor_hidden_states = np.zeros((self.num_envs,self.num_agents,int(n["gru_hidden_dim"])),dtype=np.float32)
         self.episode_start_masks = np.ones(self.num_envs,dtype=np.float32)
 
     def startup_summary(self):
@@ -106,7 +108,7 @@ class STEAMAPPOTrainingRunner(MAPPOTrainingRunner):
                   for name,module in (("actor",self.trainer.actor),("critic",self.trainer.critic))}
         counts["total_parameter_count"] = counts["actor_parameter_count"]+counts["critic_parameter_count"]
         self.trainer.save(path,{"algorithm":"STEA-MAPPO","stea_mappo_impl_version":STEA_MAPPO_IMPL_VERSION,
-            "environment_version":ENVIRONMENT_VERSION,"observation_dim":52,"action_dim":3,"num_agents":4,
+            "environment_version":self.env_config["environment_version"],"observation_dim":self.observation_dim,"action_dim":self.action_dim,"num_agents":self.num_agents,
             "training_seed":self.seed,"training_gamma":self.trainer.gamma,"training_num_envs":self.num_envs,
             "training_total_sampled_steps":self.total_sampled_steps,"training_smoke":self.smoke,
             "effective_hidden_dim":self.effective_hidden_dim,"critic_type":"attention",

@@ -3,8 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from env.config import ENVIRONMENT_VERSION, validate_config
-from env.combat_env import MultiUAVCombatEnv
+from env.config import ENVIRONMENT_VERSION, validate_config, environment_dimensions
 from algorithm.common.protocol import config_sha256
 
 
@@ -60,8 +59,6 @@ def _validate_common_checkpoint_contract(
         raise RuntimeError("checkpoint is not a MAPPO checkpoint")
     extra = _checkpoint_extra(state)
     expected_version = str(env_config.get("environment_version", ENVIRONMENT_VERSION))
-    if expected_version != ENVIRONMENT_VERSION:
-        raise RuntimeError("unsupported combat environment_version")
     checkpoint_version = extra.get("environment_version")
     if checkpoint_version != expected_version:
         raise RuntimeError(
@@ -80,11 +77,7 @@ def _validate_common_checkpoint_contract(
     if checkpoint_critic_type!=configured_critic_type:
         raise RuntimeError(f"checkpoint critic_type mismatch: expected {configured_critic_type!r}, got {checkpoint_critic_type!r}")
     configured = _configured_dimensions(algorithm_config)
-    environment = (
-        MultiUAVCombatEnv.observation_dim,
-        MultiUAVCombatEnv.action_dim,
-        int(env_config.get("scenario", {}).get("team_size", MultiUAVCombatEnv.team_size)),
-    )
+    environment = environment_dimensions(env_config)
     if configured != environment:
         raise RuntimeError(
             "algorithm/environment dimensions mismatch: configured "
@@ -106,10 +99,11 @@ def validate_checkpoint_environment(
     validate_config(env_config)
     extra = _checkpoint_extra(state)
     version = extra.get("environment_version")
-    if version != ENVIRONMENT_VERSION:
+    expected_version = str(env_config["environment_version"])
+    if version != expected_version:
         raise RuntimeError(
             "checkpoint environment_version mismatch: expected "
-            f"{ENVIRONMENT_VERSION}, got {version!r}; environment semantics "
+            f"{expected_version}, got {version!r}; environment semantics "
             "are incompatible"
         )
 

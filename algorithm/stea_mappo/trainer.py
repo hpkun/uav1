@@ -39,9 +39,8 @@ class STEAMAPPOTrainer(MAPPOTrainer):
             raise ValueError("STEA-MAPPO requires the baseline attention critic")
         if kwargs.get("actor_activation", "relu") != "relu":
             raise ValueError("STEA-MAPPO actor activation must be relu")
-        if (kwargs.get("observation_dim", 52), kwargs.get("action_dim", 3),
-                kwargs.get("num_agents", 4)) != (52, 3, 4):
-            raise ValueError("STEA-MAPPO requires observation/action/agents=52/3/4")
+        if kwargs.get("observation_dim", 52) != 13*kwargs.get("num_agents", 4) or kwargs.get("action_dim", 3) != 3:
+            raise ValueError("STEA-MAPPO requires observation/action/agents=13*N/3/N")
         self.sequence_length = int(recurrent_sequence_length)
         if self.sequence_length <= 0 or int(kwargs.get("minibatch_size", 512)) % self.sequence_length:
             raise ValueError("minibatch_size must be divisible by recurrent_sequence_length")
@@ -129,14 +128,14 @@ class STEAMAPPOTrainer(MAPPOTrainer):
         tensors = {key: self.tensor(value) for key, value in vars(rollout).items()}
         obs, mask = tensors["observations"], tensors["alive_masks"]
         t, e = obs.shape[:2]
-        if tensors["actor_hidden_states"].shape != (t,e,4,self.actor.gru_hidden_dim):
-            raise ValueError("actor_hidden_states must have shape [T,E,4,H]")
+        if tensors["actor_hidden_states"].shape != (t,e,self.num_agents,self.actor.gru_hidden_dim):
+            raise ValueError("actor_hidden_states must have shape [T,E,N,H]")
         if tensors["episode_starts"].shape != (t,e):
             raise ValueError("episode_starts must have shape [T,E]")
         with torch.no_grad():
-            values = self.critic(obs.reshape(-1,4,52),mask.reshape(-1,4)).reshape(t,e,4)
-            next_values = self.critic(tensors["next_observations"].reshape(-1,4,52),
-                tensors["next_alive_masks"].reshape(-1,4)).reshape(t,e,4)
+            values = self.critic(obs.reshape(-1,self.num_agents,self.observation_dim),mask.reshape(-1,self.num_agents)).reshape(t,e,self.num_agents)
+            next_values = self.critic(tensors["next_observations"].reshape(-1,self.num_agents,self.observation_dim),
+                tensors["next_alive_masks"].reshape(-1,self.num_agents)).reshape(t,e,self.num_agents)
             advantages, returns = compute_gae(tensors["rewards"], values, next_values,
                 tensors["dones"], mask, tensors["next_alive_masks"], self.gamma, self.gae_lambda)
             if self.normalize_advantages:
@@ -160,8 +159,8 @@ class STEAMAPPOTrainer(MAPPOTrainer):
                 advantage = batch["advantages"]
                 actor_loss = -masked_mean(torch.minimum(ratio*advantage,
                     ratio.clamp(1-self.clip_ratio,1+self.clip_ratio)*advantage),live_mask)
-                value = self.critic(batch["observations"].reshape(-1,4,52),
-                    live_mask.reshape(-1,4)).reshape_as(live_mask)
+                value = self.critic(batch["observations"].reshape(-1,self.num_agents,self.observation_dim),
+                    live_mask.reshape(-1,self.num_agents)).reshape_as(live_mask)
                 value_error = (value-batch["returns"]).square()
                 if self.clip_value_loss:
                     clipped = batch["old_values"] + (value-batch["old_values"]).clamp(-self.clip_ratio,self.clip_ratio)
@@ -233,6 +232,9 @@ class STEAMAPPOTrainer(MAPPOTrainer):
         if state.get("critic_type") != self.critic_type:
             raise RuntimeError("STEA-MAPPO critic_type mismatch")
         extra = state.get("extra",{})
+        for key in ("observation_dim","action_dim","num_agents"):
+            if key in extra and extra[key] != getattr(self,key):
+                raise RuntimeError(f"STEA-MAPPO checkpoint {key} mismatch")
         if "network_architecture" in extra and extra["network_architecture"] != self.network_architecture:
             raise RuntimeError("STEA-MAPPO extra network_architecture mismatch")
         if "stea_mappo_impl_version" in extra and extra["stea_mappo_impl_version"] != STEA_MAPPO_IMPL_VERSION:

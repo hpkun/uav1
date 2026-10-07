@@ -33,7 +33,8 @@ def test_factory_and_public_api_are_combat_only():
     assert env.__all__ == ['AircraftSpec', 'AircraftState', 'ControlCommand', 'EngagementGeometry',
         'FireState', 'MultiUAVCombatEnv', 'WeaponEnvelope', 'engagement_geometry', 'make_combat_environment']
     assert sorted(p.name for p in (ROOT / 'configs').glob('*.yaml')) == [
-        'combat_environment.yaml', 'madsac.yaml', 'mappo.yaml', 'stea_mappo.yaml']
+        'combat_environment.yaml', 'combat_environment_v24.yaml', 'madsac.yaml', 'mappo.yaml',
+        'mappo_8v8.yaml', 'stea_mappo.yaml', 'stea_mappo_8v8.yaml']
     assert list(inspect.signature(validate_checkpoint_for_evaluation).parameters) == [
         'state', 'env_config', 'algorithm_config']
     assert list(inspect.signature(evaluate_mappo_checkpoint).parameters) == [

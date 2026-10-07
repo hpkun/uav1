@@ -93,6 +93,8 @@ class MAPPOTrainer:
         if self.device.type == "cuda" and not torch.cuda.is_available():
             raise RuntimeError("CUDA requested but unavailable")
         self.num_agents = int(num_agents)
+        self.observation_dim = int(observation_dim)
+        self.action_dim = int(action_dim)
         self.gamma = float(gamma)
         self.gae_lambda = float(gae_lambda)
         self.clip_ratio = float(clip_ratio)

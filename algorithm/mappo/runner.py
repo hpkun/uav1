@@ -9,8 +9,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from env.config import ENVIRONMENT_VERSION
-from env.combat_env import MultiUAVCombatEnv
+from env.config import environment_dimensions
 from .trainer import MAPPO_IMPL_VERSION, MAPPOTrainer, RolloutBatch
 from algorithm.common.evaluator import (
     episode_return_metrics,
@@ -38,8 +37,7 @@ class MAPPOTrainingRunner:
         implementation = algorithm_config["implementation"]
         configured = (int(network["observation_dim"]), int(network["action_dim"]),
                       int(network["num_agents"]))
-        expected = (MultiUAVCombatEnv.observation_dim, MultiUAVCombatEnv.action_dim,
-                    MultiUAVCombatEnv.team_size)
+        expected = environment_dimensions(env_config)
         if configured != expected:
             raise ValueError(f"network/environment dimension mismatch: configured obs/action/agents={configured}, environment={expected}")
         self.observation_dim, self.action_dim, self.num_agents = configured
@@ -116,7 +114,7 @@ class MAPPOTrainingRunner:
             "gamma": self.trainer.gamma, "gae_lambda": self.trainer.gae_lambda,
             "clip_ratio": self.trainer.clip_ratio,
             "entropy_coefficient": self.trainer.entropy_coefficient,
-            "environment_version": ENVIRONMENT_VERSION,
+            "environment_version": self.env_config["environment_version"],
             "max_steps": int(self.env_config["simulation"]["max_steps"]),
         }
 
@@ -332,7 +330,7 @@ class MAPPOTrainingRunner:
         return True
 
     def save_checkpoint(self, path: str | Path) -> None:
-        self.trainer.save(path, {"environment_version": ENVIRONMENT_VERSION,
+        self.trainer.save(path, {"environment_version": self.env_config["environment_version"],
             "mappo_impl_version": MAPPO_IMPL_VERSION,
             "observation_dim": self.observation_dim,
             "action_dim": self.action_dim,

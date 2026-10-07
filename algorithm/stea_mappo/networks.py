@@ -8,11 +8,14 @@ from algorithm.mappo.networks import SharedMAPPOActor
 
 
 def decompose_observations(observations: torch.Tensor):
-    if observations.shape[-1] != 52:
-        raise ValueError('STEA observations must have exactly 52 features')
+    dimension = observations.shape[-1]
+    if dimension % 13 or dimension < 26:
+        raise ValueError('STEA observations must have 13*N features, N >= 2 (52 for 4v4)')
+    agents = dimension // 13
+    ally_end = 7 + 7 * (agents - 1)
     prefix = observations.shape[:-1]
-    return (observations[..., :7], observations[..., 7:28].reshape(*prefix, 3, 7),
-            observations[..., 28:52].reshape(*prefix, 4, 6))
+    return (observations[..., :7], observations[..., 7:ally_end].reshape(*prefix, agents - 1, 7),
+            observations[..., ally_end:].reshape(*prefix, agents, 6))
 
 
 class MaskedEntityAttention(nn.Module):
@@ -109,7 +112,7 @@ class SpatioTemporalEntityAttentionActor(nn.Module):
     def distribution_sequence(self, observations: torch.Tensor, initial_hidden: torch.Tensor,
                               alive: torch.Tensor, episode_starts: torch.Tensor):
         if observations.ndim != 4 or episode_starts.shape != observations.shape[:2]:
-            raise ValueError('sequences must be [batch,length,agents,52], starts [batch,length]')
+            raise ValueError('sequences must be [batch,length,agents,13*N], starts [batch,length]')
         means, scales, hidden_rows, attention_rows = [], [], [], []
         hidden = initial_hidden
         for step in range(observations.shape[1]):
