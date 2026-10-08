@@ -1,4 +1,4 @@
-"""Config validation and keyword mapping for the two new 5v5 controls only."""
+"""Config validation and keyword mapping for formal 5v5 and 8v8 controls."""
 from algorithm.common.critic_protocol import layer_width
 
 
@@ -6,8 +6,8 @@ def validate_control_config(config, algorithm):
     if config.get('algorithm') != algorithm:
         raise ValueError(f'algorithm must be {algorithm}')
     n,t,i = (config[key] for key in ('network','training','implementation'))
-    if tuple(n[k] for k in ('observation_dim','action_dim','num_agents')) != (65,3,5):
-        raise ValueError('formal controls require observation/action/agents 65/3/5')
+    if tuple(n[k] for k in ('observation_dim','action_dim','num_agents')) not in ((65,3,5),(104,3,8)):
+        raise ValueError('formal controls require observation/action/agents 65/3/5 or 104/3/8')
     if n['critic_type'] != 'mlp' or layer_width(n,'critic_hidden_layers') != 256:
         raise ValueError('formal controls require CentralizedMLPCritic [256,256]')
     expected = ({'actor_type':'flat_recurrent','flat_encoder_dim':128,'gru_hidden_dim':128,

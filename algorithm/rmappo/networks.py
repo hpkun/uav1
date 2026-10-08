@@ -1,4 +1,4 @@
-"""Flat 65D observation encoder and independent per-agent GRU128."""
+"""Flat configured observation encoder and independent per-agent GRU128."""
 import torch
 from torch import nn
 from torch.distributions import Normal
@@ -10,10 +10,11 @@ class FlatRecurrentActor(nn.Module):
                  gru_hidden_dim=128, gru_layers=1, log_std_min=-5., log_std_max=.5,
                  policy_std_mode="state_independent", log_std_init=-.5, mean_head_init_gain=.01):
         super().__init__()
-        if (observation_dim, action_dim, flat_encoder_dim, gru_hidden_dim, gru_layers) != (65,3,128,128,1):
-            raise ValueError("RMAPPO requires 65/3 and encoder128/GRU128/layers1")
+        if observation_dim not in (65,104) or (action_dim, flat_encoder_dim, gru_hidden_dim, gru_layers) != (3,128,128,1):
+            raise ValueError("RMAPPO requires obs65 or obs104, action3 and encoder128/GRU128/layers1")
         if policy_std_mode != "state_independent" or log_std_min > log_std_max:
             raise ValueError("RMAPPO requires valid state-independent Gaussian")
+        self.observation_dim = observation_dim
         self.gru_hidden_dim = gru_hidden_dim
         self.log_std_min, self.log_std_max = log_std_min, log_std_max
         self.flat_encoder = nn.Sequential(nn.Linear(observation_dim,128),nn.ReLU())
@@ -52,8 +53,8 @@ class FlatRecurrentActor(nn.Module):
 
     def distribution_sequence(self, observations: torch.Tensor, initial_hidden: torch.Tensor,
                               alive: torch.Tensor, episode_starts: torch.Tensor):
-        if observations.ndim != 4 or episode_starts.shape != observations.shape[:2]:
-            raise ValueError('sequences must be [batch,length,agents,65], starts [batch,length]')
+        if observations.ndim != 4 or observations.shape[-1] != self.observation_dim or episode_starts.shape != observations.shape[:2]:
+            raise ValueError(f'sequences must be [batch,length,agents,{self.observation_dim}], starts [batch,length]')
         means, scales, hidden_rows, attention_rows = [], [], [], []
         hidden = initial_hidden
         for step in range(observations.shape[1]):

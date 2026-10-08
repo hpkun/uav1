@@ -304,8 +304,8 @@ def test_cpu_runtime_and_wrong_environment_rejected(name,tmp_path):
     cls=RMAPPOTrainingRunner if name=='rmappo' else EAMAPPOTrainingRunner
     env=yaml.safe_load((ROOT/'configs/combat_environment_v25.yaml').read_text())
     with pytest.raises(RuntimeError,match='CUDA'):cls(env,config(name),output_dir=tmp_path,device='cpu')
-    env['environment_version']='2.4'
-    with pytest.raises(ValueError,match='2.5'):cls(env,config(name),output_dir=tmp_path,device='cuda')
+    env=yaml.safe_load((ROOT/'configs/combat_environment_v24.yaml').read_text())
+    with pytest.raises(ValueError,match='dimension'):cls(env,config(name),output_dir=tmp_path,device='cuda')
 
 
 def test_rmappo_runner_resets_individual_death_and_whole_completed_environment():

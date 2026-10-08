@@ -14,6 +14,9 @@ tmp/
 *.pth
 *.ckpt
 
+# Fixed pre-change 5v5 compatibility regression fixture, not an experiment run.
+!tests/fixtures/formal_5v5_before_8v8.pt
+
 # Test/runtime artifacts.
 .pytest_tmp/
 .pytest_cache/
