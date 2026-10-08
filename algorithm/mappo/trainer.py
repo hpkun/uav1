@@ -9,6 +9,7 @@ import torch
 from torch import nn
 
 from .networks import CentralizedMLPCritic, CentralizedValueCritic, SharedMAPPOActor
+from algorithm.common.policy_protocol import validate_trainer_policy_protocol
 
 
 MAPPO_IMPL_VERSION = 2
@@ -88,6 +89,10 @@ class MAPPOTrainer:
         log_std_min: float = -5.0,
         log_std_max: float = 2.0,
         critic_type: str = "attention",
+        policy_std_mode: str = "state_dependent",
+        log_std_init: float = -.5,
+        mean_head_init_gain: float = .01,
+        target_kl: float | None = None,
     ) -> None:
         self.device = torch.device(device)
         if self.device.type == "cuda" and not torch.cuda.is_available():
@@ -102,6 +107,9 @@ class MAPPOTrainer:
         self.entropy_coefficient = float(entropy_coefficient)
         self.max_grad_norm = float(max_grad_norm)
         self.ppo_epochs = int(ppo_epochs)
+        self.target_kl = None if target_kl is None else float(target_kl)
+        if self.target_kl is not None and (not np.isfinite(self.target_kl) or self.target_kl <= 0):
+            raise ValueError("target_kl must be positive or None")
         self.minibatch_size = int(minibatch_size)
         self.normalize_advantages = bool(normalize_advantages)
         self.clip_value_loss = bool(clip_value_loss)
@@ -115,7 +123,7 @@ class MAPPOTrainer:
 
         self.actor = SharedMAPPOActor(
             observation_dim, action_dim, hidden_dim, log_std_min, log_std_max,
-            actor_activation,
+            actor_activation, policy_std_mode, log_std_init, mean_head_init_gain,
         ).to(self.device)
         if self.critic_type=="attention":
             self.critic=CentralizedValueCritic(observation_dim,hidden_dim,attention_heads,critic_activation).to(self.device)
@@ -132,6 +140,28 @@ class MAPPOTrainer:
         self.critic_update_count = 0
         self.sampled_steps = 0
         self.vector_steps = 0
+
+    def policy_protocol(self):
+        return dict(policy_std_mode=self.actor.policy_std_mode, log_std_init=self.actor.log_std_init,
+                    mean_head_init_gain=self.actor.mean_head_init_gain, target_kl=self.target_kl)
+
+    def _epoch_exceeds_target(self, rows):
+        return bool(rows and self.target_kl is not None
+                    and np.mean([row["approx_kl"] for row in rows]) > self.target_kl)
+
+    def _stability_metrics(self, epoch_rows):
+        valid = [rows for rows in epoch_rows if rows]
+        metrics = dict(configured_ppo_epochs=float(self.ppo_epochs), effective_ppo_epochs=float(len(valid)),
+            kl_early_stop=float(bool(valid) and self._epoch_exceeds_target(valid[-1])),
+            target_kl=0. if self.target_kl is None else self.target_kl,
+            target_kl_enabled=float(self.target_kl is not None),
+            last_epoch_mean_kl=float(np.mean([row["approx_kl"] for row in valid[-1]])) if valid else 0.)
+        if self.actor.policy_std_mode == "state_independent":
+            values = self.actor.log_std_parameter.detach().clamp(self.actor.log_std_min, self.actor.log_std_max)
+            for index, name in enumerate(("heading", "pitch", "speed")):
+                metrics[f"policy_log_std_{name}"] = float(values[index])
+                metrics[f"policy_sigma_{name}"] = float(values[index].exp())
+        return metrics
 
     @torch.no_grad()
     def act(
@@ -239,6 +269,8 @@ class MAPPOTrainer:
                 raw_act = raw_actions[indices]
                 old_log = old_log_probs[indices]
                 mask = alive_masks[indices]
+                if not (mask > .5).any():
+                    continue
                 old_value = old_values[indices]
                 target_return = returns[indices]
                 advantage = advantages[indices]
@@ -324,6 +356,8 @@ class MAPPOTrainer:
                     metric_rows.append(row)
                     this_epoch.append({**pre_step, "epoch": float(epoch)})
             epoch_rows.append(this_epoch)
+            if self._epoch_exceeds_target(this_epoch):
+                break
 
         self.ppo_update_count += 1
         live = alive_masks > 0.5
@@ -355,11 +389,14 @@ class MAPPOTrainer:
         for key, value in first_minibatch.items():
             metrics[f"first_minibatch_{key}"] = value
         for epoch, rows in enumerate(epoch_rows):
+            if not rows:
+                continue
             for key in rows[0]:
                 if key != "epoch":
                     metrics[f"epoch_{epoch}_{key}"] = float(np.mean([
                         row[key] for row in rows
                     ]))
+        metrics.update(self._stability_metrics(epoch_rows))
         if not np.all(np.isfinite(list(metrics.values()))):
             raise FloatingPointError(f"non-finite MAPPO update: {metrics}")
         return metrics
@@ -378,7 +415,7 @@ class MAPPOTrainer:
             "critic_updates": self.critic_update_count,
             "sampled_steps": self.sampled_steps,
             "vector_steps": self.vector_steps,
-            "extra": extra or {},
+            "extra": {**(extra or {}), **self.policy_protocol()},
         }
 
     def save(self, path: str | Path, extra: dict[str, Any] | None = None) -> None:
@@ -400,6 +437,7 @@ class MAPPOTrainer:
                 "checkpoint MAPPO implementation mismatch: old checkpoints are "
                 "read-only diagnostics and cannot resume formal training"
             )
+        validate_trainer_policy_protocol(state, self.policy_protocol())
         self.actor.load_state_dict(state["actor"])
         self.critic.load_state_dict(state["critic"])
         if legacy:

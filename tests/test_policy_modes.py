@@ -119,8 +119,8 @@ def test_checkpoint_contract_is_strict(device,tmp_path,corruption):
                training_gamma=.99,training_smoke=False)
     state=trainer.checkpoint_state(extra)
     algorithm='mappo'
-    if corruption=='algorithm_hash':extra['algorithm_config_sha256']='wrong'
-    if corruption=='environment_hash':extra['environment_config_sha256']='wrong'
+    if corruption=='algorithm_hash':state['extra']['algorithm_config_sha256']='wrong'
+    if corruption=='environment_hash':state['extra']['environment_config_sha256']='wrong'
     if corruption=='implementation':state['mappo_impl_version']=-1
     if corruption=='cross_algorithm':
         algorithm='stea-mappo';cfg=yaml.safe_load((ROOT/'configs/stea_mappo_5v5.yaml').read_text())

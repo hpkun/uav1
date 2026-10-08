@@ -67,6 +67,10 @@ class MAPPOTrainingRunner:
             str(implementation["critic_activation"]),
             float(implementation["log_std_min"]), float(implementation["log_std_max"]),
             critic_type=str(network.get("critic_type", "attention")),
+            policy_std_mode=implementation.get("policy_std_mode", "state_dependent"),
+            log_std_init=float(implementation.get("log_std_init", -.5)),
+            mean_head_init_gain=float(implementation.get("mean_head_init_gain", .01)),
+            target_kl=training.get("target_kl"),
         )
         evaluation_base = int(implementation["evaluation_seed_base"])
         self.evaluation_seeds = list(range(
@@ -278,6 +282,9 @@ class MAPPOTrainingRunner:
                     "a", encoding="utf-8"
                 ) as stream:
                     stream.write(json.dumps(update_record) + "\n")
+                if self.trainer.actor.policy_std_mode == "state_independent" or self.trainer.target_kl is not None:
+                    with (self.output_dir / "training_metrics.jsonl").open("a", encoding="utf-8") as stream:
+                        stream.write(json.dumps({"record_type": "ppo_update", **update_record}) + "\n")
                 if self.trainer.sampled_steps >= self.next_console_log:
                     print(self.train_log_line(), flush=True)
                     while self.next_console_log <= self.trainer.sampled_steps:

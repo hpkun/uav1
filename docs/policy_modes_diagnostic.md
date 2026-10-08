@@ -4,7 +4,7 @@
 
 每局 environment seed 为 `seed_base+i`，policy sampling seed 为 `stochastic_policy_seed+i`。每局使用独立、显式设种的 Torch CPU/CUDA RNG，上下文恢复 RNG 状态，cudnn 使用 deterministic 模式。可复现性指相同 checkpoint、配置、软件/硬件及 seed；不宣称跨设备或跨 PyTorch 版本逐位一致。
 
-MAPPO 调用当前 actor 的 `distribution()`；STEA 调用 `distribution_step()`，每局 hidden 从零开始、死亡后清零、按现有 recurrent 语义更新。只读临时 hook 捕获该次实际 forward 的 log_std head，按 actor 自身 bounds clamp，并核验 `distribution.scale == exp(clamped_log_std)`；无额外策略 forward，无网络修改。
+MAPPO 调用当前 actor 的 `distribution()`；STEA 调用 `distribution_step()`，每局 hidden 从零开始、死亡后清零、按现有 recurrent 语义更新。直接读取实际执行的 `distribution.scale.log()`，在浮点精度内核验 `sigma == exp(log_std)`；无额外策略 forward，不依赖 Linear hook，同时支持 legacy state-dependent head 和新的 state-independent Parameter。
 
 输出 JSON 包含两种模式的行为 metrics、逐局记录、每局执行动作 SHA256、三个动作维度 heading/pitch/speed 的方差统计、checkpoint metadata 和 `mode_gap`。行为聚合直接使用现有 `aggregate_combat_records()` / `episode_return_metrics()`；R1–R4 为每局 Red 团队累计分量的均值，与原 evaluator 相同。
 

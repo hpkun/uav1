@@ -3,6 +3,7 @@ from algorithm.common.protocol import config_sha256
 from env.config import environment_dimensions
 from .trainer import STEA_MAPPO_IMPL_VERSION
 from .factory import validate_config
+from algorithm.common.policy_protocol import validate_policy_protocol, actor_architecture_protocol
 
 
 def require_cuda(device):
@@ -16,7 +17,7 @@ def architecture_from_config(config, smoke=False):
     return {**{key:n[key] for key in ("actor_type","entity_dim","entity_attention_heads",
         "spatial_hidden_dim","gru_hidden_dim","gru_layers","recurrent_sequence_length","critic_type")},
         "critic_hidden_dim":64 if smoke else int(n["critic_hidden_layers"][0]),
-        "critic_attention_heads":int(n["attention_heads"])}
+        "critic_attention_heads":int(n["attention_heads"]), **actor_architecture_protocol(config)}
 
 
 def validate_checkpoint(state, env_config, algorithm_config):
@@ -36,6 +37,9 @@ def validate_checkpoint(state, env_config, algorithm_config):
         "stea_mappo_impl_version","actor_parameter_count","critic_parameter_count","total_parameter_count")
     if any(key not in extra for key in required):
         raise RuntimeError("incomplete STEA-MAPPO checkpoint protocol metadata")
+    if extra["environment_version"] != env_config["environment_version"]:
+        raise RuntimeError("STEA-MAPPO checkpoint environment_version mismatch")
+    validate_policy_protocol(state, algorithm_config)
     expected = {"environment_version":env_config["environment_version"],"observation_dim":dimensions[0],"action_dim":dimensions[1],"num_agents":dimensions[2],
         "training_gamma":float(algorithm_config["training"]["gamma"]),
         "environment_config_sha256":config_sha256(env_config),

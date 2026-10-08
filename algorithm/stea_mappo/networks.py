@@ -50,7 +50,9 @@ class SpatioTemporalEntityAttentionActor(nn.Module):
     def __init__(self, entity_dim: int = 64, entity_attention_heads: int = 2,
                  spatial_hidden_dim: int = 128, gru_hidden_dim: int = 128,
                  gru_layers: int = 1, action_dim: int = 3,
-                 log_std_min: float = -5., log_std_max: float = 2.):
+                 log_std_min: float = -5., log_std_max: float = 2.,
+                 policy_std_mode: str = "state_dependent", log_std_init: float = -.5,
+                 mean_head_init_gain: float = .01):
         super().__init__()
         if gru_layers != 1:
             raise ValueError('STEA v1 requires one unidirectional GRU layer')
@@ -69,9 +71,11 @@ class SpatioTemporalEntityAttentionActor(nn.Module):
         self.gru = nn.GRU(spatial_hidden_dim, gru_hidden_dim, num_layers=1, batch_first=True)
         self.actor_head = nn.Sequential(nn.Linear(gru_hidden_dim, gru_hidden_dim), nn.ReLU())
         self.mean = nn.Linear(gru_hidden_dim, action_dim)
-        self.log_std = nn.Linear(gru_hidden_dim, action_dim)
+        self._initialize_policy_std(gru_hidden_dim, policy_std_mode, log_std_init, mean_head_init_gain)
 
     _squashed_log_prob = staticmethod(SharedMAPPOActor._squashed_log_prob)
+    _initialize_policy_std = SharedMAPPOActor._initialize_policy_std
+    _policy_log_std = SharedMAPPOActor._policy_log_std
 
     def encode_entities(self, observations: torch.Tensor):
         own, allies, enemies = decompose_observations(observations)
@@ -100,7 +104,7 @@ class SpatioTemporalEntityAttentionActor(nn.Module):
         _, next_hidden = self.gru(spatial.reshape(-1, 1, spatial.shape[-1]), hidden.reshape(1, -1, self.gru_hidden_dim))
         next_hidden = next_hidden.reshape_as(hidden) * alive[..., None]
         features = self.actor_head(next_hidden)
-        distribution = Normal(self.mean(features), self.log_std(features).clamp(self.log_std_min, self.log_std_max).exp())
+        distribution = Normal(self.mean(features), self._policy_log_std(features).exp())
         return distribution, next_hidden, attention
 
     def forward(self, observations: torch.Tensor, hidden: torch.Tensor,

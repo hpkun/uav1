@@ -5,6 +5,7 @@ from typing import Any
 
 from env.config import ENVIRONMENT_VERSION, validate_config, environment_dimensions
 from algorithm.common.protocol import config_sha256
+from algorithm.common.policy_protocol import validate_policy_protocol
 
 
 def _checkpoint_extra(state: dict[str, Any]) -> dict[str, Any]:
@@ -66,6 +67,7 @@ def _validate_common_checkpoint_contract(
             f"{expected_version!r}, got {checkpoint_version!r}; environment "
             "semantics are incompatible"
         )
+    validate_policy_protocol(state, algorithm_config)
     implementation_version = state.get("mappo_impl_version")
     if implementation_version != MAPPO_IMPL_VERSION:
         raise RuntimeError(

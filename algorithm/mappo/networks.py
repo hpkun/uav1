@@ -19,6 +19,9 @@ class SharedMAPPOActor(nn.Module):
         log_std_min: float = -5.0,
         log_std_max: float = 2.0,
         activation: str = "relu",
+        policy_std_mode: str = "state_dependent",
+        log_std_init: float = -.5,
+        mean_head_init_gain: float = .01,
     ) -> None:
         super().__init__()
         activation_cls = {"relu": nn.ReLU, "leaky_relu": nn.LeakyReLU}.get(activation)
@@ -32,14 +35,30 @@ class SharedMAPPOActor(nn.Module):
             nn.Linear(hidden_dim, hidden_dim), activation_cls(),
         )
         self.mean = nn.Linear(hidden_dim, action_dim)
-        self.log_std = nn.Linear(hidden_dim, action_dim)
+        self._initialize_policy_std(hidden_dim, policy_std_mode, log_std_init, mean_head_init_gain)
+
+    def _initialize_policy_std(self, features, mode, initial, gain):
+        if mode not in {"state_dependent", "state_independent"}:
+            raise ValueError("unsupported policy_std_mode")
+        self.policy_std_mode = mode
+        self.log_std_init, self.mean_head_init_gain = float(initial), float(gain)
+        if mode == "state_dependent":
+            self.log_std = nn.Linear(features, self.mean.out_features)
+        else:
+            if not self.log_std_min <= initial <= self.log_std_max or not math.isfinite(gain) or gain <= 0:
+                raise ValueError("invalid state-independent Gaussian initialization")
+            self.log_std_parameter = nn.Parameter(torch.full((self.mean.out_features,), float(initial)))
+            nn.init.orthogonal_(self.mean.weight, gain=gain)
+            nn.init.zeros_(self.mean.bias)
+
+    def _policy_log_std(self, features):
+        value = self.log_std(features) if self.policy_std_mode == "state_dependent" else self.log_std_parameter.expand(*features.shape[:-1], -1)
+        return value.clamp(self.log_std_min, self.log_std_max)
 
     def distribution(self, observations: torch.Tensor) -> Normal:
         hidden = self.backbone(observations)
         mean = self.mean(hidden)
-        std = self.log_std(hidden).clamp(
-            self.log_std_min, self.log_std_max
-        ).exp()
+        std = self._policy_log_std(hidden).exp()
         return Normal(mean, std)
 
     @staticmethod

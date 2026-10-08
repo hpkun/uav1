@@ -43,16 +43,12 @@ def policy_rng(device, seed):
 
 
 class PolicyExecution:
-    """Observe the actor's actual clamped head without another forward pass."""
+    """Observe the actual executed distribution in either Gaussian protocol."""
     def __init__(self, actor, recurrent, device):
         self.actor, self.recurrent, self.device = actor, recurrent, torch.device(device)
         self.hidden = None
         self.start = True
         self.clamped_log_std = None
-        self.hook = actor.log_std.register_forward_hook(self._capture_log_std)
-
-    def _capture_log_std(self, module, inputs, output):
-        self.clamped_log_std = output.detach().clamp(self.actor.log_std_min, self.actor.log_std_max)
 
     def reset(self, agents):
         self.start = True
@@ -73,7 +69,8 @@ class PolicyExecution:
             distribution = self.actor.distribution(observations)
         raw = distribution.mean if mode == "deterministic" else distribution.rsample()
         actions = raw.tanh() * alive[:, None]
-        if not torch.equal(distribution.scale, self.clamped_log_std.exp()):
+        self.clamped_log_std = distribution.scale.log()
+        if not torch.allclose(distribution.scale, self.clamped_log_std.exp(), rtol=1e-6, atol=0.):
             raise RuntimeError("captured sigma does not match actual actor distribution")
         return actions, raw, distribution, self.clamped_log_std
 
@@ -85,7 +82,7 @@ class PolicyExecution:
                 self.hidden.zero_()
 
     def close(self):
-        self.hook.remove()
+        pass
 
 
 class VarianceStatistics:

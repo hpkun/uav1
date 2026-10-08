@@ -7,6 +7,7 @@ from torch import nn
 
 from algorithm.mappo.trainer import MAPPOTrainer, RolloutBatch, compute_gae, masked_mean
 from .networks import SpatioTemporalEntityAttentionActor, attention_diagnostics
+from algorithm.common.policy_protocol import validate_trainer_policy_protocol
 
 STEA_MAPPO_IMPL_VERSION = 1
 
@@ -51,6 +52,8 @@ class STEAMAPPOTrainer(MAPPOTrainer):
             entity_dim, entity_attention_heads, spatial_hidden_dim,
             gru_hidden_dim, gru_layers, self.actor.mean.out_features,
             kwargs.get("log_std_min", -5.), kwargs.get("log_std_max", 2.),
+            kwargs.get("policy_std_mode", "state_dependent"), kwargs.get("log_std_init", -.5),
+            kwargs.get("mean_head_init_gain", .01),
         ).to(self.device)
         self.actor_optimizer = torch.optim.Adam(
             self.actor.parameters(), lr=kwargs.get("actor_learning_rate", 3e-4))
@@ -63,6 +66,8 @@ class STEAMAPPOTrainer(MAPPOTrainer):
             "critic_type": "attention", "critic_hidden_dim": int(kwargs.get("hidden_dim", 256)),
             "critic_attention_heads": self.attention_heads,
         }
+        if self.actor.policy_std_mode == "state_independent":
+            self.network_architecture.update({key: value for key, value in self.policy_protocol().items() if key != "target_kl"})
 
     def tensor(self, value):
         return torch.as_tensor(value, dtype=torch.float32, device=self.device)
@@ -195,6 +200,8 @@ class STEAMAPPOTrainer(MAPPOTrainer):
                 self.critic_update_count += 1
                 rows.append(row); this_epoch.append(row)
             epoch_rows.append(this_epoch)
+            if self._epoch_exceeds_target(this_epoch):
+                break
         if not rows:
             raise ValueError("rollout has no trainable live sequence")
         self.ppo_update_count += 1
@@ -210,6 +217,7 @@ class STEAMAPPOTrainer(MAPPOTrainer):
         metrics.update(audit, sequence_length=float(self.sequence_length),
             sequence_chunks=float(len(chunks)), valid_environment_transitions=float(t*e),
             padded_environment_transitions=float(len(chunks)*self.sequence_length-t*e))
+        metrics.update(self._stability_metrics(epoch_rows))
         if not np.isfinite(list(metrics.values())).all():
             raise FloatingPointError(f"non-finite STEA-MAPPO update: {metrics}")
         return metrics
@@ -227,6 +235,7 @@ class STEAMAPPOTrainer(MAPPOTrainer):
             raise RuntimeError("checkpoint is not a STEA-MAPPO checkpoint")
         if state.get("stea_mappo_impl_version") != STEA_MAPPO_IMPL_VERSION:
             raise RuntimeError("STEA-MAPPO implementation version mismatch")
+        validate_trainer_policy_protocol(state, self.policy_protocol())
         if state.get("network_architecture") != self.network_architecture:
             raise RuntimeError("STEA-MAPPO network_architecture mismatch")
         if state.get("critic_type") != self.critic_type:

@@ -40,6 +40,9 @@ def build_stea_mappo_trainer(config, device, *, seed=None, smoke=False):
         "clip_ratio","value_loss_coefficient","entropy_coefficient","max_grad_norm","ppo_epochs","minibatch_size")})
     kwargs.update({key:i[key] for key in ("actor_activation","critic_activation","log_std_min","log_std_max",
         "normalize_advantages","clip_value_loss")})
+    kwargs.update(policy_std_mode=i.get("policy_std_mode", "state_dependent"),
+        log_std_init=float(i.get("log_std_init", -.5)),
+        mean_head_init_gain=float(i.get("mean_head_init_gain", .01)), target_kl=t.get("target_kl"))
     kwargs.update(hidden_dim=64 if smoke else int(n["critic_hidden_layers"][0]),device=device,
                   seed=int(t["seed"] if seed is None else seed))
     if smoke:

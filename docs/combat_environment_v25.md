@@ -25,7 +25,7 @@ v2.4 和 v2.5 共用 RearAspectWeaponEnvelope 与 pair 入窗逻辑：首次合�
 
 概率命中、随机数消耗、one-hit kill、同时结算、动力学、R1–R4 奖励及 outcome 均继承最终 v2.4。达到 max_steps 且双方存活时仍为 red_failure_timeout，无 terminal reward，无按人数缩放 reward。
 
-`configs/mappo_5v5.yaml` 和 `configs/stea_mappo_5v5.yaml` 使用 65D / 3D / 5 agents、16 env、rollout 256、10 PPO epochs、minibatch 512、3M 目标、20 eval episodes、100k eval interval、500k checkpoint interval、CUDA。其余超参数继承原正式配置。MAPPO 使用 [256,256] actor/attention critic 和 2 heads；STEA 保留 entity 64、2 entity heads、spatial 128、GRU 128×1、sequence 32、critic [256,256] 和 2 heads。
+`configs/mappo_5v5.yaml` 和 `configs/stea_mappo_5v5.yaml` 使用 65D / 3D / 5 agents、16 env、rollout 256、最多10 PPO epochs、minibatch 512、3M 目标、20 eval episodes、100k eval interval、500k checkpoint interval、CUDA。当前5v5显式采用 state-independent 三维 log_std、初值−0.5、bounds[−5,0.5]、mean head orthogonal gain0.01、entropy coefficient0.001、epoch-level target KL0.015；环境规则不变。MAPPO 使用 [256,256] actor/attention critic 和 2 heads；STEA 保留 entity 64、2 entity heads、spatial 128、GRU 128×1、sequence 32、critic [256,256] 和 2 heads。旧run snapshot保持原协议，详见 `gaussian_policy_protocol.md`。
 
 Checkpoint 记录环境版本、维度、配置指纹和训练 seed，禁止 v2.3/v2.4/v2.5 跨版本加载。MADSAC 保持仅支持 v2.3 4v4/52D。
 

@@ -27,6 +27,10 @@ def build_mappo_trainer(
         "critic_activation": implementation["critic_activation"],
         "log_std_min": float(implementation["log_std_min"]),
         "log_std_max": float(implementation["log_std_max"]),
+        "policy_std_mode": implementation.get("policy_std_mode", "state_dependent"),
+        "log_std_init": float(implementation.get("log_std_init", -.5)),
+        "mean_head_init_gain": float(implementation.get("mean_head_init_gain", .01)),
+        "target_kl": training.get("target_kl"),
     }
     return MAPPOTrainer(
         **common,
