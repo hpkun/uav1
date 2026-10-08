@@ -36,8 +36,8 @@ class STEAMAPPOTrainer(MAPPOTrainer):
     def __init__(self, *, entity_dim=64, entity_attention_heads=2,
                  spatial_hidden_dim=128, gru_hidden_dim=128, gru_layers=1,
                  recurrent_sequence_length=32, **kwargs):
-        if kwargs.get("critic_type", "attention") != "attention":
-            raise ValueError("STEA-MAPPO requires the baseline attention critic")
+        if kwargs.get("critic_type", "attention") not in {"attention", "mlp"}:
+            raise ValueError("STEA-MAPPO critic_type must be attention or mlp")
         if kwargs.get("actor_activation", "relu") != "relu":
             raise ValueError("STEA-MAPPO actor activation must be relu")
         if kwargs.get("observation_dim", 52) != 13*kwargs.get("num_agents", 4) or kwargs.get("action_dim", 3) != 3:
@@ -63,9 +63,11 @@ class STEAMAPPOTrainer(MAPPOTrainer):
             "spatial_hidden_dim": int(spatial_hidden_dim),
             "gru_hidden_dim": int(gru_hidden_dim), "gru_layers": int(gru_layers),
             "recurrent_sequence_length": self.sequence_length,
-            "critic_type": "attention", "critic_hidden_dim": int(kwargs.get("hidden_dim", 256)),
-            "critic_attention_heads": self.attention_heads,
+            "critic_type": self.critic_type, "critic_hidden_dim": self.critic_hidden_dim,
         }
+        self.actor_hidden_dim = int(gru_hidden_dim)
+        if self.critic_type == "attention":
+            self.network_architecture["critic_attention_heads"] = self.attention_heads
         if self.actor.policy_std_mode == "state_independent":
             self.network_architecture.update({key: value for key, value in self.policy_protocol().items() if key != "target_kl"})
 

@@ -18,6 +18,7 @@ import torch
 import yaml
 
 from algorithm.common.checkpoint import validate_checkpoint_for_evaluation
+from algorithm.common.critic_protocol import checkpoint_widths
 from algorithm.common.evaluator import aggregate_combat_records, episode_return_metrics
 from algorithm.common.protocol import config_sha256
 from algorithm.mappo.factory import build_mappo_trainer
@@ -128,7 +129,8 @@ def load_policy(algorithm, checkpoint, env_config, algorithm_config, device):
                       "training_gamma", "training_smoke"):
             if field not in extra:
                 raise RuntimeError(f"incomplete checkpoint contract: missing {field}")
-        trainer = build_mappo_trainer(algorithm_config, device, hidden_dim=int(extra["effective_hidden_dim"]))
+        actor_width, critic_width = checkpoint_widths(state)
+        trainer = build_mappo_trainer(algorithm_config, device, hidden_dim=actor_width, critic_hidden_dim=critic_width)
     elif algorithm == "stea-mappo":
         extra = validate_checkpoint(state, env_config, algorithm_config)
         trainer = build_stea_mappo_trainer(algorithm_config, device,

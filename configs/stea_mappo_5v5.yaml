@@ -14,7 +14,7 @@ network:
   gru_hidden_dim: 128
   gru_layers: 1
   recurrent_sequence_length: 32
-  critic_type: attention
+  critic_type: mlp
 training:
   optimizer: Adam
   actor_learning_rate: 0.0003

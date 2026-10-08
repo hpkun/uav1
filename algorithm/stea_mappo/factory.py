@@ -1,5 +1,6 @@
 """Validated STEA-MAPPO construction; baseline factories remain unchanged."""
 from .trainer import STEAMAPPOTrainer
+from algorithm.common.critic_protocol import layer_width
 
 
 def validate_config(config):
@@ -8,8 +9,8 @@ def validate_config(config):
     n,t,i = (config[key] for key in ("network","training","implementation"))
     if n["num_agents"] not in (4,5,8) or n["observation_dim"] != 13*n["num_agents"] or n["action_dim"] != 3:
         raise ValueError("STEA-MAPPO requires dimensions 52/3/4, 65/3/5 or 104/3/8")
-    if n["actor_type"] != "stea" or n["critic_type"] != "attention":
-        raise ValueError("STEA-MAPPO requires actor_type=stea and critic_type=attention")
+    if n["actor_type"] != "stea" or n["critic_type"] not in {"attention", "mlp"}:
+        raise ValueError("STEA-MAPPO requires actor_type=stea and critic_type=attention or mlp")
     if i["actor_activation"] != "relu" or i["critic_activation"] != "relu":
         raise ValueError("STEA-MAPPO requires baseline ReLU activations")
     length = int(n["recurrent_sequence_length"])
@@ -19,10 +20,11 @@ def validate_config(config):
         raise ValueError("rollout_steps must be positive and divisible by recurrent_sequence_length")
     if int(n["gru_layers"]) != 1:
         raise ValueError("only one unidirectional GRU layer is supported")
-    hidden = n["critic_hidden_layers"]
-    if len(hidden) != 2 or hidden[0] != hidden[1]:
-        raise ValueError("critic_hidden_layers must match the baseline two equal widths")
-    for dim,heads in ((n["entity_dim"],n["entity_attention_heads"]),(hidden[0],n["attention_heads"])):
+    width = layer_width(n, "critic_hidden_layers")
+    attention_dimensions = [(n["entity_dim"], n["entity_attention_heads"])]
+    if n["critic_type"] == "attention":
+        attention_dimensions.append((width, n["attention_heads"]))
+    for dim,heads in attention_dimensions:
         if int(dim) <= 0 or int(heads) <= 0 or int(dim)%int(heads):
             raise ValueError("attention dimensions must be positive and divisible by heads")
     if min(int(n["spatial_hidden_dim"]),int(n["gru_hidden_dim"]),int(t["ppo_epochs"])) <= 0:
@@ -44,6 +46,7 @@ def build_stea_mappo_trainer(config, device, *, seed=None, smoke=False):
         log_std_init=float(i.get("log_std_init", -.5)),
         mean_head_init_gain=float(i.get("mean_head_init_gain", .01)), target_kl=t.get("target_kl"))
     kwargs.update(hidden_dim=64 if smoke else int(n["critic_hidden_layers"][0]),device=device,
+                  critic_hidden_dim=64 if smoke else int(n["critic_hidden_layers"][0]),
                   seed=int(t["seed"] if seed is None else seed))
     if smoke:
         kwargs.update(ppo_epochs=2,minibatch_size=2*int(n["recurrent_sequence_length"]))

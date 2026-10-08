@@ -67,7 +67,7 @@ class STEAMAPPOTrainingRunner(MAPPOTrainingRunner):
         return result
 
     def start_log_line(self):
-        return super().start_log_line().replace("algorithm=MAPPO","algorithm=STEA-MAPPO") + f" | sequence={self.trainer.sequence_length} | gru={self.trainer.actor.gru_hidden_dim}"
+        return super().start_log_line().replace("algorithm=MAPPO","algorithm=STEA-MAPPO") + f" | sequence={self.trainer.sequence_length} | gru={self.trainer.actor.gru_hidden_dim} | entity_attention_heads={self.trainer.network_architecture['entity_attention_heads']}"
 
     @staticmethod
     def done_log_line(summary):
@@ -111,7 +111,7 @@ class STEAMAPPOTrainingRunner(MAPPOTrainingRunner):
             "environment_version":self.env_config["environment_version"],"observation_dim":self.observation_dim,"action_dim":self.action_dim,"num_agents":self.num_agents,
             "training_seed":self.seed,"training_gamma":self.trainer.gamma,"training_num_envs":self.num_envs,
             "training_total_sampled_steps":self.total_sampled_steps,"training_smoke":self.smoke,
-            "effective_hidden_dim":self.effective_hidden_dim,"critic_type":"attention",
+            "effective_hidden_dim":self.effective_hidden_dim,"critic_type":self.trainer.critic_type,
             "network_architecture":dict(self.trainer.network_architecture),**counts,
             "environment_config_sha256":config_sha256(self.env_config),
             "algorithm_config_sha256":config_sha256(self.algorithm_config),

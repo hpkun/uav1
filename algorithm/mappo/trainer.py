@@ -93,6 +93,7 @@ class MAPPOTrainer:
         log_std_init: float = -.5,
         mean_head_init_gain: float = .01,
         target_kl: float | None = None,
+        critic_hidden_dim: int | None = None,
     ) -> None:
         self.device = torch.device(device)
         if self.device.type == "cuda" and not torch.cuda.is_available():
@@ -120,15 +121,19 @@ class MAPPOTrainer:
         self.critic_type=str(critic_type)
         if self.critic_type not in {"attention","mlp"}:raise ValueError(f"unsupported critic_type: {self.critic_type}")
         self.attention_heads=int(attention_heads)
+        self.actor_hidden_dim = int(hidden_dim)
+        self.critic_hidden_dim = int(hidden_dim if critic_hidden_dim is None else critic_hidden_dim)
+        if min(self.actor_hidden_dim, self.critic_hidden_dim) <= 0:
+            raise ValueError("actor/critic hidden dimensions must be positive")
 
         self.actor = SharedMAPPOActor(
             observation_dim, action_dim, hidden_dim, log_std_min, log_std_max,
             actor_activation, policy_std_mode, log_std_init, mean_head_init_gain,
         ).to(self.device)
         if self.critic_type=="attention":
-            self.critic=CentralizedValueCritic(observation_dim,hidden_dim,attention_heads,critic_activation).to(self.device)
+            self.critic=CentralizedValueCritic(observation_dim,self.critic_hidden_dim,attention_heads,critic_activation).to(self.device)
         else:
-            self.critic=CentralizedMLPCritic(observation_dim,num_agents,hidden_dim,critic_activation).to(self.device)
+            self.critic=CentralizedMLPCritic(observation_dim,num_agents,self.critic_hidden_dim,critic_activation).to(self.device)
         self.actor_optimizer = torch.optim.Adam(
             self.actor.parameters(), lr=actor_learning_rate
         )

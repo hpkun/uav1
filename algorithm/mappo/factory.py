@@ -4,22 +4,27 @@ from __future__ import annotations
 from typing import Any
 
 from .trainer import MAPPOTrainer
+from algorithm.common.critic_protocol import layer_width
 
 
 def build_mappo_trainer(
-    config: dict[str, Any], device: str, hidden_dim: int | None = None
+    config: dict[str, Any], device: str, hidden_dim: int | None = None,
+    critic_hidden_dim: int | None = None,
 ) -> MAPPOTrainer:
     """Build a formal MAPPO trainer without changing configured parameters."""
     network = config["network"]
     training = config["training"]
     implementation = config["implementation"]
+    actor_width = layer_width(network, "actor_hidden_layers")
+    critic_width = layer_width(network, "critic_hidden_layers")
     common = {
         "observation_dim": int(network["observation_dim"]),
         "action_dim": int(network["action_dim"]),
         "num_agents": int(network["num_agents"]),
         "hidden_dim": int(
-            network["actor_hidden_layers"][0] if hidden_dim is None else hidden_dim
+            actor_width if hidden_dim is None else hidden_dim
         ),
+        "critic_hidden_dim": critic_width if critic_hidden_dim is None else int(critic_hidden_dim),
         "attention_heads": int(network["attention_heads"]),
         "critic_type": str(network.get("critic_type", "attention")),
         "device": device,

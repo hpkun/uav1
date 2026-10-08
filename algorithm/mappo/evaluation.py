@@ -73,18 +73,11 @@ def evaluate_mappo_checkpoint(
         first_weight = state.get("actor", {}).get("backbone.0.weight")
         if hasattr(first_weight, "shape"):
             effective_hidden_dim = int(first_weight.shape[0])
-    configured_hidden_dim = int(
-        algorithm_config["network"]["actor_hidden_layers"][0]
+    from algorithm.common.critic_protocol import checkpoint_widths
+    actor_width, critic_width = checkpoint_widths(state)
+    trainer = build_mappo_trainer(
+        algorithm_config, device, hidden_dim=actor_width, critic_hidden_dim=critic_width
     )
-    if (
-        effective_hidden_dim is not None
-        and int(effective_hidden_dim) != configured_hidden_dim
-    ):
-        trainer = build_mappo_trainer(
-            algorithm_config, device, hidden_dim=int(effective_hidden_dim)
-        )
-    else:
-        trainer = build_mappo_trainer(algorithm_config, device)
     trainer.load(checkpoint)
     result: dict[str, Any] = dict(
         evaluate(trainer, environment_config, seeds)

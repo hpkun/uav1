@@ -14,10 +14,13 @@ def require_cuda(device):
 
 def architecture_from_config(config, smoke=False):
     n = config["network"]
-    return {**{key:n[key] for key in ("actor_type","entity_dim","entity_attention_heads",
+    architecture = {**{key:n[key] for key in ("actor_type","entity_dim","entity_attention_heads",
         "spatial_hidden_dim","gru_hidden_dim","gru_layers","recurrent_sequence_length","critic_type")},
         "critic_hidden_dim":64 if smoke else int(n["critic_hidden_layers"][0]),
-        "critic_attention_heads":int(n["attention_heads"]), **actor_architecture_protocol(config)}
+        **actor_architecture_protocol(config)}
+    if n["critic_type"] == "attention":
+        architecture["critic_attention_heads"] = int(n["attention_heads"])
+    return architecture
 
 
 def validate_checkpoint(state, env_config, algorithm_config):
@@ -39,6 +42,10 @@ def validate_checkpoint(state, env_config, algorithm_config):
         raise RuntimeError("incomplete STEA-MAPPO checkpoint protocol metadata")
     if extra["environment_version"] != env_config["environment_version"]:
         raise RuntimeError("STEA-MAPPO checkpoint environment_version mismatch")
+    if state.get("critic_type") != network["critic_type"]:
+        raise RuntimeError("STEA-MAPPO checkpoint critic_type mismatch")
+    if "critic_type" in extra and extra["critic_type"] != network["critic_type"]:
+        raise RuntimeError("STEA-MAPPO checkpoint extra critic_type mismatch")
     validate_policy_protocol(state, algorithm_config)
     expected = {"environment_version":env_config["environment_version"],"observation_dim":dimensions[0],"action_dim":dimensions[1],"num_agents":dimensions[2],
         "training_gamma":float(algorithm_config["training"]["gamma"]),
@@ -51,7 +58,7 @@ def validate_checkpoint(state, env_config, algorithm_config):
     architecture = architecture_from_config(algorithm_config,bool(extra["training_smoke"]))
     if state.get("network_architecture") != architecture or extra["network_architecture"] != architecture:
         raise RuntimeError("STEA-MAPPO network_architecture mismatch")
-    if state.get("critic_type") != "attention" or extra["effective_hidden_dim"] != architecture["critic_hidden_dim"]:
+    if state.get("critic_type") != architecture["critic_type"] or extra["effective_hidden_dim"] != architecture["critic_hidden_dim"]:
         raise RuntimeError("STEA-MAPPO critic architecture mismatch")
     actor_count = sum(value.numel() for value in state["actor"].values())
     critic_count = sum(value.numel() for value in state["critic"].values())

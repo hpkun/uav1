@@ -1,5 +1,7 @@
 # Multi-UAV Cooperative Air Combat
 
+当前正式 5v5 MAPPO 是 shared-parameter MAPPO with a centralized MLP critic；STEA-MAPPO 保留 entity-attention + GRU actor，并使用完全相同的 MLP critic。Actor/critic 宽度分别读取配置，旧 attention checkpoint 使用各自 run snapshots 继续评估。详见 [critic 协议](docs/centralized_critic_protocol.md)。下文的 4v4 说明保留原 v2.3 协议。
+
 这是一个面向 multi-UAV cooperative air combat 的多智能体强化学习研究代码库。任务为普通单回合 **4v4** 空战：4 架 Red UAV 使用共享的 learned policy，4 架 Blue UAV 使用确定性的 nearest-target pursuit policy。项目提供 **MAPPO** 和 **MADSAC** 两个独立 baseline，以及 Actor 使用实体注意力与 GRU 的独立变体 **STEA-MAPPO**。
 
 环境使用 NED 坐标下的 3DOF point-mass dynamics、RK4 integration 和 `dt=0.1 s`。每个 Red agent 接收 **52D observation**，输出 **3D continuous action**：heading、pitch、speed 的相对指令。物理环境技术版本为 **2.3**。

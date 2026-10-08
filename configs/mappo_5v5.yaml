@@ -1,5 +1,6 @@
 algorithm: MAPPO
 network:
+  critic_type: mlp
   observation_dim: 65
   action_dim: 3
   num_agents: 5

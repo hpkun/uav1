@@ -1,5 +1,9 @@
 # STEA-MAPPO v1
 
+## 当前正式 5v5 比较
+
+正式 5v5 MAPPO/STEA-MAPPO 均使用同一个 `CentralizedMLPCritic`（390→256→256→1，166,145 参数）。MAPPO 保留 shared MLP actor；STEA 保留 entity-attention + GRU actor（167,110 参数）和当前 state-independent Gaussian。主要结构差异是 actor representation。见 [centralized_critic_protocol.md](centralized_critic_protocol.md)。下文的 52D attention critic、state-dependent Gaussian 和计数描述原 v2.3 legacy 协议，继续支持旧 run snapshots。
+
 STEA-MAPPO（Spatial-Temporal Entity-Attention MAPPO）是独立算法变体，checkpoint 标识为 `STEA-MAPPO`，`STEA_MAPPO_IMPL_VERSION=1`。扁平观测缺少对不同友机、敌机相关性的显式建模，单帧输入也难以完整表达动态态势。本版本以实体注意力和 GRU 提供空间聚合与时间上下文；这些是结构动机，性能提升需要正式多 seed 对照实验验证。
 
 ## Actor 与 CTDE

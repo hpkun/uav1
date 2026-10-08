@@ -22,6 +22,7 @@ from algorithm.common.checkpoint import (
     validate_checkpoint_for_resume,
 )
 from algorithm.common.protocol import config_sha256
+from algorithm.common.critic_protocol import layer_width
 
 
 class MAPPOTrainingRunner:
@@ -50,7 +51,9 @@ class MAPPOTrainingRunner:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.rollout_steps = 4 if smoke else int(training["rollout_steps"])
-        hidden_dim = 64 if smoke else int(network["actor_hidden_layers"][0])
+        actor_width = layer_width(network, "actor_hidden_layers")
+        critic_width = layer_width(network, "critic_hidden_layers")
+        hidden_dim = 64 if smoke else actor_width
         self.effective_hidden_dim = hidden_dim
         self.trainer = MAPPOTrainer(
             self.observation_dim, self.action_dim, self.num_agents, hidden_dim,
@@ -71,6 +74,7 @@ class MAPPOTrainingRunner:
             log_std_init=float(implementation.get("log_std_init", -.5)),
             mean_head_init_gain=float(implementation.get("mean_head_init_gain", .01)),
             target_kl=training.get("target_kl"),
+            critic_hidden_dim=64 if smoke else critic_width,
         )
         evaluation_base = int(implementation["evaluation_seed_base"])
         self.evaluation_seeds = list(range(
@@ -106,7 +110,9 @@ class MAPPOTrainingRunner:
             "action_dim": self.action_dim, "num_agents": self.num_agents,
             "effective_hidden_dim": self.effective_hidden_dim,
             "critic_type": self.trainer.critic_type,
-            "attention_heads": self.trainer.attention_heads,
+            "attention_heads": self.trainer.attention_heads if self.trainer.critic_type == "attention" else "n/a",
+            "actor_hidden_dim": self.trainer.actor_hidden_dim,
+            "critic_hidden_dim": self.trainer.critic_hidden_dim,
             "actor_parameter_count":sum(p.numel() for p in self.trainer.actor.parameters()),
             "critic_parameter_count":sum(p.numel() for p in self.trainer.critic.parameters()),
             "total_parameter_count":sum(p.numel() for p in self.trainer.actor.parameters())+sum(p.numel() for p in self.trainer.critic.parameters()),
@@ -126,7 +132,7 @@ class MAPPOTrainingRunner:
         s = self.startup_summary()
         return (f"[START] algorithm=MAPPO | mode={s['mode']} | device={s['device']} "
                 f"| obs={s['observation_dim']} | act={s['action_dim']} | agents={s['num_agents']} "
-                f"| hidden={s['effective_hidden_dim']} | critic={s['critic_type']} | heads={s['attention_heads']} "
+                f"| hidden={s['effective_hidden_dim']} | actor_hidden={s['actor_hidden_dim']} | critic_hidden={s['critic_hidden_dim']} | critic={s['critic_type']} | heads={s['attention_heads']} "
                 f"| envs={s['num_envs_M']} | workers={s['environment_workers']} "
                 f"| backend={s['environment_backend']} | seed={s['seed']} "
                 f"| total={s['total_sampled_steps']} | rollout={s['rollout_steps']} "
@@ -348,10 +354,13 @@ class MAPPOTrainingRunner:
             "training_total_sampled_steps": self.total_sampled_steps,
             "training_smoke": self.smoke,
             "effective_hidden_dim": self.effective_hidden_dim,
+            "actor_hidden_dim": self.trainer.actor_hidden_dim,
+            "critic_hidden_dim": self.trainer.critic_hidden_dim,
             "critic_type":self.trainer.critic_type,
             "network_architecture": {
-                "hidden_dim": self.effective_hidden_dim,
-                "attention_heads": self.trainer.attention_heads,
+                "actor_hidden_dim": self.trainer.actor_hidden_dim,
+                "critic_hidden_dim": self.trainer.critic_hidden_dim,
+                **({"attention_heads": self.trainer.attention_heads} if self.trainer.critic_type == "attention" else {}),
                 "critic_type": self.trainer.critic_type,
             },
             "actor_parameter_count":sum(p.numel() for p in self.trainer.actor.parameters()),

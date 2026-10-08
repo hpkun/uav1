@@ -114,6 +114,7 @@ def test_formal_config_only_dimensions_and_budget_change(name):
     old=yaml.safe_load((ROOT/f'configs/{name}_8v8.yaml').read_text())
     new=yaml.safe_load((ROOT/f'configs/{name}_5v5.yaml').read_text())
     old['network'].update(observation_dim=65,num_agents=5)
+    old['network']['critic_type']='mlp'
     old['training']['total_sampled_steps']=3000000
     old['training'].update(entropy_coefficient=.001,target_kl=.015)
     old['implementation'].update(policy_std_mode='state_independent',log_std_init=-.5,

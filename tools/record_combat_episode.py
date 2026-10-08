@@ -93,10 +93,9 @@ def main() -> None:
         validate_checkpoint_for_evaluation(state, env_config, config)
         if extra.get('algorithm_config_sha256') != config_sha256(config):
             raise RuntimeError('checkpoint algorithm config fingerprint mismatch')
-        hidden = extra.get('effective_hidden_dim')
-        if hidden is None:
-            hidden = int(state['actor']['backbone.0.weight'].shape[0])
-        trainer = build_mappo_trainer(config, args.device, hidden)
+        from algorithm.common.critic_protocol import checkpoint_widths
+        actor_width, critic_width = checkpoint_widths(state)
+        trainer = build_mappo_trainer(config, args.device, actor_width, critic_width)
         trainer.load(checkpoint)
     elif algorithm == 'madsac':
         validate_madsac_checkpoint(state, env_config, config, expected_training_seed=extra['training_seed'])

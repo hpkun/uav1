@@ -239,7 +239,7 @@ def test_saturated_raw_actions_preserve_log_probability():
 
 
 @pytest.mark.parametrize('field,value',[('recurrent_sequence_length',3),('gru_layers',2),
-    ('entity_attention_heads',3),('actor_type','mlp'),('critic_type','mlp')])
+    ('entity_attention_heads',3),('actor_type','mlp'),('critic_type','unsupported')])
 def test_invalid_config_is_rejected(field,value):
     _,cfg = configs()
     cfg['network'][field] = value
