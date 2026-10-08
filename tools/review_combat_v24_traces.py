@@ -36,7 +36,6 @@ def review(folder,output):
                 assert 0<=event['distance']<=4000+1e-9
                 assert event['off_boresight']<=np.pi/6+1e-10
                 assert event['target_aspect']<=np.pi/4+1e-10
-                assert event['attacker_speed']>=event['target_speed']-1e-10
                 displacement=np.asarray(event['attacker_position'])-np.asarray(event['target_position'])
                 heading=event['target_heading']
                 projection=float(displacement[:2]@np.array([np.cos(heading),np.sin(heading)]))

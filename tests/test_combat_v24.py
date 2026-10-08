@@ -47,7 +47,7 @@ def state(x=0,y=0,z=-3000,v=250,psi=0,theta=0,alive=True):
     (state(x=1000),state(),True),
     (state(x=1000,psi=np.pi),state(),False),
     (state(x=1000,psi=np.pi/3),state(),False),
-    (state(x=1000,v=251),state(),False),
+    (state(x=1000,v=251),state(),True),
     (state(x=1000,v=250),state(v=250),True),
     (state(x=1000,z=-4000),state(),False),
     (state(x=4001),state(),False),
@@ -80,7 +80,7 @@ def pair_env(monkeypatch):
 def fire(env):
     return env._entry_attempts(env.red,env.blue,env.red_fire_states,'red')
 
-@pytest.mark.parametrize('invalid_condition',['range','cone','aspect','speed','target_dead','attacker_dead'])
+@pytest.mark.parametrize('invalid_condition',['range','cone','aspect','target_dead','attacker_dead'])
 def test_pair_invalid_then_reentry(monkeypatch,invalid_condition):
     env=pair_env(monkeypatch)
     assert fire(env)==[(0,0,False)]
@@ -89,13 +89,51 @@ def test_pair_invalid_then_reentry(monkeypatch,invalid_condition):
     if invalid_condition=='range': env.blue[0].x=5000
     if invalid_condition=='cone': env.blue[0].y=3000
     if invalid_condition=='aspect': env.blue[0].psi=np.pi
-    if invalid_condition=='speed': env.blue[0].v=251
     if invalid_condition=='target_dead': env.blue[0].alive=False
     if invalid_condition=='attacker_dead': env.red[0].alive=False
     assert fire(env)==[]
     assert env.red_fire_states.armed[0,0]
     env.blue[0]=original; env.red[0].alive=True
     assert fire(env)==[(0,0,False)]
+
+@pytest.mark.parametrize('attacker_speed',[200,250,300])
+def test_speed_does_not_affect_v24_qualification(attacker_speed):
+    env=MultiUAVCombatEnv(config())
+    a,b=state(v=attacker_speed),state(x=1000,v=250)
+    assert env.weapon.qualifies(engagement_geometry(a,b),a.v,b.v)
+    assert env._in_fire_window(a,b)
+    # The reverse-facing geometry remains invalid at every speed.
+    b.psi=np.pi
+    assert not env.weapon.qualifies(engagement_geometry(a,b),a.v,b.v)
+    assert not env._in_fire_window(a,b)
+
+def test_speed_crossing_does_not_rearm_pair(monkeypatch):
+    env=pair_env(monkeypatch)
+    assert fire(env)==[(0,0,False)]
+    for speed in (200,300,250):
+        env.red[0].v=speed
+        assert env._in_fire_window(env.red[0],env.blue[0])
+        assert fire(env)==[]
+        assert not env.red_fire_states.armed[0,0]
+
+@pytest.mark.parametrize('attacker_speed',[200,250,300])
+def test_audit_speed_is_diagnostic_only(attacker_speed):
+    from tools.audit_combat_v24 import summarize
+    row=dict(seed=40000000,red_success=False,blue_win=False,draw=False,
+             termination_reason='red_failure_timeout',episode_length=1000,kills=[])
+    for side in ('red','blue'):
+        for field in ('losses','fire_attempts','weapon_hits','attack_kills','boundary_exits','ground_losses'):
+            row[f'{side}_{field}']=0
+        row[f'{side}_survivors']=8
+        for event in ('fire_window','attempt','hit','kill'):
+            row[f'{side}_first_{event}_step']=None
+    row.update(red_fire_attempts=1,red_first_fire_window_step=1,red_first_attempt_step=1)
+    row['attempts']=[dict(step=1,side='red',attacker_index=0,target_index=0,
+        distance=1000,off_boresight=0,target_aspect=0,
+        attacker_speed=attacker_speed,target_speed=250,hit=False)]
+    result=summarize([row],config())
+    assert result['attack_qualification_violations']==[]
+    assert result['attack_geometry']['speed_advantage']['mean']==attacker_speed-250
 
 def test_pair_nearest_only_selected_disarmed_and_switch(monkeypatch):
     env=pair_env(monkeypatch); env.blue[1]=state(x=1500)

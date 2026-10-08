@@ -77,9 +77,9 @@ class RearAspectWeaponEnvelope(WeaponEnvelope):
 
     def qualifies(self, geometry: EngagementGeometry, attacker_speed: float,
                   target_speed: float) -> bool:
+        """Geometry-only qualification; retain speed arguments for API compatibility."""
         return bool(self.in_fire_window(geometry)
-                    and geometry.target_aspect <= self.target_aspect_angle_max
-                    and attacker_speed >= target_speed)
+                    and geometry.target_aspect <= self.target_aspect_angle_max)
 
 
 __all__ = ["FireState", "PairFireState", "WeaponEnvelope", "RearAspectWeaponEnvelope"]

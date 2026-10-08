@@ -150,7 +150,7 @@ class MultiUAVCombatEnv:
     def _in_fire_window(self, attacker: AircraftState, target: AircraftState) -> bool:
         if self.environment_version == "2.4":
             # Reject cheap necessary conditions before the full 3-D geometry.
-            if not attacker.alive or not target.alive or attacker.v < target.v:
+            if not attacker.alive or not target.alive:
                 return False
             dx, dy, dz = target.x-attacker.x, target.y-attacker.y, target.z-attacker.z
             distance = math.sqrt(dx*dx+dy*dy+dz*dz)

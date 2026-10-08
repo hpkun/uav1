@@ -140,8 +140,7 @@ def summarize(rows,config):
             for event in row["attempts"]:
                 if not (config["weapon"]["range_min"]-1e-9 <= event["distance"] <= config["weapon"]["range_max"]+1e-9
                     and event["off_boresight"] <= config["weapon"]["off_boresight_angle_max"]+1e-10
-                    and event["target_aspect"] <= config["weapon"]["target_aspect_angle_max"]+1e-10
-                    and event["attacker_speed"] >= event["target_speed"]-1e-10):
+                    and event["target_aspect"] <= config["weapon"]["target_aspect_angle_max"]+1e-10):
                     violations.append({"seed":row["seed"],**event})
     repeats=0; repeat_episodes=0
     for row in rows:
