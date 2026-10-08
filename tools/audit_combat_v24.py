@@ -135,7 +135,7 @@ def summarize(rows,config):
         "target_aspect":numeric_summary([a["target_aspect"] for a in attempts],{"p90":.9}),
         "speed_advantage":numeric_summary([a["attacker_speed"]-a["target_speed"] for a in attempts],{"p10":.1})}
     violations=[]
-    if config["environment_version"]=="2.4":
+    if config["environment_version"] in {"2.4", "2.5"}:
         for row in rows:
             for event in row["attempts"]:
                 if not (config["weapon"]["range_min"]-1e-9 <= event["distance"] <= config["weapon"]["range_max"]+1e-9
@@ -203,7 +203,7 @@ def main():
     parser.add_argument("--workers",type=int,choices=(1,2),default=2)
     parser.add_argument("--trace-count",type=int,default=10)
     parser.add_argument("--output-dir",type=Path,default=ROOT/"outputs/v24_combat_audit")
-    parser.add_argument("--versions",nargs="+",choices=("2.3","2.4"),default=("2.4","2.3"))
+    parser.add_argument("--versions",nargs="+",choices=("2.3","2.4","2.5"),default=("2.4","2.3"))
     args=parser.parse_args()
     if args.episodes<=0 or not 0<=args.trace_count<=args.episodes:
         parser.error("episodes positive; trace-count must be between zero and episodes")
@@ -213,7 +213,7 @@ def main():
     print("CUDA available: "+torch.cuda.get_device_name(),flush=True)
     reports={}
     for version in args.versions:
-        config=load_config(ROOT/("configs/combat_environment.yaml" if version=="2.3" else "configs/combat_environment_v24.yaml"))
+        config=load_config(ROOT/("configs/combat_environment.yaml" if version=="2.3" else f"configs/combat_environment_v{version.replace('.', '')}.yaml"))
         reports[version]=audit(config,args.episodes,args.seed_base,args.workers,args.output_dir,args.trace_count)
         (args.output_dir/"audit_report.json").write_text(json.dumps({"versions":reports},indent=2))
     if "2.3" in reports and "2.4" in reports:

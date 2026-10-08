@@ -6,8 +6,8 @@ def validate_config(config):
     if config.get("algorithm") != "STEA-MAPPO":
         raise ValueError("algorithm must be STEA-MAPPO")
     n,t,i = (config[key] for key in ("network","training","implementation"))
-    if n["num_agents"] not in (4,8) or n["observation_dim"] != 13*n["num_agents"] or n["action_dim"] != 3:
-        raise ValueError("STEA-MAPPO requires dimensions 52/3/4 or 104/3/8")
+    if n["num_agents"] not in (4,5,8) or n["observation_dim"] != 13*n["num_agents"] or n["action_dim"] != 3:
+        raise ValueError("STEA-MAPPO requires dimensions 52/3/4, 65/3/5 or 104/3/8")
     if n["actor_type"] != "stea" or n["critic_type"] != "attention":
         raise ValueError("STEA-MAPPO requires actor_type=stea and critic_type=attention")
     if i["actor_activation"] != "relu" or i["critic_activation"] != "relu":

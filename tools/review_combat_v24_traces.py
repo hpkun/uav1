@@ -14,8 +14,8 @@ def aircraft(row,side,index):
     s=row[side]
     return AircraftState(*s['positions'][index],s['speed'][index],s['pitch'][index],s['heading'][index],s['alive'][index])
 
-def review(folder,output):
-    env=MultiUAVCombatEnv(load_config(ROOT/'configs/combat_environment_v24.yaml'))
+def review(folder,output,version="2.4"):
+    env=MultiUAVCombatEnv(load_config(ROOT/f"configs/combat_environment_v{version.replace('.', '')}.yaml"))
     reports=[]; plot_candidates=[]
     paths=sorted(folder.glob('seed_*.jsonl'))
     if len(paths)<10: raise RuntimeError('At least ten traces required')
@@ -25,7 +25,7 @@ def review(folder,output):
         seen={}; repeats=[]; projections=[]; attempts=[]
         for row in rows:
             for side in ('red','blue'):
-                assert np.asarray(row[side]['positions']).shape==(8,3)
+                assert np.asarray(row[side]['positions']).shape==(env.team_size,3)
                 assert np.isfinite(row[side]['positions']).all() and np.isfinite(row[side]['speed']).all()
             used=set()
             for event in row['attempts']:
@@ -66,7 +66,7 @@ def review(folder,output):
     for path,rows in plot_candidates[:3]:
         fig=plt.figure(figsize=(11,8));ax=fig.add_subplot(111,projection='3d')
         for side,color in [('red','tab:red'),('blue','tab:blue')]:
-            for index in range(8):
+            for index in range(env.team_size):
                 points=[]
                 for row in rows:
                     points.append(row[side]['positions'][index])
@@ -77,7 +77,7 @@ def review(folder,output):
         xyz=np.asarray([event['attacker_position'],event['target_position']])
         ax.plot(xyz[:,0],xyz[:,1],-xyz[:,2],color='black',linewidth=3,label=f"First rear-qualified attempt, step {event['step']}")
         ax.scatter(xyz[:,0],xyz[:,1],-xyz[:,2],color=['darkorange','black'],s=40)
-        ax.set(xlabel='x (m)',ylabel='y (m)',zlabel='Altitude (m)',title=f'v2.4 mirrored nearest-target, {path.stem}')
+        ax.set(xlabel='x (m)',ylabel='y (m)',zlabel='Altitude (m)',title=f'v{version} mirrored nearest-target, {path.stem}')
         ax.legend();fig.tight_layout();fig.savefig(output/f'{path.stem}_3d.png',dpi=150);plt.close(fig)
     result={'traces_checked':len(reports),'all_geometry_valid':True,
         'all_attempts_from_rear':True,'all_repeated_pairs_have_invalid_intervals':True,
@@ -88,9 +88,9 @@ def review(folder,output):
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--trace-dir',type=Path,default=ROOT/'outputs/v24_combat_audit/v24/traces')
-    parser.add_argument('--output-dir',type=Path,default=ROOT/'outputs/v24_combat_audit/trace_review');args=parser.parse_args()
+    parser.add_argument('--output-dir',type=Path,default=ROOT/'outputs/v24_combat_audit/trace_review');parser.add_argument('--version',choices=('2.4','2.5'),default='2.4');args=parser.parse_args()
     import torch
     if not torch.cuda.is_available():raise RuntimeError('CUDA required for repository audits')
-    review(args.trace_dir,args.output_dir)
+    review(args.trace_dir,args.output_dir,args.version)
 
 if __name__=='__main__':main()

@@ -1,4 +1,4 @@
-"""Version-isolated Multi-UAV Combat Environments v2.3 and v2.4."""
+"""Version-isolated Multi-UAV Combat Environments v2.3, v2.4 and v2.5."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -34,6 +34,7 @@ class MultiUAVCombatEnv:
     ) -> None:
         self.config = load_config(config) if not isinstance(config, dict) else validate_config(config)
         self.environment_version = str(self.config["environment_version"])
+        self._uses_pair_rear_aspect_protocol = self.environment_version in {"2.4", "2.5"}
         self.observation_dim, self.action_dim, self.team_size = environment_dimensions(self.config)
         self.spec = aircraft_spec(self.config)
         self.dt = float(self.config["simulation"]["dt"])
@@ -44,7 +45,7 @@ class MultiUAVCombatEnv:
         self.fixed_policy = NearestTargetPursuitPolicy(
             self.config["blue_policy"], self.config["action"]
         )
-        weapon_class = WeaponEnvelope if self.environment_version == "2.3" else RearAspectWeaponEnvelope
+        weapon_class = RearAspectWeaponEnvelope if self._uses_pair_rear_aspect_protocol else WeaponEnvelope
         self.weapon = weapon_class(**self.config["weapon"])
         self.rng = np.random.default_rng()
         self.red: list[AircraftState] = []
@@ -59,7 +60,7 @@ class MultiUAVCombatEnv:
         self.episode_reward_components: dict[str, np.ndarray] = {}
 
     def _new_fire_states(self):
-        if self.environment_version == "2.4":
+        if self._uses_pair_rear_aspect_protocol:
             return PairFireState(self.team_size)
         return [FireState() for _ in range(self.team_size)]
 
@@ -148,7 +149,7 @@ class MultiUAVCombatEnv:
         return results[0], results[1], results[2], results[3]
 
     def _in_fire_window(self, attacker: AircraftState, target: AircraftState) -> bool:
-        if self.environment_version == "2.4":
+        if self._uses_pair_rear_aspect_protocol:
             # Reject cheap necessary conditions before the full 3-D geometry.
             if not attacker.alive or not target.alive:
                 return False
@@ -191,7 +192,7 @@ class MultiUAVCombatEnv:
         fire_states: list[FireState],
         side: str,
     ) -> list[tuple[int, int, bool]]:
-        if self.environment_version == "2.4":
+        if self._uses_pair_rear_aspect_protocol:
             return self._pair_entry_attempts(attackers, targets, fire_states, side)
         attempts: list[tuple[int, int, bool]] = []
         for attacker_index, attacker in enumerate(attackers):

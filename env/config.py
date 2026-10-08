@@ -9,7 +9,7 @@ from .models import AircraftSpec
 
 
 ENVIRONMENT_VERSION = "2.3"
-SUPPORTED_ENVIRONMENT_VERSIONS = frozenset({"2.3", "2.4"})
+SUPPORTED_ENVIRONMENT_VERSIONS = frozenset({"2.3", "2.4", "2.5"})
 
 
 def load_config(path: str | Path) -> dict[str, Any]:
@@ -40,21 +40,21 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     version = str(config["environment_version"])
     if version not in SUPPORTED_ENVIRONMENT_VERSIONS:
         raise ValueError(
-            f"environment_version must be 2.3 or 2.4, got "
+            f"environment_version must be 2.3, 2.4 or 2.5, got "
             f"{config['environment_version']}"
         )
-    expected_team_size = {"2.3": 4, "2.4": 8}[version]
+    expected_team_size = {"2.3": 4, "2.4": 8, "2.5": 5}[version]
     if config["scenario"].get("team_size") != expected_team_size:
         raise ValueError(f"environment_version {version} requires team_size={expected_team_size}")
     if len(config["scenario"].get("formation_offsets", [])) != expected_team_size:
         raise ValueError("formation_offsets length must equal version-specific team_size")
     weapon_fields = {"range_min", "range_max", "off_boresight_angle_max",
                      "effective_hit_distance", "attack_noise_scale", "height_noise_scale"}
-    if version == "2.4":
+    if version in {"2.4", "2.5"}:
         weapon_fields.add("target_aspect_angle_max")
     if set(config["weapon"]) != weapon_fields:
         raise ValueError(f"weapon schema mismatch for environment_version {version}")
-    if version == "2.4" and not 0 < float(config["weapon"]["target_aspect_angle_max"]) <= 3.141592653589793:
+    if version in {"2.4", "2.5"} and not 0 < float(config["weapon"]["target_aspect_angle_max"]) <= 3.141592653589793:
         raise ValueError("target_aspect_angle_max must be in (0, pi]")
     return config
 
