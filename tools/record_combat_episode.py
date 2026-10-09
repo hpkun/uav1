@@ -1,4 +1,4 @@
-"""Record a deterministic combat episode from either baseline checkpoint."""
+"""Record deterministic combat using each algorithm's official checkpoint contract."""
 import argparse
 from pathlib import Path
 from typing import Any
@@ -37,9 +37,20 @@ def record(trainer: Any, env_config: dict[str, Any], seed: int, output_dir: str 
     transitions = {key: [] for key in TRANSITION_FIELDS}
     append_frame(frames, env)
     start = time.monotonic()
+    recurrent = hasattr(getattr(trainer, 'actor', None), 'gru_hidden_dim')
+    if recurrent:
+        hidden = np.zeros((env.team_size, trainer.actor.gru_hidden_dim), dtype=np.float32)
+        episode_start = np.array(1., dtype=np.float32)
     while True:
-        action = trainer.act(observation[None], env.red_alive_mask[None], deterministic=True)[0]
+        if recurrent:
+            action, _, _, hidden = trainer.act(observation, env.red_alive_mask,
+                hidden, episode_start, deterministic=True)
+        else:
+            action = trainer.act(observation[None], env.red_alive_mask[None], deterministic=True)[0]
         observation, reward, terminated, truncated, info = env.step(action)
+        if recurrent:
+            hidden *= env.red_alive_mask[:, None]
+            episode_start = np.array(0., dtype=np.float32)
         transitions['red_actions'].append(info['executed_red_actions'])
         transitions['local_rewards'].append(reward)
         transitions['reward_components'].append(np.stack([info[f'{name}_rewards'] for name in ('r1', 'r2', 'r3', 'r4')]))
@@ -47,6 +58,8 @@ def record(trainer: Any, env_config: dict[str, Any], seed: int, output_dir: str 
         transitions['truncated'].append(truncated)
         append_frame(frames, env)
         if terminated or truncated:
+            if recurrent:
+                hidden.fill(0.)
             break
         if wall_timeout_s > 0 and time.monotonic() - start > wall_timeout_s:
             raise RuntimeError('recording exceeded wall timeout')
@@ -70,6 +83,47 @@ def record(trainer: Any, env_config: dict[str, Any], seed: int, output_dir: str 
     return result
 
 
+def load_recording_policy(checkpoint, env_config, config, device='cuda'):
+    """Use official validation, factory and load; no alternate actor implementation."""
+    if torch.device(device).type != 'cuda' or not torch.cuda.is_available():
+        raise RuntimeError('CUDA is required for checkpoint recording')
+    checkpoint = Path(checkpoint)
+    state = torch.load(checkpoint, map_location='cpu', weights_only=False)
+    extra = state.get('extra', {})
+    algorithm = str(state['algorithm']).lower()
+    if algorithm == 'mappo':
+        validate_checkpoint_for_evaluation(state, env_config, config)
+        if extra.get('algorithm_config_sha256') != config_sha256(config):
+            raise RuntimeError('checkpoint algorithm config fingerprint mismatch')
+        from algorithm.common.critic_protocol import checkpoint_widths
+        actor_width, critic_width = checkpoint_widths(state)
+        trainer = build_mappo_trainer(config, device, actor_width, critic_width)
+        trainer.load(checkpoint)
+    elif algorithm == 'madsac':
+        validate_madsac_checkpoint(state, env_config, config, expected_training_seed=extra['training_seed'])
+        trainer = build_madsac_trainer(config, device, extra['network_architecture']['hidden_dim'], extra['training_seed'])
+        trainer.load_for_evaluation(checkpoint)
+    else:
+        import importlib
+        modules = {'rmappo': 'rmappo', 'ea-mappo': 'ea_mappo', 'stea-mappo': 'stea_mappo'}
+        if algorithm not in modules:
+            raise ValueError(f'unsupported algorithm: {algorithm}')
+        name = modules[algorithm]
+        protocol = importlib.import_module(f'algorithm.{name}.protocol')
+        factory = importlib.import_module(f'algorithm.{name}.factory')
+        protocol.validate_checkpoint(state, env_config, config)
+        trainer = getattr(factory, f'build_{name}_trainer')(config, device,
+            seed=extra['training_seed'], smoke=bool(extra['training_smoke']))
+        trainer.load(checkpoint)
+    return trainer, state, {'algorithm': state['algorithm'], 'checkpoint_path': str(checkpoint),
+        'checkpoint_sha256': checkpoint_sha256(checkpoint),
+        'checkpoint_sampled_steps': int(state['sampled_steps']),
+        'training_seed': extra.get('training_seed'),
+        'observation_dim': extra.get('observation_dim'), 'action_dim': extra.get('action_dim'),
+        'num_agents': extra.get('num_agents'),
+        'algorithm_config_sha256': config_sha256(config)}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--checkpoint', required=True)
@@ -86,29 +140,14 @@ def main() -> None:
     state = torch.load(checkpoint, map_location='cpu', weights_only=False)
     extra = state.get('extra', {})
     algorithm = str(state['algorithm']).lower()
-    config_path = args.algorithm_config or f'configs/{algorithm}.yaml'
+    snapshot = checkpoint.parent / 'algorithm_config.yaml'
+    config_path = args.algorithm_config or (snapshot if snapshot.exists() else f'configs/{algorithm}.yaml')
     config = yaml.safe_load(resolved(config_path).read_text(encoding='utf-8'))
     env_config = yaml.safe_load(resolved(args.env_config).read_text(encoding='utf-8'))
-    if algorithm == 'mappo':
-        validate_checkpoint_for_evaluation(state, env_config, config)
-        if extra.get('algorithm_config_sha256') != config_sha256(config):
-            raise RuntimeError('checkpoint algorithm config fingerprint mismatch')
-        from algorithm.common.critic_protocol import checkpoint_widths
-        actor_width, critic_width = checkpoint_widths(state)
-        trainer = build_mappo_trainer(config, args.device, actor_width, critic_width)
-        trainer.load(checkpoint)
-    elif algorithm == 'madsac':
-        validate_madsac_checkpoint(state, env_config, config, expected_training_seed=extra['training_seed'])
-        trainer = build_madsac_trainer(config, args.device, extra['network_architecture']['hidden_dim'], extra['training_seed'])
-        trainer.load_for_evaluation(checkpoint)
-    else:
-        raise ValueError(f'unsupported algorithm: {algorithm}')
+    trainer, state, provenance = load_recording_policy(checkpoint, env_config, config, args.device)
     result = record(trainer, env_config, args.episode_seed, resolved(args.output_dir),
-        {'algorithm': algorithm.upper(), 'checkpoint_path': str(checkpoint),
-         'checkpoint_sha256': checkpoint_sha256(checkpoint),
-         'checkpoint_sampled_steps': int(state['sampled_steps']),
-         'algorithm_config_sha256': config_sha256(config)}, args.wall_timeout_s)
-    print(result)
+        provenance, args.wall_timeout_s)
+    print({key: value for key, value in result.items() if key != 'events'})
 
 
 if __name__ == '__main__':

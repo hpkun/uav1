@@ -12,10 +12,12 @@ from tools.combat_visualization import read_trace
 
 
 def render(trace_path: str | Path, metadata_path: str | Path, output: str | Path,
-           stride: int = 4) -> Path:
+           stride: int = 4, playback_speed: float = 1.) -> Path:
     import plotly.graph_objects as go
     if stride <= 0:
         raise ValueError('stride must be positive')
+    if not np.isfinite(playback_speed) or playback_speed <= 0:
+        raise ValueError('playback speed must be finite and positive')
     trace = read_trace(trace_path)
     metadata = json.loads(Path(metadata_path).read_text(encoding='utf-8'))
     radius = float(metadata['arena_radius'])
@@ -29,7 +31,7 @@ def render(trace_path: str | Path, metadata_path: str | Path, output: str | Path
         for side, color, label in (('red', '#df3348', 'R'), ('blue', '#2484d0', 'B')):
             alive = trace[f'{side}_alive']
             values = trace[f'{side}_kinematics']
-            for agent in range(4):
+            for agent in range(alive.shape[1]):
                 deaths = np.flatnonzero(~alive[:frame+1, agent])
                 last = int(deaths[0]) if len(deaths) else frame
                 path = values[:last+1, agent]
@@ -60,19 +62,26 @@ def render(trace_path: str | Path, metadata_path: str | Path, output: str | Path
         return f"Combat | step {trace['steps'][frame]} | {trace['time_s'][frame]:.1f}s | Red {red} / Blue {blue} | {', '.join(current)}{ending}"
 
     fig = go.Figure(data=data_at(0))
-    fig.frames = [go.Frame(name=str(frame), data=data_at(frame), traces=list(range(18)),
+    fig.frames = [go.Frame(name=str(frame), data=data_at(frame), traces=list(range(len(fig.data))),
                            layout=go.Layout(title=title(frame))) for frame in indices]
     angle = np.linspace(0, 2*np.pi, 120)
     fig.add_trace(go.Scatter3d(x=radius*np.cos(angle), y=radius*np.sin(angle), z=np.zeros_like(angle),
                              mode='lines', line=dict(color='gray', width=2), name='Arena'))
     altitude = max(4000, max(float(-trace[f'{side}_kinematics'][:, :, 2].min()) for side in ('red', 'blue')))
-    animation = dict(frame=dict(duration=80, redraw=True), transition=dict(duration=0), fromcurrent=True)
+    def animation(speed):
+        return dict(frame=dict(duration=1000*metadata['dt']*stride/speed, redraw=True),
+                    transition=dict(duration=0), fromcurrent=True)
+    play_buttons = [dict(label=f'Play ({playback_speed:g}x)', method='animate', args=[None, animation(playback_speed)])]
+    play_buttons.extend(dict(label=f'Play ({speed:g}x)', method='animate', args=[None, animation(speed)])
+                        for speed in (.25, .5, 1., 2.) if speed != playback_speed)
+    play_buttons.append(dict(label='Pause', method='animate',
+        args=[[None], dict(frame=dict(duration=0, redraw=False), mode='immediate')]))
     fig.update_layout(title=title(0), uirevision='combat-replay',
         scene=dict(xaxis=dict(title='X (m)', range=[-radius, radius]),
                    yaxis=dict(title='Y (m)', range=[-radius, radius]),
-                   zaxis=dict(title='Altitude (m)', range=[0, altitude]), aspectmode='cube', dragmode='orbit'),
-        updatemenus=[dict(type='buttons', buttons=[dict(label='Play', method='animate', args=[None, animation]),
-            dict(label='Pause', method='animate', args=[[None], dict(frame=dict(duration=0, redraw=False), mode='immediate')])])],
+                   zaxis=dict(title='Altitude (m)', range=[0, altitude]), aspectmode='cube',
+                   dragmode='orbit', uirevision='combat-camera'),
+        updatemenus=[dict(type='buttons', buttons=play_buttons)],
         sliders=[dict(active=0, steps=[dict(label=f"{trace['time_s'][frame]:.1f}s", method='animate',
             args=[[str(frame)], dict(mode='immediate', frame=dict(duration=0, redraw=True), transition=dict(duration=0))]) for frame in indices])])
     output = Path(output)
@@ -88,8 +97,9 @@ def main() -> None:
     parser.add_argument('--metadata', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--stride', type=int, default=4)
+    parser.add_argument('--playback-speed', type=float, default=1.)
     args = parser.parse_args()
-    print(render(args.trace, args.metadata, args.output, args.stride))
+    print(render(args.trace, args.metadata, args.output, args.stride, args.playback_speed))
 
 
 if __name__ == '__main__':

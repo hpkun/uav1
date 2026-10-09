@@ -7,6 +7,7 @@ import numpy as np
 from env.combat_env import MultiUAVCombatEnv
 from env.models import AircraftState
 from env.weapon import FireState
+from env.geometry import engagement_geometry
 
 TRACE_SCHEMA_VERSION = 2
 FEATURE_NAMES = ['x', 'y', 'z', 'v', 'theta', 'psi']
@@ -28,8 +29,15 @@ class RecordingCombatEnv(MultiUAVCombatEnv):
                         fire_states: list[FireState], side: str) -> list[tuple[int, int, bool]]:
         attempts = super()._entry_attempts(attackers, targets, fire_states, side)
         for attacker, target, hit in attempts:
+            # Capture the actual firing state before simultaneous kills mutate alive flags.
+            geometry = engagement_geometry(attackers[attacker], targets[target])
             self.events.append({'type': 'fire_attempt', 'step': self.steps, 'side': side,
                                 'attacker': attacker, 'target': target, 'hit': bool(hit),
+                                'attacker_state': attackers[attacker].as_array().tolist(),
+                                'target_state': targets[target].as_array().tolist(),
+                                'distance': geometry.distance,
+                                'off_boresight': geometry.off_boresight,
+                                'target_aspect': geometry.target_aspect,
                                 'start': attackers[attacker].as_array()[:3].tolist(),
                                 'end': targets[target].as_array()[:3].tolist()})
         return attempts
@@ -74,7 +82,9 @@ def read_trace(path: str | Path) -> dict[str, np.ndarray]:
         raise ValueError('unsupported combat trace schema')
     count = len(trace['steps'])
     for side in ('red', 'blue'):
-        if trace[f'{side}_kinematics'].shape != (count, 4, 6) or trace[f'{side}_alive'].shape != (count, 4):
+        values, alive = trace[f'{side}_kinematics'], trace[f'{side}_alive']
+        if (values.ndim != 3 or values.shape[0] != count or values.shape[2] != 6
+                or values.shape[1] <= 0 or alive.shape != values.shape[:2]):
             raise ValueError('invalid combat trace shape')
     return trace
 

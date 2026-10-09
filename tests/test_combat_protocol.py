@@ -35,6 +35,7 @@ def test_factory_and_public_api_are_combat_only():
     assert sorted(p.name for p in (ROOT / 'configs').glob('*.yaml')) == [
         'combat_environment.yaml', 'combat_environment_v24.yaml', 'combat_environment_v25.yaml',
         'ea_mappo_5v5.yaml', 'ea_mappo_8v8.yaml',
+        'maddpg_5v5.yaml', 'maddpg_8v8.yaml',
         'madsac.yaml', 'mappo.yaml', 'mappo_5v5.yaml', 'mappo_8v8.yaml',
         'mappo_8v8_formal.yaml', 'rmappo_5v5.yaml', 'rmappo_8v8.yaml',
         'stea_mappo.yaml', 'stea_mappo_5v5.yaml', 'stea_mappo_8v8.yaml',

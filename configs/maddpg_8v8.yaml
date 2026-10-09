@@ -1,0 +1,41 @@
+algorithm: maddpg
+network:
+  observation_dim: 104
+  action_dim: 3
+  num_agents: 8
+  actor_hidden_layers: [256, 256]
+  critic_hidden_layers: [256, 256]
+training:
+  optimizer: Adam
+  actor_learning_rate: 0.0001
+  critic_learning_rate: 0.0001
+  gamma: 0.99
+  tau: 0.001
+  replay_capacity: 1000000
+  minibatch_size: 1024
+  learning_starts: 10000
+  gradient_steps_per_vector_step: 1
+  num_train_envs: 16
+  total_sampled_steps: 3000000
+  evaluation_episodes: 20
+  evaluation_interval_sampled_steps: 100000
+  device: cuda
+  seed: 0
+implementation:
+  noise_type: ou
+  ou_theta: 0.15
+  ou_sigma: 0.20
+  ou_mu: 0.0
+  exploration_scale_start: 1.0
+  exploration_scale_end: 0.1
+  exploration_decay_sampled_steps: 3000000
+  evaluation_mode: deterministic
+  evaluation_seed_base: 10000000
+  checkpoint_interval_sampled_steps: 500000
+runtime_logging:
+  console_interval_sampled_steps: 20000
+  recent_episode_window: 100
+metadata:
+  algorithm_structure: classic CTDE MADDPG with independent local deterministic actors and one centralized MLP Q per agent
+  project_training_choice: All numerical hyperparameters and linear OU scale decay are project experimental settings, not claimed as original Lowe MPE hyperparameters.
+  formal_exact_resume_supported: false
