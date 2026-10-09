@@ -27,6 +27,7 @@ from algorithm.ea_mappo.evaluation import evaluate_ea_mappo_checkpoint
 from algorithm.stea_mappo.evaluation import evaluate_stea_mappo_checkpoint
 from algorithm.rmappo.protocol import require_cuda
 from algorithm.common.protocol import config_sha256
+from env.config import environment_dimensions
 
 ALGORITHMS={
     'mappo':('mappo_8v8_formal',MAPPOTrainingRunner,evaluate_mappo_checkpoint),
@@ -53,9 +54,17 @@ def run_smokes(output, names, seed=31, env_config=None):
     env_path=Path(env_config) if env_config else ROOT/'configs/combat_environment_v24.yaml'
     env_bytes=env_path.read_bytes()
     env=yaml.safe_load(env_bytes)
+    obs_dim,action_dim,agents=environment_dimensions(env)
+    if agents not in (5,8):
+        raise ValueError('formal smoke requires 5v5 or 8v8')
+    critic_input_dim=(agents+1)*obs_dim
+    expected_critic_count={5:166145,8:305921}[agents]
     records={};reference=None
     for name in names:
         stem,runner_class,evaluator=ALGORITHMS[name]
+        if agents==5:
+            stem={'mappo':'mappo_5v5','rmappo':'rmappo_5v5',
+                  'ea-mappo':'ea_mappo_5v5','stea-mappo':'stea_mappo_5v5'}[name]
         config_path=ROOT/f'configs/{stem}.yaml'
         cfg=yaml.safe_load(config_path.read_text())
         run=output/name
@@ -69,8 +78,8 @@ def run_smokes(output, names, seed=31, env_config=None):
                 assert initial.keys()==reference.keys()
                 assert all(torch.equal(v,reference[k]) for k,v in initial.items())
             startup=runner.startup_summary()
-            assert runner.trainer.critic.value_network[0].in_features==936
-            assert startup['critic_parameter_count']==305921
+            assert runner.trainer.critic.value_network[0].in_features==critic_input_dim
+            assert startup['critic_parameter_count']==expected_critic_count
             assert runner.trainer.ppo_epochs==10 and runner.trainer.minibatch_size==512
             assert runner.rollout_steps==256 and runner.trainer.target_kl==.015
             (run/'env_config.yaml').write_bytes(env_bytes)
@@ -97,12 +106,12 @@ def run_smokes(output, names, seed=31, env_config=None):
             assert metrics['pre_update_ratio_max_abs_error']<1e-4
         assert all(torch.isfinite(p).all() for m in (runner.trainer.actor,runner.trainer.critic) for p in m.parameters())
         with torch.no_grad():
-            values=runner.trainer.critic(torch.ones(2,8,104,device='cuda'),torch.ones(2,8,device='cuda'))
+            values=runner.trainer.critic(torch.ones(2,agents,obs_dim,device='cuda'),torch.ones(2,agents,device='cuda'))
             assert torch.isfinite(values).all()
         checkpoint=run/'latest.pt'
         state=torch.load(checkpoint,map_location='cpu',weights_only=False)
         extra=state['extra']
-        assert tuple(extra[k] for k in ('observation_dim','action_dim','num_agents'))==(104,3,8)
+        assert tuple(extra[k] for k in ('observation_dim','action_dim','num_agents'))==(obs_dim,action_dim,agents)
         assert extra['environment_version']==env['environment_version'] and extra['training_total_sampled_steps']==512
         seeds=range(int(cfg['implementation']['evaluation_seed_base']),int(cfg['implementation']['evaluation_seed_base'])+2)
         evaluation=evaluator(checkpoint,cfg,env,'cuda',seeds)
@@ -111,7 +120,7 @@ def run_smokes(output, names, seed=31, env_config=None):
         records[name]={'algorithm':cfg['algorithm'],'sampled_steps':512,'num_envs':16,
             'formal_network_and_ppo':True,'configured_rollout_steps':256,'actual_final_rollout_steps':32,
             'actor_parameter_count':startup['actor_parameter_count'],
-            'critic_parameter_count':startup['critic_parameter_count'],'critic_input_dim':936,
+            'critic_parameter_count':startup['critic_parameter_count'],'critic_input_dim':critic_input_dim,
             'critic_initial_sha256':fingerprint(initial),'finite_gradients_parameters_and_values':True,
             'metrics':metrics,'evaluation_after_checkpoint_reload':evaluation}
         print(f'[SMOKE-DONE] {cfg["algorithm"]}: epochs={metrics["effective_ppo_epochs"]}, '

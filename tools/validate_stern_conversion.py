@@ -115,8 +115,8 @@ def main():
     if not 1 <= args.trials <= 200:
         raise ValueError('bounded validation requires 1..200 trials')
     config = load_config(args.env_config)
-    if str(config['environment_version']) != '2.6':
-        raise ValueError('Stern validation requires v2.6')
+    if str(config['environment_version']) not in {'2.6', '2.7'}:
+        raise ValueError('Stern validation requires v2.6 or v2.7')
     result = validate(config, args.trials, args.seed_base)
     path = Path(args.output)
     path.parent.mkdir(parents=True, exist_ok=True)

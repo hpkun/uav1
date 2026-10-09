@@ -21,8 +21,8 @@ class RMAPPOTrainingRunner(MAPPOTrainingRunner):
         t,n,i = (algorithm_config[key] for key in ("training","network","implementation"))
         self.device = str(t["device"] if device is None else device)
         require_cuda(self.device)
-        if str(env_config["environment_version"]) not in {"2.4","2.5","2.6"}:
-            raise ValueError("formal control requires environment_version 2.4, 2.5 or 2.6")
+        if str(env_config["environment_version"]) not in {"2.4","2.5","2.6","2.7"}:
+            raise ValueError("formal control requires environment_version 2.4, 2.5, 2.6 or 2.7")
         self.observation_dim,self.action_dim,self.num_agents = environment_dimensions(env_config)
         if (n["observation_dim"],n["action_dim"],n["num_agents"]) != (self.observation_dim,self.action_dim,self.num_agents):
             raise ValueError("RMAPPO network/environment dimension mismatch")

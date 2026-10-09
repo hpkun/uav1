@@ -9,7 +9,7 @@ from .models import AircraftSpec
 
 
 ENVIRONMENT_VERSION = "2.3"
-SUPPORTED_ENVIRONMENT_VERSIONS = frozenset({"2.3", "2.4", "2.5", "2.6"})
+SUPPORTED_ENVIRONMENT_VERSIONS = frozenset({"2.3", "2.4", "2.5", "2.6", "2.7"})
 
 
 def load_config(path: str | Path) -> dict[str, Any]:
@@ -40,37 +40,37 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     version = str(config["environment_version"])
     if version not in SUPPORTED_ENVIRONMENT_VERSIONS:
         raise ValueError(
-            f"environment_version must be 2.3, 2.4, 2.5 or 2.6, got "
+            f"environment_version must be 2.3, 2.4, 2.5, 2.6 or 2.7, got "
             f"{config['environment_version']}"
         )
-    expected_team_size = {"2.3": 4, "2.4": 8, "2.5": 5, "2.6": 8}[version]
+    expected_team_size = {"2.3": 4, "2.4": 8, "2.5": 5, "2.6": 8, "2.7": 5}[version]
     if config["scenario"].get("team_size") != expected_team_size:
         raise ValueError(f"environment_version {version} requires team_size={expected_team_size}")
     if len(config["scenario"].get("formation_offsets", [])) != expected_team_size:
         raise ValueError("formation_offsets length must equal version-specific team_size")
     weapon_fields = {"range_min", "range_max", "off_boresight_angle_max",
                      "effective_hit_distance", "attack_noise_scale", "height_noise_scale"}
-    if version in {"2.4", "2.5", "2.6"}:
+    if version in {"2.4", "2.5", "2.6", "2.7"}:
         weapon_fields.add("target_aspect_angle_max")
     if set(config["weapon"]) != weapon_fields:
         raise ValueError(f"weapon schema mismatch for environment_version {version}")
-    if version in {"2.4", "2.5", "2.6"} and not 0 < float(config["weapon"]["target_aspect_angle_max"]) <= 3.141592653589793:
+    if version in {"2.4", "2.5", "2.6", "2.7"} and not 0 < float(config["weapon"]["target_aspect_angle_max"]) <= 3.141592653589793:
         raise ValueError("target_aspect_angle_max must be in (0, pi]")
-    if version == "2.6":
+    if version in {"2.6", "2.7"}:
         import math
         fields = {"desired_speed", "turn_angle", "turn_range", "required_lateral_displacement", "conversion_range"}
         blue = config["blue_policy"]
         if not isinstance(blue, dict) or set(blue) != fields:
-            raise ValueError("v2.6 blue_policy schema mismatch")
+            raise ValueError(f"v{version} blue_policy schema mismatch")
         values = {k: float(blue[k]) for k in fields}
         if not all(math.isfinite(v) for v in values.values()):
-            raise ValueError("v2.6 blue_policy values must be finite")
+            raise ValueError(f"v{version} blue_policy values must be finite")
         if not (150 <= values["desired_speed"] <= 300
                 and 0 < values["turn_angle"] < math.pi/2
                 and values["turn_range"] > 0
                 and values["required_lateral_displacement"] > 0
                 and values["required_lateral_displacement"] < values["conversion_range"] <= float(config["weapon"]["range_max"])):
-            raise ValueError("invalid v2.6 blue_policy geometry/speed parameters")
+            raise ValueError(f"invalid v{version} blue_policy geometry/speed parameters")
     return config
 
 
