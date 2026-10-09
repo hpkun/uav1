@@ -114,11 +114,66 @@ def test_four_phase_conditions_and_heading_semantics():
     b.x=9000;p.action(b,[t]);assert s.phase is SternPhase.CONVERT
 
 
-@pytest.mark.parametrize('index,lateral,side',[(0,0,1),(1,0,-1),(0,10,1),(1,-10,-1)])
+@pytest.mark.parametrize('index,lateral,side',[(0,0,1),(1,0,-1),(0,1e-6,1),(1,-1e-6,-1)])
 def test_deterministic_turn_side(index,lateral,side):
     p=policy();b=aircraft(6000,lateral,np.pi);t=aircraft()
     p.action(b,[t],index);p.action(b,[t],index)
     assert p.states[index].turn_side==side
+
+
+@pytest.mark.parametrize('target_heading',[0.,.7,-1.2])
+@pytest.mark.parametrize('lateral',[-100.,100.])
+@pytest.mark.parametrize('heading_offset',[-.1,0.,.1])
+def test_nonzero_lateral_selects_outward_candidate(target_heading,lateral,heading_offset):
+    p=policy();t=aircraft(psi=target_heading)
+    b=aircraft(6000*np.cos(target_heading)-lateral*np.sin(target_heading),
+               6000*np.sin(target_heading)+lateral*np.cos(target_heading),
+               wrap_angle(target_heading+np.pi+heading_offset))
+    p.action(b,[t]);p.action(b,[t])
+    s=p.states[0]
+    assert s.phase is SternPhase.RELATIVE_BEARING
+    candidates=[wrap_angle(b.psi+p.config['turn_angle']),wrap_angle(b.psi-p.config['turn_angle'])]
+    scores=[np.sign(lateral)*np.sin(h-t.psi) for h in candidates]
+    selected=np.sign(lateral)*np.sin(s.relative_bearing_heading-t.psi)
+    assert selected>0 and selected==max(scores)
+    assert s.relative_bearing_heading==candidates[0 if s.turn_side==1 else 1]
+    if heading_offset==0 and target_heading==0:
+        assert s.turn_side==(-1 if lateral>0 else 1)
+
+
+@pytest.mark.parametrize('lateral',[-100.,100.])
+def test_real_dynamics_initial_lateral_motion_is_outward(lateral):
+    from env.config import aircraft_spec
+    from env.control import action_to_control
+    from env.integrator import RK4Integrator
+    from env.dynamics import PointMassDynamics
+    from env.models import ControlCommand
+    p=policy();t=aircraft();b=aircraft(6000,lateral,np.pi)
+    p.action(b,[t]);action=p.action(b,[t])
+    stored=p.states[0].relative_bearing_heading
+    cfg=config();integrator=RK4Integrator(cfg['simulation']['dt'])
+    dynamics=PointMassDynamics();spec=aircraft_spec(cfg)
+    before=abs(p.target_coordinates(b,t)[1])
+    for _ in range(10):
+        b=integrator.step(b,action_to_control(b,action,cfg['action']),dynamics,spec)
+        t=integrator.step(t,ControlCommand(0,1,0),dynamics,spec)
+        after=abs(p.target_coordinates(b,t)[1])
+        assert after>before
+        before=after;action=p.action(b,[t])
+        assert p.states[0].relative_bearing_heading==stored
+
+
+@pytest.mark.parametrize('index',[0,1])
+def test_exact_score_tie_uses_parity(index,monkeypatch):
+    # Symmetric scores with a nonzero lateral: explicitly exercise exact
+    # floating-point equality, without broadening it to a tolerance rule.
+    original=np.sin
+    def symmetric_sin(angle):
+        return 1. if 1. < angle < 2. else original(angle)
+    monkeypatch.setattr('env.fixed_policy.np.sin',symmetric_sin)
+    p=policy();b=aircraft(6000,100,np.pi/2);t=aircraft()
+    p.action(b,[t],index);p.action(b,[t],index)
+    assert p.states[index].turn_side==(1 if index%2==0 else -1)
 
 
 @pytest.mark.parametrize('phase',list(SternPhase))

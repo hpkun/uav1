@@ -118,8 +118,20 @@ class SternConversionPolicy(NearestTargetPursuitPolicy):
         cfg = self.config
         if not reacquired:
             if state.phase is SternPhase.PURE_PURSUIT and distance <= cfg["turn_range"]:
-                state.turn_side = (1 if lateral > 0 else -1) if abs(lateral) > 1e-6 else (1 if aircraft_index % 2 == 0 else -1)
-                state.relative_bearing_heading = float(wrap_angle(own.psi + state.turn_side*cfg["turn_angle"]))
+                parity_side = 1 if aircraft_index % 2 == 0 else -1
+                candidate_plus = float(wrap_angle(own.psi + cfg["turn_angle"]))
+                candidate_minus = float(wrap_angle(own.psi - cfg["turn_angle"]))
+                state.turn_side = parity_side
+                if abs(lateral) > 1e-6:
+                    # Project each existing heading candidate onto the target's
+                    # left axis, choosing the larger outward lateral motion.
+                    score_plus = np.sign(lateral) * np.sin(candidate_plus - target.psi)
+                    score_minus = np.sign(lateral) * np.sin(candidate_minus - target.psi)
+                    if score_plus > score_minus:
+                        state.turn_side = 1
+                    elif score_minus > score_plus:
+                        state.turn_side = -1
+                state.relative_bearing_heading = candidate_plus if state.turn_side == 1 else candidate_minus
                 state.phase = SternPhase.RELATIVE_BEARING
             elif state.phase is SternPhase.RELATIVE_BEARING and abs(lateral) >= cfg["required_lateral_displacement"]:
                 state.phase = SternPhase.OFFSET_RECIPROCAL
