@@ -90,12 +90,16 @@ def validate(config, trials=200, seed_base=260000):
     first = [r['first_fire_window_step'] for r in records if r['fire_window_success']]
     convert = [transition['step'] for r in records for transition in r['transitions']
                if transition['phase'] == SternPhase.CONVERT.value]
+    relative_bearing = [transition['step'] for r in records for transition in r['transitions']
+                        if transition['phase'] == SternPhase.RELATIVE_BEARING.value]
     return {'trials': trials, 'seed_base': seed_base, 'parameters': config['blue_policy'],
             'fire_window_success_rate': float(np.mean([r['fire_window_success'] for r in records])),
             'median_first_window_step': float(np.median(first)) if first else None,
             'p90_first_window_step': float(np.percentile(first, 90)) if first else None,
             'mean_convert_entry_step': float(np.mean(convert)) if convert else None,
             'median_convert_entry_step': float(np.median(convert)) if convert else None,
+            'mean_relative_bearing_entry_step': float(np.mean(relative_bearing)) if relative_bearing else None,
+            'median_relative_bearing_entry_step': float(np.median(relative_bearing)) if relative_bearing else None,
             'first_window_percentiles_population': 'successful trials only',
             'phase_completion_rate': float(np.mean([r['phase_completion'] for r in records])),
             'boundary_failure_count': sum(r['boundary_before_fire_window'] for r in records),
@@ -119,8 +123,8 @@ def main():
     if not 1 <= args.trials <= 200:
         raise ValueError('bounded validation requires 1..200 trials')
     config = load_config(args.env_config)
-    if str(config['environment_version']) not in {'2.6', '2.7', '2.8'}:
-        raise ValueError('Stern validation requires v2.6, v2.7 or v2.8')
+    if str(config['environment_version']) not in {'2.6', '2.7', '2.8', '2.9'}:
+        raise ValueError('Stern validation requires v2.6, v2.7, v2.8 or v2.9')
     result = validate(config, args.trials, args.seed_base)
     path = Path(args.output)
     path.parent.mkdir(parents=True, exist_ok=True)

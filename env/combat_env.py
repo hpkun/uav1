@@ -1,4 +1,4 @@
-"""Version-isolated Multi-UAV Combat Environments v2.3 through v2.8."""
+"""Version-isolated Multi-UAV Combat Environments v2.3 through v2.9."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -34,7 +34,7 @@ class MultiUAVCombatEnv:
     ) -> None:
         self.config = load_config(config) if not isinstance(config, dict) else validate_config(config)
         self.environment_version = str(self.config["environment_version"])
-        self._uses_pair_rear_aspect_protocol = self.environment_version in {"2.4", "2.5", "2.6", "2.7", "2.8"}
+        self._uses_pair_rear_aspect_protocol = self.environment_version in {"2.4", "2.5", "2.6", "2.7", "2.8", "2.9"}
         self.observation_dim, self.action_dim, self.team_size = environment_dimensions(self.config)
         self.spec = aircraft_spec(self.config)
         self.dt = float(self.config["simulation"]["dt"])
@@ -45,7 +45,7 @@ class MultiUAVCombatEnv:
         self.fixed_policy = NearestTargetPursuitPolicy(
             self.config["blue_policy"], self.config["action"]
         )
-        if self.environment_version in {"2.6", "2.7", "2.8"}:
+        if self.environment_version in {"2.6", "2.7", "2.8", "2.9"}:
             self.fixed_policy = SternConversionPolicy(self.config["blue_policy"], self.config["action"], self.team_size)
         weapon_class = RearAspectWeaponEnvelope if self._uses_pair_rear_aspect_protocol else WeaponEnvelope
         self.weapon = weapon_class(**self.config["weapon"])
@@ -92,7 +92,7 @@ class MultiUAVCombatEnv:
         }
 
     def reset(self, seed: int | None = None) -> tuple[np.ndarray, dict[str, Any]]:
-        if self.environment_version in {"2.6", "2.7", "2.8"}:
+        if self.environment_version in {"2.6", "2.7", "2.8", "2.9"}:
             self.fixed_policy.reset()
         self.rng = np.random.default_rng(seed)
         self.red, self.blue, radial_angle = random_combat_states(
