@@ -194,7 +194,7 @@ def test_control_runner_rejects_mixed_dimensions_and_unsupported_versions(name,c
     with pytest.raises(ValueError,match='dimension'):
         cls(env5,cfg(name),device='cuda',output_dir=tmp_path)
     env['environment_version']='2.3'
-    with pytest.raises(ValueError,match='2.4 or 2.5'):
+    with pytest.raises(ValueError,match='2.4, 2.5 or 2.6'):
         cls(env,cfg(name),device='cuda',output_dir=tmp_path)
 
 

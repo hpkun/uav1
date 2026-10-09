@@ -1,4 +1,4 @@
-"""Version-isolated Multi-UAV Combat Environments v2.3, v2.4 and v2.5."""
+"""Version-isolated Multi-UAV Combat Environments v2.3 through v2.6."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -11,7 +11,7 @@ from .dynamics import PointMassDynamics
 from .integrator import RK4Integrator
 from .models import AircraftState
 from .control import action_to_control
-from .fixed_policy import NearestTargetPursuitPolicy
+from .fixed_policy import NearestTargetPursuitPolicy, SternConversionPolicy
 from .geometry import engagement_geometry
 from .observation import OBSERVATION_DIM, build_team_observations
 from .reward import paper_state_reward_components
@@ -34,7 +34,7 @@ class MultiUAVCombatEnv:
     ) -> None:
         self.config = load_config(config) if not isinstance(config, dict) else validate_config(config)
         self.environment_version = str(self.config["environment_version"])
-        self._uses_pair_rear_aspect_protocol = self.environment_version in {"2.4", "2.5"}
+        self._uses_pair_rear_aspect_protocol = self.environment_version in {"2.4", "2.5", "2.6"}
         self.observation_dim, self.action_dim, self.team_size = environment_dimensions(self.config)
         self.spec = aircraft_spec(self.config)
         self.dt = float(self.config["simulation"]["dt"])
@@ -45,6 +45,8 @@ class MultiUAVCombatEnv:
         self.fixed_policy = NearestTargetPursuitPolicy(
             self.config["blue_policy"], self.config["action"]
         )
+        if self.environment_version == "2.6":
+            self.fixed_policy = SternConversionPolicy(self.config["blue_policy"], self.config["action"], self.team_size)
         weapon_class = RearAspectWeaponEnvelope if self._uses_pair_rear_aspect_protocol else WeaponEnvelope
         self.weapon = weapon_class(**self.config["weapon"])
         self.rng = np.random.default_rng()
@@ -90,6 +92,8 @@ class MultiUAVCombatEnv:
         }
 
     def reset(self, seed: int | None = None) -> tuple[np.ndarray, dict[str, Any]]:
+        if self.environment_version == "2.6":
+            self.fixed_policy.reset()
         self.rng = np.random.default_rng(seed)
         self.red, self.blue, radial_angle = random_combat_states(
             self.rng, **self.config["scenario"]

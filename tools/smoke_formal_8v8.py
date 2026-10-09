@@ -44,13 +44,13 @@ def fingerprint(state):
     return digest.hexdigest()
 
 
-def run_smokes(output, names, seed=31):
+def run_smokes(output, names, seed=31, env_config=None):
     require_cuda('cuda')
     output=Path(output)
     if not output.is_absolute(): output=ROOT/output
     if (output/'summary.json').exists():
         raise RuntimeError('Use a fresh validation output directory; results will not be overwritten')
-    env_path=ROOT/'configs/combat_environment_v24.yaml'
+    env_path=Path(env_config) if env_config else ROOT/'configs/combat_environment_v24.yaml'
     env_bytes=env_path.read_bytes()
     env=yaml.safe_load(env_bytes)
     records={};reference=None
@@ -103,7 +103,7 @@ def run_smokes(output, names, seed=31):
         state=torch.load(checkpoint,map_location='cpu',weights_only=False)
         extra=state['extra']
         assert tuple(extra[k] for k in ('observation_dim','action_dim','num_agents'))==(104,3,8)
-        assert extra['environment_version']=='2.4' and extra['training_total_sampled_steps']==512
+        assert extra['environment_version']==env['environment_version'] and extra['training_total_sampled_steps']==512
         seeds=range(int(cfg['implementation']['evaluation_seed_base']),int(cfg['implementation']['evaluation_seed_base'])+2)
         evaluation=evaluator(checkpoint,cfg,env,'cuda',seeds)
         assert evaluation['evaluation_episodes']==2 and evaluation['protocol_complete']
@@ -116,7 +116,7 @@ def run_smokes(output, names, seed=31):
             'metrics':metrics,'evaluation_after_checkpoint_reload':evaluation}
         print(f'[SMOKE-DONE] {cfg["algorithm"]}: epochs={metrics["effective_ppo_epochs"]}, '
               f'last_KL={metrics["last_epoch_mean_kl"]:.7f}, eval_episodes=2',flush=True)
-    assert env_path.read_bytes()==env_bytes,'v2.4 environment config must remain unchanged'
+    assert env_path.read_bytes()==env_bytes,'environment config must remain unchanged'
     result={'cuda_device':torch.cuda.get_device_name(),'same_seed_initial_critics_identical':True,
         'seed':seed,'formal_training_started':False,'records':records}
     (output/'summary.json').write_text(json.dumps(result,indent=2))
@@ -128,9 +128,10 @@ def main():
     parser.add_argument('--algorithm',choices=['all',*ALGORITHMS],default='all')
     parser.add_argument('--seed',type=int,default=31)
     parser.add_argument('--output',required=True)
+    parser.add_argument('--env-config',default=None)
     args=parser.parse_args()
     if args.seed<0: raise ValueError('seed must be nonnegative')
-    run_smokes(args.output,list(ALGORITHMS) if args.algorithm=='all' else [args.algorithm],args.seed)
+    run_smokes(args.output,list(ALGORITHMS) if args.algorithm=='all' else [args.algorithm],args.seed,args.env_config)
 
 
 if __name__=='__main__': main()
