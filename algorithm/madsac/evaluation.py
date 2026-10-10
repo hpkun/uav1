@@ -26,7 +26,7 @@ def evaluate_madsac_episode(trainer, env_config, seed: int, mode="stochastic",
         raise ValueError("mode must be stochastic or deterministic")
     env = make_combat_environment(env_config)
     observation, _ = env.reset(int(seed))
-    returns = np.zeros(4, dtype=np.float64)
+    returns = np.zeros(env.team_size, dtype=np.float64)
     while True:
         actions = trainer.act(
             observation[None], env.red_alive_mask[None],

@@ -39,8 +39,8 @@ def finite_grad_norm(module):
 class MADDPGTrainer:
     def __init__(self, observation_dim, action_dim, num_agents, actor_learning_rate=1e-4,
                  critic_learning_rate=1e-4, gamma=.99, tau=.001, device='cuda', seed=0):
-        if observation_dim != 13*num_agents or num_agents not in (5, 8) or action_dim != 3:
-            raise ValueError('MADDPG requires 65/3/5 or 104/3/8')
+        if (observation_dim, action_dim, num_agents) not in ((65, 3, 5), (104, 3, 8), (66, 3, 5)):
+            raise ValueError('MADDPG requires 65/3/5, 104/3/8 or 66/3/5')
         if not 0 <= gamma <= 1 or not 0 < tau <= 1:
             raise ValueError('invalid gamma/tau')
         self.device = torch.device(device)

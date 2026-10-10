@@ -1,6 +1,6 @@
 """Validate combat dimensions and MADSAC checkpoint identity."""
 from algorithm.common.protocol import config_sha256
-from env.config import ENVIRONMENT_VERSION, validate_config
+from env.config import ENVIRONMENT_VERSION, validate_config, environment_dimensions
 from .trainer import MADSAC_IMPL_VERSION
 
 
@@ -8,12 +8,13 @@ def validate_madsac_config(env_config: dict, algorithm_config: dict) -> None:
     validate_config(env_config)
     if algorithm_config.get('algorithm') != 'madsac':
         raise RuntimeError('algorithm config is not madsac')
-    if str(env_config.get('environment_version')) != ENVIRONMENT_VERSION:
-        raise RuntimeError('MADSAC environment_version mismatch: unsupported protocol; MADSAC supports only v2.3 4v4/52D')
+    if str(env_config.get('environment_version')) not in (ENVIRONMENT_VERSION,'3.3'):
+        raise RuntimeError('MADSAC environment_version mismatch: unsupported protocol; MADSAC supports only v2.3 4v4/52D or v3.3 5v5/66D')
     n, t, i = algorithm_config['network'], algorithm_config['training'], algorithm_config['implementation']
     actual = tuple(int(n[key]) for key in ('observation_dim', 'action_dim', 'num_agents'))
-    if actual != (52, 3, 4) or int(env_config['scenario']['team_size']) != 4:
-        raise RuntimeError(f'MADSAC dimension mismatch: {actual} vs (52, 3, 4)')
+    expected=environment_dimensions(env_config)
+    if actual != expected:
+        raise RuntimeError(f'MADSAC dimension mismatch: {actual} vs {expected}')
     if int(t['evaluation_episodes']) <= 0:
         raise RuntimeError('evaluation_episodes must be positive')
     if i['evaluation_mode'] not in ('stochastic', 'deterministic'):
@@ -31,11 +32,11 @@ def validate_madsac_checkpoint(state: dict, env_config: dict, algorithm_config: 
         raise RuntimeError('MADSAC checkpoint identity/version mismatch')
     extra = state.get('extra', {})
     expected = {
-        'environment_version': ENVIRONMENT_VERSION,
+        'environment_version': env_config['environment_version'],
         'environment_config_sha256': config_sha256(env_config),
         'algorithm_config_sha256': config_sha256(algorithm_config),
         'training_seed': int(algorithm_config['training']['seed'] if expected_training_seed is None else expected_training_seed),
-        'observation_dim': 52, 'action_dim': 3, 'num_agents': 4,
+        **dict(zip(('observation_dim','action_dim','num_agents'),environment_dimensions(env_config))),
     }
     for key, value in expected.items():
         if extra.get(key) != value:
@@ -48,7 +49,7 @@ def validate_madsac_checkpoint(state: dict, env_config: dict, algorithm_config: 
     if architecture.get('hidden_dim') != expected_hidden:
         raise RuntimeError('MADSAC checkpoint hidden_dim mismatch')
     actor_weight = state.get('actor', {}).get('backbone.0.weight')
-    if actor_weight is not None and tuple(actor_weight.shape) != (expected_hidden, 52):
+    if actor_weight is not None and tuple(actor_weight.shape) != (expected_hidden, expected['observation_dim']):
         raise RuntimeError('MADSAC checkpoint actor architecture mismatch')
     if state.get('formal_exact_resume_supported') is not False or state.get('replay_buffer_included') is not False:
         raise RuntimeError('MADSAC checkpoint resume/replay provenance mismatch')

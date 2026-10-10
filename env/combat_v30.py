@@ -59,6 +59,10 @@ class CombatEnvironmentV30(MultiUAVCombatEnv):
         """Historical v3.0/v3.1 semantics, including terminal transitions."""
         return actual_phi_next
 
+    def event_reward_extension(self, individual_event, red_alive_before, red_exits, red_ground, blue_kills):
+        """Identity extension preserves old rewards and complete info byte-for-byte."""
+        return individual_event, {}
+
     def _resolve_noncombat_losses(self):
         lists=[[],[],[],[]]
         for side_index,(side,states) in enumerate((('red',self.red),('blue',self.blue))):
@@ -110,6 +114,7 @@ class CombatEnvironmentV30(MultiUAVCombatEnv):
         return False,False,False,'ongoing'
 
     def step(self,red_actions,blue_actions=None):
+        red_alive_before=self.red_alive_mask.copy()
         before,diag_before=self.potential()
         if blue_actions is None:blue_actions=self.fixed_policy.team_actions(self.blue,self.red)
         arrays=[]
@@ -128,7 +133,8 @@ class CombatEnvironmentV30(MultiUAVCombatEnv):
         blue_attempts=self._entry_attempts(self.blue,self.red,self.blue_fire_states,'blue')
         red_kills,blue_kills=self._resolve_combat(red_attempts,blue_attempts)
         combat,boundary=self._event_reward_components(red_exits,red_ground,red_kills,blue_kills)
-        event=combat+boundary
+        individual_event=combat+boundary
+        event,event_diagnostics=self.event_reward_extension(individual_event,red_alive_before,red_exits,red_ground,blue_kills)
         terminated=not self.red_alive_mask.any() or not self.blue_alive_mask.any()
         truncated=not terminated and self.steps>=self.max_steps
         win,loss,draw,_=self._outcome(truncated)
@@ -144,12 +150,14 @@ class CombatEnvironmentV30(MultiUAVCombatEnv):
         # explicit fields are authoritative and are not legacy state rewards.
         aliases=dict(zip(('r1','r2','r3','r4'),components.values()))
         for name,value in {**components,**aliases}.items():self.episode_reward_components[name]+=value
+        for name,value in event_diagnostics.items():self.episode_reward_components[name]+=value
         info=self._info(rewards,aliases,red_action,self.red_last_executed_phi,truncated,red_pairs,blue_pairs,
             len(red_attempts),len(blue_attempts),sum(x[2] for x in red_attempts),sum(x[2] for x in blue_attempts),len(red_kills),len(blue_kills))
         info.update(timeout=bool(truncated),red_ammo=self.red_ammo.copy(),blue_ammo=self.blue_ammo.copy(),
                     executed_blue_actions=blue_action.copy(),phi_current=before.copy(),phi_next=after.copy(),
                     phi_next_actual=after.copy(),phi_next_for_shaping=shaping_after.copy())
         for name,value in components.items():info[f'{name}_rewards']=value.copy()
+        for name,value in event_diagnostics.items():info[f'{name}_rewards']=value.copy()
         for label,phi,diagnostic in (('current',before,diag_before),('next',after,diag_after)):
             info[f'mean_potential_{label}']=float(phi.mean())
             for name in ('distance','angle'):info[f'mean_{name}_component_{label}']=float(diagnostic[name].mean())

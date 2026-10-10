@@ -204,7 +204,7 @@ class MADSACTrainingRunner:
 
     def checkpoint_extra(self):
         return {
-            "environment_version": ENVIRONMENT_VERSION,
+            "environment_version": self.env_config['environment_version'],
             "environment_config": deepcopy(self.env_config),
             "algorithm_config": deepcopy(self.algorithm_config),
             "environment_config_sha256": config_sha256(self.env_config),

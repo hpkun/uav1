@@ -20,8 +20,8 @@ def architecture_from_config(config,smoke=False):
 
 def validate_checkpoint(state, env_config, algorithm_config):
     validate_config(algorithm_config)
-    if str(env_config["environment_version"]) not in {"2.4","2.5","2.6","2.7","2.8","2.9","3.0","3.1","3.2"}:
-        raise RuntimeError("formal control requires environment_version 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0, 3.1 or 3.2")
+    if str(env_config["environment_version"]) not in {"2.4","2.5","2.6","2.7","2.8","2.9","3.0","3.1","3.2","3.3"}:
+        raise RuntimeError("formal control requires environment_version 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0, 3.1, 3.2 or 3.3")
     dimensions = environment_dimensions(env_config)
     network = algorithm_config["network"]
     if dimensions != tuple(network[key] for key in ("observation_dim","action_dim","num_agents")):
