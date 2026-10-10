@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 import time
 import numpy as np
+from algorithm.common.metrics import episode_is_timeout
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -99,7 +100,7 @@ def summarize(rows,config):
         "environment_version":config["environment_version"],
         "red_wins":sum(r["red_success"] for r in rows),"blue_wins":sum(r["blue_win"] for r in rows),
         "draws":sum(r["draw"] for r in rows),
-        "timeouts":sum(r["termination_reason"]=="red_failure_timeout" for r in rows),
+        "timeouts":sum(episode_is_timeout(r) for r in rows),
         "average_episode_length":float(np.mean([r["episode_length"] for r in rows]))}
     for count,rate in (("red_wins","red_win_rate"),("blue_wins","blue_win_rate"),
                        ("draws","draw_rate"),("timeouts","timeout_rate")):

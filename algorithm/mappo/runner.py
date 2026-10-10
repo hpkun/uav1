@@ -7,6 +7,7 @@ import math
 from pathlib import Path
 from typing import Any
 import numpy as np
+from algorithm.common.metrics import episode_is_timeout
 import torch
 
 from env.config import environment_dimensions
@@ -218,7 +219,7 @@ class MAPPOTrainingRunner:
             "mean_agent_episode_return": mean("mean_agent_episode_return"),
             "win_rate": mean("red_success"), "loss_rate": mean("blue_win"),
             "draw_rate": mean("draw"),
-            "timeout_rate": rate(lambda r: r["termination_reason"] == "red_failure_timeout"),
+            "timeout_rate": rate(episode_is_timeout),
             **{f"{side}_{event}_episode_rate": rate(
                 lambda r, field=f"{side}_first_{event}_step": r[field] is not None
             ) for side in ("red", "blue") for event in ("fire_window", "attempt", "hit", "kill")},
@@ -401,7 +402,7 @@ class MAPPOTrainingRunner:
             "completed_episodes": len(self.completed_records), "average_return": mean("episode_return"),
             "average_agent_return": mean("mean_agent_episode_return"), "win_rate": mean("red_success"),
             "loss_rate": mean("blue_win"), "draw_rate": mean("draw"),
-            "timeout_rate": float(np.mean([r["termination_reason"] == "red_failure_timeout" for r in self.completed_records])) if self.completed_records else 0.0,
+            "timeout_rate": float(np.mean([episode_is_timeout(r) for r in self.completed_records])) if self.completed_records else 0.0,
             "average_red_loss": mean("red_losses"), "average_blue_loss": mean("blue_losses"),
             "average_red_attack_kills": mean("red_attack_kills"), "average_blue_attack_kills": mean("blue_attack_kills"),
             "total_red_attack_kills": int(sum(r["red_attack_kills"] for r in self.completed_records)),

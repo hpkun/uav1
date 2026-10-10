@@ -9,7 +9,7 @@ from .models import AircraftSpec
 
 
 ENVIRONMENT_VERSION = "2.3"
-SUPPORTED_ENVIRONMENT_VERSIONS = frozenset({"2.3", "2.4", "2.5", "2.6", "2.7", "2.8", "2.9", "3.0", "3.1"})
+SUPPORTED_ENVIRONMENT_VERSIONS = frozenset({"2.3", "2.4", "2.5", "2.6", "2.7", "2.8", "2.9", "3.0", "3.1", "3.2"})
 
 
 def load_config(path: str | Path) -> dict[str, Any]:
@@ -21,6 +21,9 @@ def load_config(path: str | Path) -> dict[str, Any]:
 
 def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     """Reject unsupported schemas before constructing a combat environment."""
+    if isinstance(config, dict) and str(config.get('environment_version')) == '3.2':
+        from .v32_config import validate_v32
+        return validate_v32(config)
     if isinstance(config, dict) and str(config.get('environment_version')) == '3.1':
         from .v31_config import validate_v31
         return validate_v31(config)
@@ -85,7 +88,7 @@ def environment_dimensions(config: dict[str, Any]) -> tuple[int, int, int]:
     from .observation import observation_dim_for_team_size
     validate_config(config)
     agents = int(config["scenario"]["team_size"])
-    if str(config['environment_version']) in ('3.0', '3.1'):
+    if str(config['environment_version']) in ('3.0', '3.1', '3.2'):
         from .v30_observation import observation_dim_for_v30
         return observation_dim_for_v30(agents), 3, agents
     return observation_dim_for_team_size(agents), 3, agents

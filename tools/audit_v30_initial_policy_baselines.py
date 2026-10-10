@@ -302,9 +302,10 @@ def review_runtime_semantics():
         'rollout_deterministic':False,'formal_eval_deterministic':True,
         'sampled_steps_per_rollout':16*cfg['training']['rollout_steps'],
         'rollout_updates_at_20480':20480//(16*cfg['training']['rollout_steps']),
-        'timeout_logging_issue':{'runner_summary':'legacy red_failure_timeout comparison misses v3.0 timeout reasons',
-            'step_metrics':'aggregate_combat_records overwrites legacy value when episodes complete; correct timeout flag',
-            'formal_evaluator':'correct info.timeout with legacy fallback',
+        'timeout_logging_issue':{'runner_summary':'fixed for new runs: authoritative info.timeout with known legacy reason fallback',
+            'historical_outputs':'pre-fix summary timeout errors remain in original experiment records; never rewritten',
+            'step_metrics':'shared episode_is_timeout helper and aggregate_combat_records',
+            'formal_evaluator':'shared episode_is_timeout helper',
             'impact':'timeout summary field only; no effect on win/outcome or selection logic'},
         'eval_zero_wins_in_20_wilson_95':wilson(0,20)}
     run=ROOT/'outputs/mappo_v30_5v5_seed1_1m'

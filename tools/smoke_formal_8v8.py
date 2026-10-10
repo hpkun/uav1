@@ -10,7 +10,9 @@ ROOT=Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path: sys.path.insert(0,str(ROOT))
 
 import argparse
+import importlib
 from contextlib import redirect_stdout
+from unittest.mock import patch
 import hashlib
 import json
 import numpy as np
@@ -67,12 +69,24 @@ def run_smokes(output, names, seed=31, env_config=None):
                   'ea-mappo':'ea_mappo_5v5','stea-mappo':'stea_mappo_5v5'}[name]
             if env['environment_version']=='3.0': stem += '_v30'
             if env['environment_version']=='3.1': stem += '_v31'
+            if env['environment_version']=='3.2': stem += '_v32'
         config_path=ROOT/f'configs/{stem}.yaml'
         cfg=yaml.safe_load(config_path.read_text())
         run=output/name
         ensure_fresh_output_directory(run)
         runner=runner_class(env,cfg,num_envs=16,total_sampled_steps=512,device='cuda',
             seed=seed,output_dir=run,smoke=False)
+        # EA's update wrapper delegates its GAE calculation to MAPPOTrainer.
+        gae_module=importlib.import_module('algorithm.mappo.trainer' if name in ('mappo','ea-mappo')
+            else runner.trainer.update.__module__)
+        original_gae=gae_module.compute_gae
+        gae_checks=[]
+        def checked_gae(*args,**kwargs):
+            assert all(torch.isfinite(v).all() for v in args if isinstance(v,torch.Tensor))
+            result=original_gae(*args,**kwargs)
+            assert all(torch.isfinite(v).all() for v in result)
+            gae_checks.append(True)
+            return result
         try:
             initial={k:v.detach().cpu().clone() for k,v in runner.trainer.critic.state_dict().items()}
             if reference is None: reference=initial
@@ -92,7 +106,7 @@ def run_smokes(output, names, seed=31, env_config=None):
                 'validation_total_sampled_steps':512,'validation_evaluation_episodes':2,
                 'environment_config_sha256':config_sha256(env),
                 'algorithm_config_sha256':config_sha256(cfg)},indent=2))
-            with (run/'train.log').open('w') as log, redirect_stdout(TeeOutput(sys.stdout,log)):
+            with (run/'train.log').open('w') as log, redirect_stdout(TeeOutput(sys.stdout,log)), patch.object(gae_module,'compute_gae',checked_gae):
                 print(f'[CUDA-SMOKE] algorithm={cfg["algorithm"]} | cap=512 | formal_dimensions_and_ppo=true',flush=True)
                 print(runner.start_log_line(),flush=True)
                 summary=runner.run()
@@ -101,6 +115,7 @@ def run_smokes(output, names, seed=31, env_config=None):
         finally:
             runner.vector.close()
         assert summary['sampled_steps']==512 and summary['rollout_updates']==1
+        assert gae_checks, 'the real update must compute finite GAE'
         metrics=summary['last_update_metrics']
         assert np.isfinite(list(metrics.values())).all()
         assert metrics['actor_grad_norm']>0 and metrics['critic_grad_norm']>0
@@ -110,6 +125,19 @@ def run_smokes(output, names, seed=31, env_config=None):
         with torch.no_grad():
             values=runner.trainer.critic(torch.ones(2,agents,obs_dim,device='cuda'),torch.ones(2,agents,device='cuda'))
             assert torch.isfinite(values).all()
+            if name in ('rmappo','stea-mappo'):
+                actor=runner.trainer.actor
+                obs=torch.as_tensor(runner.observations[0],device='cuda')
+                alive=torch.ones(agents,device='cuda');alive[1]=0
+                hidden=torch.ones(agents,actor.gru_hidden_dim,device='cuda')
+                start=torch.tensor(0.,device='cuda')
+                actions,death_hidden=actor(obs,hidden,alive,start)
+                assert not torch.count_nonzero(actions[1]) and not torch.count_nonzero(death_hidden[1])
+                reset_actions,reset_hidden=actor(obs,hidden,alive,torch.ones_like(start))
+                zero_actions,zero_hidden=actor(obs,torch.zeros_like(hidden),alive,start)
+                assert torch.equal(reset_actions,zero_actions) and torch.equal(reset_hidden,zero_hidden)
+            if name in ('ea-mappo','stea-mappo'):
+                assert runner.trainer.actor.self_feature_dim==(8 if obs_dim==66 else 7)
         checkpoint=run/'latest.pt'
         state=torch.load(checkpoint,map_location='cpu',weights_only=False)
         extra=state['extra']
@@ -124,6 +152,8 @@ def run_smokes(output, names, seed=31, env_config=None):
             'actor_parameter_count':startup['actor_parameter_count'],
             'critic_parameter_count':startup['critic_parameter_count'],'critic_input_dim':critic_input_dim,
             'critic_initial_sha256':fingerprint(initial),'finite_gradients_parameters_and_values':True,
+            'finite_rewards_advantages_and_returns':True,
+            'recurrent_reset_verified':name in ('rmappo','stea-mappo'),
             'metrics':metrics,'evaluation_after_checkpoint_reload':evaluation}
         print(f'[SMOKE-DONE] {cfg["algorithm"]}: epochs={metrics["effective_ppo_epochs"]}, '
               f'last_KL={metrics["last_epoch_mean_kl"]:.7f}, eval_episodes=2',flush=True)

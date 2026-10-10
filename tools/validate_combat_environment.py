@@ -11,6 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import numpy as np
+from algorithm.common.metrics import episode_is_timeout
 
 from env.config import ENVIRONMENT_VERSION, aircraft_spec, load_config
 from env.control import action_to_control
@@ -183,7 +184,7 @@ def rule_based_validation(config: dict, episodes: int = 100) -> dict:
         "red_win_rate": mean("red_success"),
         "red_loss_rate": mean("blue_win"),
         "timeout_rate": float(np.mean([
-            row["termination_reason"] == "red_failure_timeout" for row in records
+            episode_is_timeout(row) for row in records
         ])),
         "failure_rate": float(np.mean([not row["red_success"] for row in records])),
         "average_episode_length": mean("episode_length"),

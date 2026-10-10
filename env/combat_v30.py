@@ -55,6 +55,10 @@ class CombatEnvironmentV30(MultiUAVCombatEnv):
     def potential(self):
         return potentials(self.red,self.blue,self.config['sensor'],self.config['weapon'],self.config['reward'])
 
+    def shaping_next_potential(self, actual_phi_next, terminated, truncated):
+        """Historical v3.0/v3.1 semantics, including terminal transitions."""
+        return actual_phi_next
+
     def _resolve_noncombat_losses(self):
         lists=[[],[],[],[]]
         for side_index,(side,states) in enumerate((('red',self.red),('blue',self.blue))):
@@ -131,7 +135,8 @@ class CombatEnvironmentV30(MultiUAVCombatEnv):
         rcfg=self.config['reward']
         outcome=np.full(5,rcfg['win_reward'] if win else rcfg['lose_penalty'] if loss else rcfg['draw_reward'] if draw else 0.,dtype=float)
         after,diag_after=self.potential()
-        adv=potential_shaping(before,after,rcfg)
+        shaping_after=self.shaping_next_potential(after,terminated,truncated)
+        adv=potential_shaping(before,shaping_after,rcfg)
         safe=safety_rewards(self.red,self.blue,rcfg)
         components=dict(event=event,outcome=outcome,adv=adv,safe=safe)
         rewards=sum(components.values(),np.zeros(5,dtype=float)).astype(np.float32)
@@ -142,7 +147,8 @@ class CombatEnvironmentV30(MultiUAVCombatEnv):
         info=self._info(rewards,aliases,red_action,self.red_last_executed_phi,truncated,red_pairs,blue_pairs,
             len(red_attempts),len(blue_attempts),sum(x[2] for x in red_attempts),sum(x[2] for x in blue_attempts),len(red_kills),len(blue_kills))
         info.update(timeout=bool(truncated),red_ammo=self.red_ammo.copy(),blue_ammo=self.blue_ammo.copy(),
-                    executed_blue_actions=blue_action.copy(),phi_current=before.copy(),phi_next=after.copy())
+                    executed_blue_actions=blue_action.copy(),phi_current=before.copy(),phi_next=after.copy(),
+                    phi_next_actual=after.copy(),phi_next_for_shaping=shaping_after.copy())
         for name,value in components.items():info[f'{name}_rewards']=value.copy()
         for label,phi,diagnostic in (('current',before,diag_before),('next',after,diag_after)):
             info[f'mean_potential_{label}']=float(phi.mean())
