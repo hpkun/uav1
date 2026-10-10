@@ -66,6 +66,7 @@ def run_smokes(output, names, seed=31, env_config=None):
             stem={'mappo':'mappo_5v5','rmappo':'rmappo_5v5',
                   'ea-mappo':'ea_mappo_5v5','stea-mappo':'stea_mappo_5v5'}[name]
             if env['environment_version']=='3.0': stem += '_v30'
+            if env['environment_version']=='3.1': stem += '_v31'
         config_path=ROOT/f'configs/{stem}.yaml'
         cfg=yaml.safe_load(config_path.read_text())
         run=output/name

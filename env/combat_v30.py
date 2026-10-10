@@ -17,10 +17,11 @@ class StrictPairEntryState:
 
 
 class CombatEnvironmentV30(MultiUAVCombatEnv):
+    environment_version = '3.0'
     def __init__(self,config):
         self.config=validate_config(config) if isinstance(config,dict) else load_config(config)
-        if str(self.config['environment_version'])!='3.0': raise ValueError('v3.0 family requires version 3.0')
-        self.environment_version='3.0'
+        if str(self.config['environment_version'])!=self.environment_version:
+            raise ValueError(f'v3.0 family requires version {self.environment_version}')
         self.observation_dim,self.action_dim,self.team_size=environment_dimensions(self.config)
         self.spec=aircraft_spec(self.config)
         self.dt=float(self.config['simulation']['dt']);self.max_steps=int(self.config['simulation']['max_steps'])

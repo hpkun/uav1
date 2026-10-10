@@ -50,7 +50,7 @@ def aggregate_combat_records(records: list[dict[str, Any]]) -> dict[str, float]:
         result[event] = result[f"red_{event}"] + result[f"blue_{event}"]
     for name in ("r1", "r2", "r3", "r4"):
         result[f"average_episode_{name}_total"] = mean(f"episode_{name}_total")
-    if all(row.get('environment_version') == '3.0' for row in records):
+    if all(row.get('environment_version') in ('3.0', '3.1') for row in records):
         for name in ('event','outcome','adv','safe'):
             result[f'average_episode_{name}_total'] = mean(f'episode_{name}_total')
         for side in ('red','blue'):
