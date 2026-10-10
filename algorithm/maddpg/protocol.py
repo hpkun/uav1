@@ -17,8 +17,8 @@ def validate_config(env, config):
     n, t, i = (config[key] for key in ('network', 'training', 'implementation'))
     dimensions = tuple(n[key] for key in ('observation_dim', 'action_dim', 'num_agents'))
     if dimensions != environment_dimensions(env) or (str(env['environment_version']), dimensions) not in (
-            ('2.5', (65, 3, 5)), ('2.4', (104, 3, 8)), ('3.3', (66, 3, 5))):
-        raise RuntimeError('MADDPG requires v2.5 65/3/5, v2.4 104/3/8 or v3.3 66/3/5')
+            ('2.5', (65, 3, 5)), ('2.4', (104, 3, 8)), ('3.3', (66, 3, 5)), ('3.4', (66, 3, 5))):
+        raise RuntimeError('MADDPG requires v2.5 65/3/5, v2.4 104/3/8 or v3.3/v3.4 66/3/5')
     if n['actor_hidden_layers'] != [256, 256] or n['critic_hidden_layers'] != [256, 256]:
         raise RuntimeError('MADDPG requires independent 256/256 MLPs')
     forbidden = {'attention_heads', 'actor_type', 'gru_hidden_dim', 'policy_delay', 'alpha',
