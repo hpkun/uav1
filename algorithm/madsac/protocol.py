@@ -8,8 +8,8 @@ def validate_madsac_config(env_config: dict, algorithm_config: dict) -> None:
     validate_config(env_config)
     if algorithm_config.get('algorithm') != 'madsac':
         raise RuntimeError('algorithm config is not madsac')
-    if str(env_config.get('environment_version')) not in (ENVIRONMENT_VERSION,'3.3','3.4'):
-        raise RuntimeError('MADSAC environment_version mismatch: unsupported protocol; MADSAC supports only v2.3 4v4/52D or v3.3/v3.4 5v5/66D')
+    if str(env_config.get('environment_version')) not in (ENVIRONMENT_VERSION,'3.3','3.4','3.5'):
+        raise RuntimeError('MADSAC environment_version mismatch: unsupported protocol; MADSAC supports only v2.3 4v4/52D or v3.3/v3.4/v3.5 5v5/66D')
     n, t, i = algorithm_config['network'], algorithm_config['training'], algorithm_config['implementation']
     actual = tuple(int(n[key]) for key in ('observation_dim', 'action_dim', 'num_agents'))
     expected=environment_dimensions(env_config)

@@ -1,0 +1,67 @@
+environment_version: '3.5'
+simulation:
+  dt: 0.1
+  max_steps: 1000
+action:
+  command:
+    heading_delta_max: 3.141592653589793
+    pitch_delta_max: 1.0471975511965976
+    speed_delta_max: 50.0
+  controller:
+    heading_time_constant: 2.0
+    pitch_time_constant: 2.0
+    speed_time_constant: 2.0
+    normal_load_max: 8.0
+aircraft:
+  v_min: 150.0
+  v_max: 300.0
+  theta_min: -1.0471975511965976
+  theta_max: 1.0471975511965976
+arena:
+  radius: 5000.0
+  altitude_min: 0.0
+  altitude_max: 6000.0
+scenario:
+  team_size: 5
+  center_radius: 2500.0
+  lateral_min: -2500.0
+  lateral_max: 2500.0
+  minimum_same_team_lateral_separation: 400.0
+  altitude_center: 3000.0
+  altitude_perturbation_max: 100.0
+  speed_center: 225.0
+  speed_perturbation_max: 10.0
+  heading_perturbation_max: 0.3490658503988659
+weapon:
+  range_min: 0.0
+  range_max: 1000.0
+  off_boresight_angle_max: 1.5707963267948966
+  hit_probability: 0.7
+  ammo_per_aircraft: 6
+reward:
+  kill_reward: 10.0
+  loss_penalty: -10.0
+  boundary_penalty: -10.0
+  team_casualty_penalty: -2.0
+  win_reward: 20.0
+  lose_penalty: -20.0
+  draw_reward: 0.0
+  potential_gamma: 0.99
+  potential_scale: 1.0
+  distance_weight: 0.5
+  angle_weight: 0.5
+  safe_distance: 200.0
+  safety_penalty_scale: 0.2
+observation:
+  horizontal_position_scale: 5000.0
+  altitude_scale: 10000.0
+  speed_center: 225.0
+  speed_scale: 75.0
+  relative_position_scale: 10000.0
+blue_policy:
+  desired_speed: 250.0
+  close_distance: 1800.0
+  dispersion_threshold: 1500.0
+sensor:
+  range_max: 3000.0
+  off_boresight_angle_max: 1.5707963267948966
