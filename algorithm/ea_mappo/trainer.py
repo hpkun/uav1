@@ -9,20 +9,21 @@ EAMAPPO_IMPL_VERSION = 1
 
 
 class EAMAPPOTrainer(MAPPOTrainer):
-    def __init__(self, *, entity_dim=64, entity_attention_heads=2, spatial_hidden_dim=128, **kwargs):
+    def __init__(self, *, entity_dim=64, entity_attention_heads=2, spatial_hidden_dim=128, self_feature_dim=7, **kwargs):
         if kwargs.get("critic_type") != "mlp":
             raise ValueError("EA-MAPPO requires CentralizedMLPCritic")
         super().__init__(**kwargs)
         self.actor = EntityAttentionActor(entity_dim,entity_attention_heads,spatial_hidden_dim,
             self.action_dim,kwargs.get("log_std_min",-5.),kwargs.get("log_std_max",.5),
             kwargs.get("policy_std_mode","state_independent"),kwargs.get("log_std_init",-.5),
-            kwargs.get("mean_head_init_gain",.01)).to(self.device)
+            kwargs.get("mean_head_init_gain",.01),self_feature_dim).to(self.device)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(),lr=kwargs.get("actor_learning_rate",3e-4))
         self.actor_hidden_dim = 128
         self.network_architecture = dict(actor_type="entity_attention",entity_dim=64,
             entity_attention_heads=2,spatial_hidden_dim=128,critic_type="mlp",
             critic_hidden_dim=self.critic_hidden_dim,
             **{k:v for k,v in self.policy_protocol().items() if k != "target_kl"})
+        if self_feature_dim == 8: self.network_architecture['self_feature_dim'] = 8
 
     def update(self, rollout):
         metrics = super().update(rollout)

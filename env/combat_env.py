@@ -29,6 +29,14 @@ class MultiUAVCombatEnv:
     team_size, observation_dim, action_dim = 4, OBSERVATION_DIM, 3
     environment_version = ENVIRONMENT_VERSION
 
+    def __new__(cls, config=DEFAULT_COMBAT_CONFIG):
+        if cls is MultiUAVCombatEnv:
+            candidate = config if isinstance(config, dict) else load_config(config)
+            if str(candidate.get('environment_version')) == '3.0':
+                from .combat_v30 import CombatEnvironmentV30
+                return object.__new__(CombatEnvironmentV30)
+        return object.__new__(cls)
+
     def __init__(
         self, config: str | Path | dict[str, Any] = DEFAULT_COMBAT_CONFIG
     ) -> None:

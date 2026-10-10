@@ -35,12 +35,12 @@ def pack_sequences(tensor, chunks, length, pad=0):
 class STEAMAPPOTrainer(MAPPOTrainer):
     def __init__(self, *, entity_dim=64, entity_attention_heads=2,
                  spatial_hidden_dim=128, gru_hidden_dim=128, gru_layers=1,
-                 recurrent_sequence_length=32, **kwargs):
+                 recurrent_sequence_length=32, self_feature_dim=7, **kwargs):
         if kwargs.get("critic_type", "attention") not in {"attention", "mlp"}:
             raise ValueError("STEA-MAPPO critic_type must be attention or mlp")
         if kwargs.get("actor_activation", "relu") != "relu":
             raise ValueError("STEA-MAPPO actor activation must be relu")
-        if kwargs.get("observation_dim", 52) != 13*kwargs.get("num_agents", 4) or kwargs.get("action_dim", 3) != 3:
+        if kwargs.get("observation_dim", 52) != 13*kwargs.get("num_agents", 4)+self_feature_dim-7 or kwargs.get("action_dim", 3) != 3:
             raise ValueError("STEA-MAPPO requires observation/action/agents=13*N/3/N")
         self.sequence_length = int(recurrent_sequence_length)
         if self.sequence_length <= 0 or int(kwargs.get("minibatch_size", 512)) % self.sequence_length:
@@ -54,6 +54,7 @@ class STEAMAPPOTrainer(MAPPOTrainer):
             kwargs.get("log_std_min", -5.), kwargs.get("log_std_max", 2.),
             kwargs.get("policy_std_mode", "state_dependent"), kwargs.get("log_std_init", -.5),
             kwargs.get("mean_head_init_gain", .01),
+            self_feature_dim,
         ).to(self.device)
         self.actor_optimizer = torch.optim.Adam(
             self.actor.parameters(), lr=kwargs.get("actor_learning_rate", 3e-4))
@@ -66,6 +67,7 @@ class STEAMAPPOTrainer(MAPPOTrainer):
             "critic_type": self.critic_type, "critic_hidden_dim": self.critic_hidden_dim,
         }
         self.actor_hidden_dim = int(gru_hidden_dim)
+        if self_feature_dim == 8: self.network_architecture['self_feature_dim'] = 8
         if self.critic_type == "attention":
             self.network_architecture["critic_attention_heads"] = self.attention_heads
         if self.actor.policy_std_mode == "state_independent":

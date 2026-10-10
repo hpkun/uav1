@@ -10,7 +10,7 @@ class FlatRecurrentActor(nn.Module):
                  gru_hidden_dim=128, gru_layers=1, log_std_min=-5., log_std_max=.5,
                  policy_std_mode="state_independent", log_std_init=-.5, mean_head_init_gain=.01):
         super().__init__()
-        if observation_dim not in (65,104) or (action_dim, flat_encoder_dim, gru_hidden_dim, gru_layers) != (3,128,128,1):
+        if observation_dim not in (65,66,104) or (action_dim, flat_encoder_dim, gru_hidden_dim, gru_layers) != (3,128,128,1):
             raise ValueError("RMAPPO requires obs65 or obs104, action3 and encoder128/GRU128/layers1")
         if policy_std_mode != "state_independent" or log_std_min > log_std_max:
             raise ValueError("RMAPPO requires valid state-independent Gaussian")

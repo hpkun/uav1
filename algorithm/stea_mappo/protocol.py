@@ -14,10 +14,11 @@ def require_cuda(device):
 
 def architecture_from_config(config, smoke=False):
     n = config["network"]
+    layout = {"self_feature_dim":8} if n.get("self_feature_dim",7)==8 else {}
     architecture = {**{key:n[key] for key in ("actor_type","entity_dim","entity_attention_heads",
         "spatial_hidden_dim","gru_hidden_dim","gru_layers","recurrent_sequence_length","critic_type")},
         "critic_hidden_dim":64 if smoke else int(n["critic_hidden_layers"][0]),
-        **actor_architecture_protocol(config)}
+        **actor_architecture_protocol(config),**layout}
     if n["critic_type"] == "attention":
         architecture["critic_attention_heads"] = int(n["attention_heads"])
     return architecture

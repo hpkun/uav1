@@ -9,14 +9,16 @@ from algorithm.stea_mappo.networks import MaskedEntityAttention, SpatioTemporalE
 class EntityAttentionActor(nn.Module):
     def __init__(self, entity_dim=64, entity_attention_heads=2, spatial_hidden_dim=128,
                  action_dim=3, log_std_min=-5., log_std_max=.5,
-                 policy_std_mode="state_independent", log_std_init=-.5, mean_head_init_gain=.01):
+                 policy_std_mode="state_independent", log_std_init=-.5, mean_head_init_gain=.01, self_feature_dim=7):
         super().__init__()
         if (entity_dim,entity_attention_heads,spatial_hidden_dim,action_dim) != (64,2,128,3):
             raise ValueError("EA-MAPPO requires entity64/heads2/spatial128/action3")
         if policy_std_mode != "state_independent" or log_std_min > log_std_max:
             raise ValueError("EA-MAPPO requires valid state-independent Gaussian")
         self.log_std_min,self.log_std_max = log_std_min,log_std_max
-        self.self_encoder = nn.Sequential(nn.Linear(7,64),nn.ReLU())
+        if self_feature_dim not in (7,8): raise ValueError('self_feature_dim must be 7 or 8')
+        self.self_feature_dim = self_feature_dim
+        self.self_encoder = nn.Sequential(nn.Linear(self_feature_dim,64),nn.ReLU())
         self.ally_encoder = nn.Sequential(nn.Linear(7,64),nn.ReLU())
         self.enemy_encoder = nn.Sequential(nn.Linear(6,64),nn.ReLU())
         self.ally_attention = MaskedEntityAttention(64,2)

@@ -6,8 +6,10 @@ def validate_control_config(config, algorithm):
     if config.get('algorithm') != algorithm:
         raise ValueError(f'algorithm must be {algorithm}')
     n,t,i = (config[key] for key in ('network','training','implementation'))
-    if tuple(n[k] for k in ('observation_dim','action_dim','num_agents')) not in ((65,3,5),(104,3,8)):
+    if tuple(n[k] for k in ('observation_dim','action_dim','num_agents')) not in ((65,3,5),(104,3,8),(66,3,5)):
         raise ValueError('formal controls require observation/action/agents 65/3/5 or 104/3/8')
+    if algorithm == 'EA-MAPPO' and n.get('self_feature_dim',7) != (8 if n['observation_dim']==66 else 7):
+        raise ValueError('EA-MAPPO self feature layout mismatch')
     if n['critic_type'] != 'mlp' or layer_width(n,'critic_hidden_layers') != 256:
         raise ValueError('formal controls require CentralizedMLPCritic [256,256]')
     expected = ({'actor_type':'flat_recurrent','flat_encoder_dim':128,'gru_hidden_dim':128,

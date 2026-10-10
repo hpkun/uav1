@@ -33,12 +33,12 @@ def test_factory_and_public_api_are_combat_only():
     assert env.__all__ == ['AircraftSpec', 'AircraftState', 'ControlCommand', 'EngagementGeometry',
         'FireState', 'MultiUAVCombatEnv', 'WeaponEnvelope', 'engagement_geometry', 'make_combat_environment']
     assert sorted(p.name for p in (ROOT / 'configs').glob('*.yaml')) == [
-        'combat_environment.yaml', 'combat_environment_v24.yaml', 'combat_environment_v25.yaml', 'combat_environment_v26.yaml', 'combat_environment_v27.yaml', 'combat_environment_v28.yaml', 'combat_environment_v29.yaml',
-        'ea_mappo_5v5.yaml', 'ea_mappo_8v8.yaml',
+        'combat_environment.yaml', 'combat_environment_v24.yaml', 'combat_environment_v25.yaml', 'combat_environment_v26.yaml', 'combat_environment_v27.yaml', 'combat_environment_v28.yaml', 'combat_environment_v29.yaml', 'combat_environment_v30.yaml',
+        'ea_mappo_5v5.yaml', 'ea_mappo_5v5_v30.yaml', 'ea_mappo_8v8.yaml',
         'maddpg_5v5.yaml', 'maddpg_8v8.yaml',
-        'madsac.yaml', 'mappo.yaml', 'mappo_5v5.yaml', 'mappo_8v8.yaml',
-        'mappo_8v8_formal.yaml', 'rmappo_5v5.yaml', 'rmappo_8v8.yaml',
-        'stea_mappo.yaml', 'stea_mappo_5v5.yaml', 'stea_mappo_8v8.yaml',
+        'madsac.yaml', 'mappo.yaml', 'mappo_5v5.yaml', 'mappo_5v5_v30.yaml', 'mappo_8v8.yaml',
+        'mappo_8v8_formal.yaml', 'rmappo_5v5.yaml', 'rmappo_5v5_v30.yaml', 'rmappo_8v8.yaml',
+        'stea_mappo.yaml', 'stea_mappo_5v5.yaml', 'stea_mappo_5v5_v30.yaml', 'stea_mappo_8v8.yaml',
         'stea_mappo_8v8_formal.yaml']
     assert list(inspect.signature(validate_checkpoint_for_evaluation).parameters) == [
         'state', 'env_config', 'algorithm_config']

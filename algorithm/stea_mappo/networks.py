@@ -9,12 +9,13 @@ from algorithm.mappo.networks import SharedMAPPOActor
 
 def decompose_observations(observations: torch.Tensor):
     dimension = observations.shape[-1]
-    if dimension % 13 or dimension < 26:
+    self_dim = 8 if dimension % 13 == 1 else 7
+    if (dimension - (self_dim-7)) % 13 or dimension < 26:
         raise ValueError('STEA observations must have 13*N features, N >= 2 (52 for 4v4)')
     agents = dimension // 13
-    ally_end = 7 + 7 * (agents - 1)
+    ally_end = self_dim + 7 * (agents - 1)
     prefix = observations.shape[:-1]
-    return (observations[..., :7], observations[..., 7:ally_end].reshape(*prefix, agents - 1, 7),
+    return (observations[..., :self_dim], observations[..., self_dim:ally_end].reshape(*prefix, agents - 1, 7),
             observations[..., ally_end:].reshape(*prefix, agents, 6))
 
 
@@ -52,7 +53,7 @@ class SpatioTemporalEntityAttentionActor(nn.Module):
                  gru_layers: int = 1, action_dim: int = 3,
                  log_std_min: float = -5., log_std_max: float = 2.,
                  policy_std_mode: str = "state_dependent", log_std_init: float = -.5,
-                 mean_head_init_gain: float = .01):
+                 mean_head_init_gain: float = .01, self_feature_dim: int = 7):
         super().__init__()
         if gru_layers != 1:
             raise ValueError('STEA v1 requires one unidirectional GRU layer')
@@ -62,7 +63,9 @@ class SpatioTemporalEntityAttentionActor(nn.Module):
             raise ValueError('log_std_min must not exceed log_std_max')
         self.gru_hidden_dim = gru_hidden_dim
         self.log_std_min, self.log_std_max = log_std_min, log_std_max
-        self.self_encoder = nn.Sequential(nn.Linear(7, entity_dim), nn.ReLU())
+        if self_feature_dim not in (7,8): raise ValueError('self_feature_dim must be 7 or 8')
+        self.self_feature_dim = self_feature_dim
+        self.self_encoder = nn.Sequential(nn.Linear(self_feature_dim, entity_dim), nn.ReLU())
         self.ally_encoder = nn.Sequential(nn.Linear(7, entity_dim), nn.ReLU())
         self.enemy_encoder = nn.Sequential(nn.Linear(6, entity_dim), nn.ReLU())
         self.ally_attention = MaskedEntityAttention(entity_dim, entity_attention_heads)

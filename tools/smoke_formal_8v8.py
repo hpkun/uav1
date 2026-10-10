@@ -58,13 +58,14 @@ def run_smokes(output, names, seed=31, env_config=None):
     if agents not in (5,8):
         raise ValueError('formal smoke requires 5v5 or 8v8')
     critic_input_dim=(agents+1)*obs_dim
-    expected_critic_count={5:166145,8:305921}[agents]
+    expected_critic_count=critic_input_dim*256+256+256*256+256+256+1
     records={};reference=None
     for name in names:
         stem,runner_class,evaluator=ALGORITHMS[name]
         if agents==5:
             stem={'mappo':'mappo_5v5','rmappo':'rmappo_5v5',
                   'ea-mappo':'ea_mappo_5v5','stea-mappo':'stea_mappo_5v5'}[name]
+            if env['environment_version']=='3.0': stem += '_v30'
         config_path=ROOT/f'configs/{stem}.yaml'
         cfg=yaml.safe_load(config_path.read_text())
         run=output/name
