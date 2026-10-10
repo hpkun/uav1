@@ -28,7 +28,7 @@ class CombatEnvironmentV30(MultiUAVCombatEnv):
         self.arena_radius=float(self.config['arena']['radius'])
         self.dynamics=PointMassDynamics();self.integrator=RK4Integrator(self.dt)
         self.fixed_policy=SensorLimitedPursuitPolicy(self.config['blue_policy'],self.config['action'],self.config['sensor'],self.config['scenario'])
-        self.weapon=FiniteAmmoWeapon(**self.config['weapon'])
+        self.weapon=self.build_weapon()
         self.red_ammo=np.full(5,self.weapon.ammo_per_aircraft,dtype=np.int64)
         self.blue_ammo=self.red_ammo.copy()
         self.red=[];self.blue=[];self.rng=np.random.default_rng();self.steps=0
@@ -37,6 +37,16 @@ class CombatEnvironmentV30(MultiUAVCombatEnv):
         self._reset_metrics()
 
     def _new_fire_states(self): return StrictPairEntryState()
+
+    def build_weapon(self):
+        return FiniteAmmoWeapon(**self.config['weapon'])
+
+    def dense_combat_reward(self):
+        """No arithmetic or diagnostic changes in historical environments."""
+        return None, {}
+
+    def advantage_reward(self,current,next_,dense):
+        return potential_shaping(current,next_,self.config['reward'])
 
     def _reset_metrics(self):
         super()._reset_metrics()
@@ -126,6 +136,7 @@ class CombatEnvironmentV30(MultiUAVCombatEnv):
         self.red_last_executed_phi=self._advance(self.red,red_action)
         self.blue_last_executed_phi=self._advance(self.blue,blue_action);self.steps+=1
         red_exits,_,red_ground,_=self._resolve_noncombat_losses()
+        dense,dense_diagnostics=self.dense_combat_reward()
         red_pairs=int(self.weapon.eligibility(self.red,self.blue,self.red_ammo)[0].sum())
         blue_pairs=int(self.weapon.eligibility(self.blue,self.red,self.blue_ammo)[0].sum())
         self._update_fire_window_metrics(red_pairs,blue_pairs)
@@ -142,7 +153,7 @@ class CombatEnvironmentV30(MultiUAVCombatEnv):
         outcome=np.full(5,rcfg['win_reward'] if win else rcfg['lose_penalty'] if loss else rcfg['draw_reward'] if draw else 0.,dtype=float)
         after,diag_after=self.potential()
         shaping_after=self.shaping_next_potential(after,terminated,truncated)
-        adv=potential_shaping(before,shaping_after,rcfg)
+        adv=self.advantage_reward(before,shaping_after,dense)
         safe=safety_rewards(self.red,self.blue,rcfg)
         components=dict(event=event,outcome=outcome,adv=adv,safe=safe)
         rewards=sum(components.values(),np.zeros(5,dtype=float)).astype(np.float32)
@@ -151,6 +162,7 @@ class CombatEnvironmentV30(MultiUAVCombatEnv):
         aliases=dict(zip(('r1','r2','r3','r4'),components.values()))
         for name,value in {**components,**aliases}.items():self.episode_reward_components[name]+=value
         for name,value in event_diagnostics.items():self.episode_reward_components[name]+=value
+        for name,value in dense_diagnostics.items():self.episode_reward_components[name]+=value
         info=self._info(rewards,aliases,red_action,self.red_last_executed_phi,truncated,red_pairs,blue_pairs,
             len(red_attempts),len(blue_attempts),sum(x[2] for x in red_attempts),sum(x[2] for x in blue_attempts),len(red_kills),len(blue_kills))
         info.update(timeout=bool(truncated),red_ammo=self.red_ammo.copy(),blue_ammo=self.blue_ammo.copy(),
@@ -158,6 +170,7 @@ class CombatEnvironmentV30(MultiUAVCombatEnv):
                     phi_next_actual=after.copy(),phi_next_for_shaping=shaping_after.copy())
         for name,value in components.items():info[f'{name}_rewards']=value.copy()
         for name,value in event_diagnostics.items():info[f'{name}_rewards']=value.copy()
+        for name,value in dense_diagnostics.items():info[f'{name}_rewards']=value.copy()
         for label,phi,diagnostic in (('current',before,diag_before),('next',after,diag_after)):
             info[f'mean_potential_{label}']=float(phi.mean())
             for name in ('distance','angle'):info[f'mean_{name}_component_{label}']=float(diagnostic[name].mean())

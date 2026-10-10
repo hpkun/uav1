@@ -14,6 +14,26 @@ from tools.render_combat_episode_interactive import render as render_interactive
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.parametrize('version', ['33', '34', '35'])
+def test_versioned_recorder_preserves_full_episode_and_info(version):
+    from tools._capture_v33_reference import canonical
+    config = load_config(ROOT / f'configs/combat_environment_v{version}.yaml')
+    base, observed = MultiUAVCombatEnv(config), RecordingCombatEnv(config)
+    assert observed.environment_version == base.environment_version
+    assert canonical(base.reset(10000000)) == canonical(observed.reset(10000000))
+    rng = np.random.default_rng(44)
+    while True:
+        action = rng.uniform(-1, 1, (5, 3)).astype(np.float32)
+        expected, actual = base.step(action), observed.step(action)
+        assert canonical(expected) == canonical(actual)
+        np.testing.assert_array_equal(states_array(base.red + base.blue), states_array(observed.red + observed.blue))
+        assert base.rng.bit_generator.state == observed.rng.bit_generator.state
+        if version == '35':
+            assert base.fixed_policy.rng.bit_generator.state == observed.fixed_policy.rng.bit_generator.state
+        if actual[2] or actual[3]:
+            break
+
+
 def test_recorder_preserves_transition_and_rng_semantics():
     base, observed = MultiUAVCombatEnv(), RecordingCombatEnv()
     assert np.array_equal(base.reset(701)[0], observed.reset(701)[0])

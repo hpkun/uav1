@@ -4,7 +4,7 @@ from typing import Any
 import hashlib
 import json
 import numpy as np
-from env.combat_env import MultiUAVCombatEnv
+from env.combat_env import MultiUAVCombatEnv, DEFAULT_COMBAT_CONFIG
 from env.models import AircraftState
 from env.weapon import FireState
 from env.geometry import engagement_geometry
@@ -21,6 +21,16 @@ def states_array(states: list[AircraftState]) -> np.ndarray:
 
 class RecordingCombatEnv(MultiUAVCombatEnv):
     """Observe original event results without adding RNG draws or transitions."""
+    def __new__(cls, config=DEFAULT_COMBAT_CONFIG):
+        if cls is RecordingCombatEnv:
+            base = type(MultiUAVCombatEnv.__new__(MultiUAVCombatEnv, config))
+            if base is not MultiUAVCombatEnv:
+                # Keep recording hooks first while resolving initialization and
+                # combat/reset through the actual versioned environment class.
+                recording_class = type(f'Recording{base.__name__}', (cls, base), {})
+                return object.__new__(recording_class)
+        return object.__new__(cls)
+
     def reset(self, seed: int | None = None) -> tuple[np.ndarray, dict[str, Any]]:
         self.events = []
         return super().reset(seed)

@@ -51,7 +51,7 @@ def aggregate_combat_records(records: list[dict[str, Any]]) -> dict[str, float]:
         result[event] = result[f"red_{event}"] + result[f"blue_{event}"]
     for name in ("r1", "r2", "r3", "r4"):
         result[f"average_episode_{name}_total"] = mean(f"episode_{name}_total")
-    if all(row.get('environment_version') in ('3.0', '3.1', '3.2', '3.3', '3.4', '3.5') for row in records):
+    if all(row.get('environment_version') in ('3.0', '3.1', '3.2', '3.3', '3.4', '3.5', '3.6') for row in records):
         for name in ('event','outcome','adv','safe'):
             result[f'average_episode_{name}_total'] = mean(f'episode_{name}_total')
         for side in ('red','blue'):
@@ -59,14 +59,14 @@ def aggregate_combat_records(records: list[dict[str, Any]]) -> dict[str, float]:
                 result[f'{side}_{event}'] = mean(f'{side}_{event}')
             result[f'{side}_noncombat_loss_episode_rate'] = float(np.mean([
                 row[f'{side}_boundary_exits']+row[f'{side}_ground_losses']>0 for row in records]))
-    if all(row.get('environment_version') in ('3.3','3.4','3.5') for row in records):
+    if all(row.get('environment_version') in ('3.3','3.4','3.5','3.6') for row in records):
         for name in ('individual_event','team_casualty'):
             result[f'average_episode_{name}_total'] = mean(f'episode_{name}_total')
     if all(row.get('environment_version') == '3.4' and 'blue_evade_episode' in row for row in records):
         for mode in ('search','pursuit','evade','guard'):
             result[f'average_blue_{mode}_agent_steps'] = mean(f'blue_{mode}_agent_steps')
         result['blue_evade_episode_rate'] = mean('blue_evade_episode')
-    if all(row.get('environment_version') == '3.5' for row in records):
+    if all(row.get('environment_version') in ('3.5','3.6') for row in records):
         for name in ('boundary','horizontal','ground','ceiling'):
             result[f'average_blue_{name}_returns'] = mean(f'blue_{name}_returns')
         result['blue_boundary_return_episode_rate'] = mean('blue_boundary_return_episode')
@@ -75,6 +75,9 @@ def aggregate_combat_records(records: list[dict[str, Any]]) -> dict[str, float]:
                 result[f'average_blue_{name}_agent_steps'] = mean(f'blue_{name}_agent_steps')
             for name in ('escape','guerrilla','centripetal'):
                 result[f'blue_{name}_episode_rate'] = mean(f'blue_{name}_episode')
+    if all(row.get('environment_version') == '3.6' for row in records):
+        for name in ('guide','tactical_offense','tactical_defense','tactical'):
+            result[f'average_episode_{name}_total'] = mean(f'episode_{name}_total')
     return result
 
 
