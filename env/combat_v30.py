@@ -41,6 +41,13 @@ class CombatEnvironmentV30(MultiUAVCombatEnv):
     def build_weapon(self):
         return FiniteAmmoWeapon(**self.config['weapon'])
 
+    def attempt_hit_for_pair(self,attacker,target):
+        """Historical sampling order and RNG consumption remain unchanged."""
+        return self.weapon.attempt_hit(self.rng)
+
+    def reward_aliases(self,components,combat,boundary,dense_diagnostics):
+        return dict(zip(('r1','r2','r3','r4'),components.values()))
+
     def dense_combat_reward(self):
         """No arithmetic or diagnostic changes in historical environments."""
         return None, {}
@@ -104,7 +111,7 @@ class CombatEnvironmentV30(MultiUAVCombatEnv):
             if indices.size and ammo[i]>0:
                 j=int(min(indices,key=lambda j:(distance[i,j],j)))
                 ammo[i]-=1
-                attempts.append((i,j,self.weapon.attempt_hit(self.rng)))
+                attempts.append((i,j,self.attempt_hit_for_pair(attackers[i],targets[j])))
         self.combat_counts[side]['ammo_used']+=len(attempts)
         self.combat_counts[side]['fire_attempts']+=len(attempts)
         hits=sum(hit for _,_,hit in attempts);self.combat_counts[side]['weapon_hits']+=hits
@@ -159,7 +166,7 @@ class CombatEnvironmentV30(MultiUAVCombatEnv):
         rewards=sum(components.values(),np.zeros(5,dtype=float)).astype(np.float32)
         # Four aliases keep existing evaluator infrastructure readable; the new
         # explicit fields are authoritative and are not legacy state rewards.
-        aliases=dict(zip(('r1','r2','r3','r4'),components.values()))
+        aliases=self.reward_aliases(components,combat,boundary,dense_diagnostics)
         for name,value in {**components,**aliases}.items():self.episode_reward_components[name]+=value
         for name,value in event_diagnostics.items():self.episode_reward_components[name]+=value
         for name,value in dense_diagnostics.items():self.episode_reward_components[name]+=value

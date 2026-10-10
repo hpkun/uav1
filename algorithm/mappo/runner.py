@@ -416,10 +416,10 @@ class MAPPOTrainingRunner:
             "last_update_metrics": self.last_metrics, "evaluation_history": self.evaluation_history,
             **({f"average_episode_{name}_total": mean(f"episode_{name}_total")
                 for name in ('individual_event','team_casualty')}
-               if str(getattr(self,'env_config',{}).get('environment_version')) in ('3.3','3.4','3.5','3.6') else {}),
+               if str(getattr(self,'env_config',{}).get('environment_version')) in ('3.3','3.4','3.5','3.6','3.7') else {}),
             **({f"average_episode_{name}_total": mean(f"episode_{name}_total")
                 for name in ('guide','tactical_offense','tactical_defense','tactical')}
-               if str(getattr(self,'env_config',{}).get('environment_version')) == '3.6' else {}),
+               if str(getattr(self,'env_config',{}).get('environment_version')) in ('3.6','3.7') else {}),
             "best_evaluation_steps": best.get("sampled_steps"),
             "best_evaluation_win_rate": best.get("win_rate"),
             "best_evaluation_return": best.get("average_return"),
