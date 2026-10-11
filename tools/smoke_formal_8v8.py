@@ -15,6 +15,7 @@ from contextlib import redirect_stdout
 from unittest.mock import patch
 import hashlib
 import json
+import csv
 import numpy as np
 import torch
 import yaml
@@ -81,6 +82,7 @@ def run_smokes(output, names, seed=31, env_config=None):
             if env['environment_version']=='3.11': stem += '_v311'
             if env['environment_version']=='3.12': stem += '_v312'
             if env['environment_version']=='3.13': stem += '_v313'
+            if env['environment_version']=='3.14': stem += '_v314'
         config_path=ROOT/f'configs/{stem}.yaml'
         cfg=yaml.safe_load(config_path.read_text())
         run=output/name
@@ -92,6 +94,19 @@ def run_smokes(output, names, seed=31, env_config=None):
             else runner.trainer.update.__module__)
         original_gae=gae_module.compute_gae
         gae_checks=[]
+        rollout_checks=[]
+        original_update=runner.trainer.update
+        def checked_update(batch):
+            for key in ('observations','actions','rewards'):
+                assert np.isfinite(getattr(batch,key)).all(), f'nonfinite {key}'
+            rollout_checks.append(True)
+            result=original_update(batch)
+            for module in (runner.trainer.actor,runner.trainer.critic):
+                for parameter in module.parameters():
+                    assert torch.isfinite(parameter).all()
+                    if parameter.grad is not None:
+                        assert torch.isfinite(parameter.grad).all()
+            return result
         def checked_gae(*args,**kwargs):
             assert all(torch.isfinite(v).all() for v in args if isinstance(v,torch.Tensor))
             result=original_gae(*args,**kwargs)
@@ -99,6 +114,7 @@ def run_smokes(output, names, seed=31, env_config=None):
             gae_checks.append(True)
             return result
         try:
+            initial_actor_fingerprint=fingerprint(runner.trainer.actor.state_dict())
             initial={k:v.detach().cpu().clone() for k,v in runner.trainer.critic.state_dict().items()}
             if reference is None: reference=initial
             else:
@@ -117,7 +133,7 @@ def run_smokes(output, names, seed=31, env_config=None):
                 'validation_total_sampled_steps':512,'validation_evaluation_episodes':2,
                 'environment_config_sha256':config_sha256(env),
                 'algorithm_config_sha256':config_sha256(cfg)},indent=2))
-            with (run/'train.log').open('w') as log, redirect_stdout(TeeOutput(sys.stdout,log)), patch.object(gae_module,'compute_gae',checked_gae):
+            with (run/'train.log').open('w') as log, redirect_stdout(TeeOutput(sys.stdout,log)), patch.object(gae_module,'compute_gae',checked_gae), patch.object(runner.trainer,'update',checked_update):
                 print(f'[CUDA-SMOKE] algorithm={cfg["algorithm"]} | cap=512 | formal_dimensions_and_ppo=true',flush=True)
                 print(runner.start_log_line(),flush=True)
                 summary=runner.run()
@@ -126,6 +142,9 @@ def run_smokes(output, names, seed=31, env_config=None):
         finally:
             runner.vector.close()
         assert summary['sampled_steps']==512 and summary['rollout_updates']==1
+        assert rollout_checks and summary['actor_updates']>0 and summary['critic_updates']>0
+        assert fingerprint(runner.trainer.actor.state_dict())!=initial_actor_fingerprint
+        assert fingerprint(runner.trainer.critic.state_dict())!=fingerprint(initial)
         assert gae_checks, 'the real update must compute finite GAE'
         metrics=summary['last_update_metrics']
         assert np.isfinite(list(metrics.values())).all()
@@ -161,6 +180,14 @@ def run_smokes(output, names, seed=31, env_config=None):
         seeds=range(int(cfg['implementation']['evaluation_seed_base']),int(cfg['implementation']['evaluation_seed_base'])+2)
         evaluation=evaluator(checkpoint,cfg,env,'cuda',seeds)
         assert evaluation['evaluation_episodes']==2 and evaluation['protocol_complete']
+        if env['environment_version']=='3.14':
+            assert evaluation['checkpoint_environment_version']=='3.14'
+            # The official reloaded evaluation is the bounded smoke's history;
+            # no additional episodes are needed solely to create the CSV.
+            with (run/'evaluation_history.csv').open('w',newline='') as stream:
+                row={'environment_version':'3.14','sampled_steps':512,**evaluation}
+                writer=csv.DictWriter(stream,fieldnames=list(row))
+                writer.writeheader();writer.writerow(row)
         (run/'reloaded_evaluation.json').write_text(json.dumps(evaluation,indent=2))
         records[name]={'algorithm':cfg['algorithm'],'sampled_steps':512,'num_envs':16,
             'formal_network_and_ppo':True,'configured_rollout_steps':256,'actual_final_rollout_steps':32,
@@ -169,6 +196,9 @@ def run_smokes(output, names, seed=31, env_config=None):
             'critic_initial_sha256':fingerprint(initial),'finite_gradients_parameters_and_values':True,
             'observation_dim':obs_dim,
             'finite_rewards_advantages_and_returns':True,
+            'finite_observations_actions_and_gradients':True,
+            'actor_parameters_changed':True,'critic_parameters_changed':True,
+            'actor_updates':summary['actor_updates'],'critic_updates':summary['critic_updates'],
             'recurrent_reset_verified':name in ('rmappo','stea-mappo'),
             'metrics':metrics,'evaluation_after_checkpoint_reload':evaluation}
         print(f'[SMOKE-DONE] {cfg["algorithm"]}: epochs={metrics["effective_ppo_epochs"]}, '

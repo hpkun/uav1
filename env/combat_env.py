@@ -32,6 +32,9 @@ class MultiUAVCombatEnv:
     def __new__(cls, config=DEFAULT_COMBAT_CONFIG):
         if cls is MultiUAVCombatEnv:
             candidate = config if isinstance(config, dict) else load_config(config)
+            if str(candidate.get('environment_version')) == '3.14':
+                from .combat_v314 import CombatEnvironmentV314
+                return object.__new__(CombatEnvironmentV314)
             if str(candidate.get('environment_version')) == '3.13':
                 from .combat_v313 import CombatEnvironmentV313
                 return object.__new__(CombatEnvironmentV313)
@@ -169,7 +172,9 @@ class MultiUAVCombatEnv:
         return [state.copy() for state in states]
 
     def _advance(self, states: list[AircraftState], actions: np.ndarray) -> np.ndarray:
-        phis = np.zeros(self.team_size, dtype=np.float32)
+        # v3.14 exposes phi in float64 observations: retain the actual control
+        # value, including +/-pi/2. Historical versions keep float32 traces.
+        phis = np.zeros(self.team_size, dtype=np.float64 if self.environment_version == '3.14' else np.float32)
         for index, state in enumerate(states):
             if state.alive:
                 control = action_to_control(state, actions[index], self.config["action"])
