@@ -76,6 +76,7 @@ class RMAPPOTrainingRunner(MAPPOTrainingRunner):
         return MAPPOTrainingRunner.done_log_line(summary).replace("algorithm=MAPPO","algorithm=RMAPPO")
 
     def collect_rollout(self,vector_steps=None):
+        self._begin_rollout_metrics()
         storage = {key:[] for key in RecurrentRolloutBatch.__dataclass_fields__}
         for _ in range(self.rollout_steps if vector_steps is None else int(vector_steps)):
             obs,alive = self.observations.copy(),self.alive_masks.copy()
@@ -98,7 +99,7 @@ class RMAPPOTrainingRunner(MAPPOTrainingRunner):
             self.observations,self.alive_masks = result.observations,self.vector.current_alive_masks.copy()
             self.trainer.sampled_steps += self.num_envs
             self.trainer.vector_steps += 1
-            self._write_step_metrics(result,rows)
+            self._accumulate_rollout_metrics(result,rows)
         return RecurrentRolloutBatch(**{key:np.stack(values).astype(np.float32) for key,values in storage.items()})
 
     def _evaluation_record(self):

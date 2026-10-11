@@ -317,12 +317,12 @@ def review_runtime_semantics():
                 r=json.loads(line)
                 updates.append({k:r[k] for k in ('sampled_steps','rollout_update','effective_ppo_epochs')})
         completed, actual_timeout = 0, 0.
-        with (run/'training_metrics.jsonl').open() as stream:
-            for line in stream:
-                row=json.loads(line)
-                n=row.get('evaluation_episodes',0)
-                completed+=n
-                actual_timeout+=n*(row.get('timeout_rate') or 0)
+        from algorithm.common.training_log import read_training_records, training_record_kind
+        for row in read_training_records(run/'training_metrics.jsonl'):
+            if training_record_kind(row)=='ppo_update':continue
+            n=row.get('evaluation_episodes',0)
+            completed+=n
+            actual_timeout+=n*(row.get('timeout_rate') or 0)
         import re
         first_log=next(line for line in (run/'train.log').read_text().splitlines() if '[TRAIN] steps=20480/' in line)
         episode_count=int(re.search(r'\beps=(\d+)',first_log)[1])

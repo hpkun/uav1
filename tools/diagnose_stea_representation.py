@@ -394,15 +394,20 @@ def weighted_training_summary(rows):
 
 
 def analyze_logs(run_dir, training_seed):
+    from algorithm.common.training_log import read_training_records, training_record_kind
     run_dir = Path(run_dir)
     updates = list(read_jsonl(run_dir/'optimization_metrics.jsonl'))
     evaluations = numeric_csv(run_dir/'evaluation_history.csv')
     completed, recorded_updates = [], []
-    for row in read_jsonl(run_dir/'training_metrics.jsonl'):
-        if row.get('record_type')=='ppo_update':recorded_updates.append(row)
+    for row in read_training_records(run_dir/'training_metrics.jsonl'):
+        if training_record_kind(row)=='ppo_update':recorded_updates.append(row)
         elif row.get('evaluation_episodes',0)>0:completed.append(row)
-    if len(recorded_updates)!=len(updates):raise RuntimeError('training/optimization update count differs')
-    for left,right in zip(recorded_updates,updates):
+    # Optimization is authoritative. Mixed resumed logs may contain duplicates
+    # only for the legacy prefix; compact logs intentionally contain none.
+    by_step={row['sampled_steps']:row for row in updates}
+    for left in recorded_updates:
+        if left['sampled_steps'] not in by_step:raise RuntimeError('legacy duplicate has no optimization update')
+        right=by_step[left['sampled_steps']]
         for key in LOG_FIELDS:
             if key in right and left.get(key)!=right[key]:raise RuntimeError(f'duplicate log differs: {key}')
     intervals = [(450000,600000),(800000,1000000),(1450000,1700000),(1800000,2000000)] if training_seed==1 else [

@@ -129,7 +129,9 @@ def test_true_truncated_episode_in_training_metrics_and_summary(tmp_path,name):
     runner.trainer=SimpleNamespace(sampled_steps=1,vector_steps=1,ppo_update_count=0,actor_update_count=0,critic_update_count=0)
     runner.output_dir=tmp_path;runner.last_metrics={};runner.completed_records=[row]
     runner.best_evaluation=None;runner.evaluation_history=[];runner.startup_summary=lambda:{}
-    runner._write_step_metrics(SimpleNamespace(rewards=reward[None,:],infos=[info]),[row])
+    runner._begin_rollout_metrics()
+    runner._accumulate_rollout_metrics(SimpleNamespace(rewards=reward[None,:],infos=[info]),[row])
+    runner._write_rollout_metrics()
     written=json.loads((tmp_path/'training_metrics.jsonl').read_text())
     assert written['timeout_rate']==1 and runner.summary()['timeout_rate']==1
     assert aggregate_combat_records([row])['timeout_rate']==1

@@ -326,7 +326,7 @@ def test_rmappo_runner_resets_individual_death_and_whole_completed_environment()
         next_alive_masks=next_alive,observations=runner.observations)
     runner.vector=SimpleNamespace(step_batch=lambda _:result,current_alive_masks=np.ones((2,5),np.float32))
     runner.vector.current_alive_masks[0,1]=0
-    runner._completed=lambda _:[];runner._write_step_metrics=lambda *_:None
+    runner._completed=lambda _:[];runner._accumulate_rollout_metrics=lambda *_:None
     batch=runner.collect_rollout()
     assert np.all(batch.actor_hidden_states[0]==2)
     assert np.count_nonzero(runner.actor_hidden_states[0,1])==0

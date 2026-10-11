@@ -200,21 +200,41 @@ class MAPPOTrainingRunner:
                 self.agent_episode_returns[index].fill(0.0)
         return rows
 
-    def _write_step_metrics(self, result, rows: list[dict[str, Any]]) -> None:
+    def _begin_rollout_metrics(self) -> None:
+        self._rollout_metrics = {"vector_steps": 0, "sampled_steps": 0,
+                                 "sums": {}, "counts": {}, "completed_rows": []}
+
+    def _accumulate_rollout_metrics(self, result, rows: list[dict[str, Any]]) -> None:
+        metrics = self._rollout_metrics
+        metrics["vector_steps"] += 1
+        metrics["sampled_steps"] += len(result.infos)
+        metrics["completed_rows"].extend(rows)
+        values = {"mean_step_reward": result.rewards}
+        for name in ("r1", "r2", "r3", "r4"):
+            values[f"mean_{name}_reward"] = np.concatenate([
+                np.asarray(info[f"{name}_rewards"]).reshape(-1) for info in result.infos])
+        for side in ("red", "blue"):
+            for field in ("fire_window_pairs", "step_fire_attempts", "step_weapon_hits"):
+                key = f"{side}_{field}"
+                values[key] = [info[key] for info in result.infos]
+        for key, value in values.items():
+            array = np.asarray(value, dtype=np.float64)
+            metrics["sums"][key] = metrics["sums"].get(key, 0.0) + float(array.sum())
+            metrics["counts"][key] = metrics["counts"].get(key, 0) + array.size
+
+    def _finalize_rollout_metrics(self) -> dict[str, Any]:
+        metrics = self._rollout_metrics
+        rows = metrics["completed_rows"]
         mean = lambda key: float(np.mean([r[key] for r in rows])) if rows else None
         rate = lambda predicate: float(np.mean([predicate(r) for r in rows])) if rows else None
         record = {
+            "record_type": "rollout_summary",
             "sampled_steps": self.trainer.sampled_steps,
-            "mean_step_reward": float(np.mean(result.rewards)),
-            **{f"mean_{name}_reward": float(np.mean(np.stack([
-                info[f"{name}_rewards"] for info in result.infos
-            ]))) for name in ("r1", "r2", "r3", "r4")},
-            **{f"{side}_fire_window_pairs": float(np.mean([
-                info[f"{side}_fire_window_pairs"] for info in result.infos
-            ])) for side in ("red", "blue")},
-            **{f"{side}_step_{event}": float(np.mean([
-                info[f"{side}_step_{event}"] for info in result.infos
-            ])) for side in ("red", "blue") for event in ("fire_attempts", "weapon_hits")},
+            "rollout_update": self.trainer.ppo_update_count,
+            "rollout_vector_steps": metrics["vector_steps"],
+            "rollout_sampled_steps": metrics["sampled_steps"],
+            "completed_episodes_in_rollout": len(rows),
+            **{key: total / metrics["counts"][key] for key, total in metrics["sums"].items()},
             "team_episode_return": mean("team_episode_return"),
             "mean_agent_episode_return": mean("mean_agent_episode_return"),
             "win_rate": mean("red_success"), "loss_rate": mean("blue_win"),
@@ -233,15 +253,19 @@ class MAPPOTrainingRunner:
             **{f"episode_{name}_total": mean(f"episode_{name}_total")
                for name in ("r1", "r2", "r3", "r4")},
             **{key: self.last_metrics.get(key) for key in (
-                "actor_loss", "value_loss", "entropy", "approx_kl", "clip_fraction",
-                "value", "explained_variance", "actor_grad_norm", "critic_grad_norm")},
+                "actor_loss", "value_loss", "entropy", "approx_kl", "clip_fraction")},
         }
         if rows:
             record.update(aggregate_combat_records(rows))
+        return record
+
+    def _write_rollout_metrics(self) -> None:
+        record = self._finalize_rollout_metrics()
         with (self.output_dir / "training_metrics.jsonl").open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(record) + "\n")
 
     def collect_rollout(self, vector_steps: int | None = None) -> RolloutBatch:
+        self._begin_rollout_metrics()
         storage = {key: [] for key in ("observations", "actions", "raw_actions", "old_log_probs",
                    "rewards", "dones", "alive_masks", "next_observations",
                    "next_alive_masks")}
@@ -263,7 +287,7 @@ class MAPPOTrainingRunner:
             rows = self._completed(result)
             self.observations, self.alive_masks = result.observations, self.vector.current_alive_masks.copy()
             self.trainer.sampled_steps += self.num_envs; self.trainer.vector_steps += 1
-            self._write_step_metrics(result, rows)
+            self._accumulate_rollout_metrics(result, rows)
         return RolloutBatch(**{key: np.stack(value).astype(np.float32)
                                for key, value in storage.items()})
 
@@ -289,9 +313,7 @@ class MAPPOTrainingRunner:
                     "a", encoding="utf-8"
                 ) as stream:
                     stream.write(json.dumps(update_record) + "\n")
-                if self.trainer.actor.policy_std_mode == "state_independent" or self.trainer.target_kl is not None:
-                    with (self.output_dir / "training_metrics.jsonl").open("a", encoding="utf-8") as stream:
-                        stream.write(json.dumps({"record_type": "ppo_update", **update_record}) + "\n")
+                self._write_rollout_metrics()
                 if self.trainer.sampled_steps >= self.next_console_log:
                     print(self.train_log_line(), flush=True)
                     while self.next_console_log <= self.trainer.sampled_steps:

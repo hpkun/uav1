@@ -151,7 +151,9 @@ def test_new_diagnostics_in_training_writer_and_summary(tmp_path,name):
     runner=object.__new__(cls);runner.env_config=cfg();runner.output_dir=tmp_path
     runner.trainer=SimpleNamespace(sampled_steps=1,vector_steps=1,ppo_update_count=0,actor_update_count=0,critic_update_count=0)
     runner.completed_records=[row];runner.best_evaluation=None;runner.evaluation_history=[];runner.last_metrics={};runner.startup_summary=lambda:{}
-    runner._write_step_metrics(SimpleNamespace(rewards=reward[None,:],infos=[info]),[row])
+    runner._begin_rollout_metrics()
+    runner._accumulate_rollout_metrics(SimpleNamespace(rewards=reward[None,:],infos=[info]),[row])
+    runner._write_rollout_metrics()
     for record in (runner.summary(),json.loads((tmp_path/'training_metrics.jsonl').read_text())):
         assert record['average_episode_team_casualty_total']==-10 and record['average_episode_individual_event_total']==-10
 
