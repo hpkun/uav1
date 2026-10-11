@@ -18,7 +18,7 @@ import torch
 import yaml
 from algorithm.common.evaluator import aggregate_combat_records, episode_return_metrics
 from algorithm.common.protocol import config_sha256
-from algorithm.stea_mappo.networks import decompose_observations
+from algorithm.stea_mappo.networks import decompose_observations, entity_valid_mask
 from algorithm.stea_mappo.trainer import RecurrentRolloutBatch
 from env.factory import make_combat_environment
 from tools.evaluate_policy_modes import load_policy
@@ -96,8 +96,8 @@ def one_step_counterfactuals(actor, obs, hidden, alive, start, learned_action):
     """Same visited state and incoming memory; inputs and weights are untouched."""
     _, allies, enemies = decompose_observations(obs)
     own, ally, enemy = actor.encode_entities(obs)
-    a_valid = (allies[...,-1]>.5) & (alive[...,None]>.5)
-    e_valid = (enemies[...,-1]>.5) & (alive[...,None]>.5)
+    a_valid = entity_valid_mask(allies, alive, obs.shape[-1])
+    e_valid = entity_valid_mask(enemies, alive, obs.shape[-1])
     a_context = uniform_context(actor.ally_attention, ally, a_valid)
     e_context = uniform_context(actor.enemy_attention, enemy, e_valid)
     spatial = actor.spatial_fusion(torch.cat((own,a_context,e_context),-1))
@@ -151,7 +151,7 @@ def rollout(trainer, env_config, seeds, *, representation=True, memoryless=False
             if representation:
                 _, allies, enemies = decompose_observations(obs)
                 for side,features in (('ally',allies),('enemy',enemies)):
-                    valid = (features[...,-1]>.5) & live[...,None]
+                    valid = entity_valid_mask(features, alive, obs.shape[-1])
                     rows,k = concentration_rows(attention[f'{side}_attention_weights'],valid)
                     attention_rows[side].append(rows[live].cpu().numpy()); k_rows[side].append(k[live].cpu().numpy())
                     if (attention[f'{side}_attention_weights'] * (~valid)[...,None,:]).count_nonzero():
@@ -162,7 +162,7 @@ def rollout(trainer, env_config, seeds, *, representation=True, memoryless=False
                 action_rows.append(torch.stack((uniform_diff[live],zero_diff[live]),1).cpu().numpy())
                 effective = before * alive[:,None]*(1-start)
                 hidden_rows.append(torch.stack((effective.norm(dim=-1)[live],next_hidden.norm(dim=-1)[live]),1).cpu().numpy())
-                valid = (enemies[...,-1]>.5) & live[:,None]
+                valid = entity_valid_mask(enemies, alive, obs.shape[-1])
                 chosen = attention['enemy_attention_weights'].mean(-2).argmax(-1)
                 ranks = torch.stack([ranked_slot(enemies,valid,chosen,col) for col in (0,3,4)],-1)
                 eligible = live & valid.any(-1)
@@ -279,7 +279,7 @@ def rollout_batched(trainer, env_config, seeds, *, representation=True, memoryle
         if representation:
             _,allies,enemies=decompose_observations(obs)
             for side,features in (('ally',allies),('enemy',enemies)):
-                valid=(features[...,-1]>.5)&live[...,None]
+                valid=entity_valid_mask(features, alive, obs.shape[-1])
                 rows,k=concentration_rows(attention[f'{side}_attention_weights'],valid)
                 a_rows[side].append(rows[live].cpu().numpy());k_rows[side].append(k[live].cpu().numpy())
                 if (attention[f'{side}_attention_weights']*(~valid)[...,None,:]).count_nonzero():
@@ -290,7 +290,7 @@ def rollout_batched(trainer, env_config, seeds, *, representation=True, memoryle
             action_rows.append(torch.stack((uniform_diff[live],zero_diff[live]),1).cpu().numpy())
             effective=before*alive[...,None]*(1-starts)[:,None,None]
             hidden_rows.append(torch.stack((effective.norm(dim=-1)[live],next_hidden.norm(dim=-1)[live]),1).cpu().numpy())
-            valid=(enemies[...,-1]>.5)&live[...,None]
+            valid=entity_valid_mask(enemies, alive, obs.shape[-1])
             chosen=attention['enemy_attention_weights'].mean(-2).argmax(-1)
             ranks=torch.stack([ranked_slot(enemies,valid,chosen,col) for col in (0,3,4)],-1)
             eligible=live&valid.any(-1);selected=chosen.cpu().numpy()

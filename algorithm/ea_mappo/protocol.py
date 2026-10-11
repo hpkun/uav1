@@ -15,14 +15,16 @@ def require_cuda(device):
 def architecture_from_config(config,smoke=False):
     n=config["network"]
     layout = {"self_feature_dim":8} if n.get("self_feature_dim",7)==8 else {}
+    if n.get('observation_layout', 'legacy') != 'legacy':
+        layout['observation_layout'] = n['observation_layout']
     return {**{key:n[key] for key in ('actor_type', 'entity_dim', 'entity_attention_heads', 'spatial_hidden_dim', 'critic_type')},
         "critic_hidden_dim":int(n["critic_hidden_layers"][0]),**actor_architecture_protocol(config),**layout}
 
 
 def validate_checkpoint(state, env_config, algorithm_config):
     validate_config(algorithm_config)
-    if str(env_config["environment_version"]) not in {"2.4","2.5","2.6","2.7","2.8","2.9","3.0","3.1","3.2","3.3","3.4","3.5","3.6","3.7","3.8", "3.9", "3.10", "3.11"}:
-        raise RuntimeError("formal control requires environment_version 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 3.10 or 3.11")
+    if str(env_config["environment_version"]) not in {"2.4","2.5","2.6","2.7","2.8","2.9","3.0","3.1","3.2","3.3","3.4","3.5","3.6","3.7","3.8", "3.9", "3.10", "3.11", "3.12"}:
+        raise RuntimeError("formal control requires environment_version 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 3.10, 3.11 or 3.12")
     dimensions = environment_dimensions(env_config)
     network = algorithm_config["network"]
     if dimensions != tuple(network[key] for key in ("observation_dim","action_dim","num_agents")):

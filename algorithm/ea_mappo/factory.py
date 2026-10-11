@@ -13,5 +13,6 @@ def build_ea_mappo_trainer(config,device,*,seed=None,smoke=False):
     n = config["network"]
     kwargs.update({key:n[key] for key in ('entity_dim', 'entity_attention_heads', 'spatial_hidden_dim')})
     kwargs["self_feature_dim"]=n.get("self_feature_dim",7)
+    kwargs['observation_layout'] = n.get('observation_layout', 'legacy')
     # Smoke retains formal actor/critic dimensions and PPO hyperparameters.
     return EAMAPPOTrainer(**kwargs)

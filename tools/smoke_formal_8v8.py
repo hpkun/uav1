@@ -79,6 +79,7 @@ def run_smokes(output, names, seed=31, env_config=None):
             if env['environment_version']=='3.9': stem += '_v39'
             if env['environment_version']=='3.10': stem += '_v310'
             if env['environment_version']=='3.11': stem += '_v311'
+            if env['environment_version']=='3.12': stem += '_v312'
         config_path=ROOT/f'configs/{stem}.yaml'
         cfg=yaml.safe_load(config_path.read_text())
         run=output/name
@@ -147,6 +148,10 @@ def run_smokes(output, names, seed=31, env_config=None):
                 assert torch.equal(reset_actions,zero_actions) and torch.equal(reset_hidden,zero_hidden)
             if name in ('ea-mappo','stea-mappo'):
                 assert runner.trainer.actor.self_feature_dim==(8 if obs_dim==66 else 7)
+                if obs_dim == 56:
+                    assert [runner.trainer.actor.self_encoder[0].in_features,
+                        runner.trainer.actor.ally_encoder[0].in_features,
+                        runner.trainer.actor.enemy_encoder[0].in_features] == [7,6,5]
         checkpoint=run/'latest.pt'
         state=torch.load(checkpoint,map_location='cpu',weights_only=False)
         extra=state['extra']
@@ -161,6 +166,7 @@ def run_smokes(output, names, seed=31, env_config=None):
             'actor_parameter_count':startup['actor_parameter_count'],
             'critic_parameter_count':startup['critic_parameter_count'],'critic_input_dim':critic_input_dim,
             'critic_initial_sha256':fingerprint(initial),'finite_gradients_parameters_and_values':True,
+            'observation_dim':obs_dim,
             'finite_rewards_advantages_and_returns':True,
             'recurrent_reset_verified':name in ('rmappo','stea-mappo'),
             'metrics':metrics,'evaluation_after_checkpoint_reload':evaluation}

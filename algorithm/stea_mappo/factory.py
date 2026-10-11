@@ -1,13 +1,15 @@
 """Validated STEA-MAPPO construction; baseline factories remain unchanged."""
 from .trainer import STEAMAPPOTrainer
 from algorithm.common.critic_protocol import layer_width
+from algorithm.common.entity_layout import validate_entity_layout
 
 
 def validate_config(config):
     if config.get("algorithm") != "STEA-MAPPO":
         raise ValueError("algorithm must be STEA-MAPPO")
     n,t,i = (config[key] for key in ("network","training","implementation"))
-    if n["num_agents"] not in (4,5,8) or n["observation_dim"] != 13*n["num_agents"]+n.get("self_feature_dim",7)-7 or n["action_dim"] != 3:
+    validate_entity_layout(n)
+    if n["num_agents"] not in (4,5,8) or n["action_dim"] != 3:
         raise ValueError("STEA-MAPPO requires dimensions 52/3/4, 65/3/5 or 104/3/8")
     if n.get("self_feature_dim",7) not in (7,8) or (n.get("self_feature_dim",7)==8 and n["num_agents"]!=5):
         raise ValueError("STEA self feature layout mismatch")
@@ -48,6 +50,7 @@ def build_stea_mappo_trainer(config, device, *, seed=None, smoke=False):
         log_std_init=float(i.get("log_std_init", -.5)),
         mean_head_init_gain=float(i.get("mean_head_init_gain", .01)), target_kl=t.get("target_kl"))
     kwargs["self_feature_dim"]=n.get("self_feature_dim",7)
+    kwargs['observation_layout'] = n.get('observation_layout', 'legacy')
     kwargs.update(hidden_dim=64 if smoke else int(n["critic_hidden_layers"][0]),device=device,
                   critic_hidden_dim=64 if smoke else int(n["critic_hidden_layers"][0]),
                   seed=int(t["seed"] if seed is None else seed))

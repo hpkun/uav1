@@ -3,20 +3,25 @@ from pathlib import Path
 import torch
 from algorithm.mappo.trainer import MAPPOTrainer
 from algorithm.common.policy_protocol import validate_trainer_policy_protocol
+from algorithm.common.entity_layout import validate_entity_layout
 from .networks import EntityAttentionActor, spatial_diagnostics
 
 EAMAPPO_IMPL_VERSION = 1
 
 
 class EAMAPPOTrainer(MAPPOTrainer):
-    def __init__(self, *, entity_dim=64, entity_attention_heads=2, spatial_hidden_dim=128, self_feature_dim=7, **kwargs):
+    def __init__(self, *, entity_dim=64, entity_attention_heads=2, spatial_hidden_dim=128, self_feature_dim=7,
+                 observation_layout='legacy', **kwargs):
         if kwargs.get("critic_type") != "mlp":
             raise ValueError("EA-MAPPO requires CentralizedMLPCritic")
+        validate_entity_layout(dict(observation_dim=kwargs.get('observation_dim', 52),
+            action_dim=kwargs.get('action_dim', 3), num_agents=kwargs.get('num_agents', 4),
+            self_feature_dim=self_feature_dim, observation_layout=observation_layout))
         super().__init__(**kwargs)
         self.actor = EntityAttentionActor(entity_dim,entity_attention_heads,spatial_hidden_dim,
             self.action_dim,kwargs.get("log_std_min",-5.),kwargs.get("log_std_max",.5),
             kwargs.get("policy_std_mode","state_independent"),kwargs.get("log_std_init",-.5),
-            kwargs.get("mean_head_init_gain",.01),self_feature_dim).to(self.device)
+            kwargs.get("mean_head_init_gain",.01),self_feature_dim,observation_layout).to(self.device)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(),lr=kwargs.get("actor_learning_rate",3e-4))
         self.actor_hidden_dim = 128
         self.network_architecture = dict(actor_type="entity_attention",entity_dim=64,
@@ -24,6 +29,8 @@ class EAMAPPOTrainer(MAPPOTrainer):
             critic_hidden_dim=self.critic_hidden_dim,
             **{k:v for k,v in self.policy_protocol().items() if k != "target_kl"})
         if self_feature_dim == 8: self.network_architecture['self_feature_dim'] = 8
+        if observation_layout != 'legacy':
+            self.network_architecture['observation_layout'] = observation_layout
 
     def update(self, rollout):
         metrics = super().update(rollout)

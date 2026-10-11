@@ -8,6 +8,7 @@ from torch import nn
 from algorithm.mappo.trainer import MAPPOTrainer, RolloutBatch, compute_gae, masked_mean
 from .networks import SpatioTemporalEntityAttentionActor, attention_diagnostics
 from algorithm.common.policy_protocol import validate_trainer_policy_protocol
+from algorithm.common.entity_layout import validate_entity_layout
 
 STEA_MAPPO_IMPL_VERSION = 1
 
@@ -35,12 +36,15 @@ def pack_sequences(tensor, chunks, length, pad=0):
 class STEAMAPPOTrainer(MAPPOTrainer):
     def __init__(self, *, entity_dim=64, entity_attention_heads=2,
                  spatial_hidden_dim=128, gru_hidden_dim=128, gru_layers=1,
-                 recurrent_sequence_length=32, self_feature_dim=7, **kwargs):
+                 recurrent_sequence_length=32, self_feature_dim=7, observation_layout='legacy', **kwargs):
         if kwargs.get("critic_type", "attention") not in {"attention", "mlp"}:
             raise ValueError("STEA-MAPPO critic_type must be attention or mlp")
         if kwargs.get("actor_activation", "relu") != "relu":
             raise ValueError("STEA-MAPPO actor activation must be relu")
-        if kwargs.get("observation_dim", 52) != 13*kwargs.get("num_agents", 4)+self_feature_dim-7 or kwargs.get("action_dim", 3) != 3:
+        validate_entity_layout(dict(observation_dim=kwargs.get('observation_dim', 52),
+            action_dim=kwargs.get('action_dim', 3), num_agents=kwargs.get('num_agents', 4),
+            self_feature_dim=self_feature_dim, observation_layout=observation_layout))
+        if kwargs.get("action_dim", 3) != 3:
             raise ValueError("STEA-MAPPO requires observation/action/agents=13*N/3/N")
         self.sequence_length = int(recurrent_sequence_length)
         if self.sequence_length <= 0 or int(kwargs.get("minibatch_size", 512)) % self.sequence_length:
@@ -55,6 +59,7 @@ class STEAMAPPOTrainer(MAPPOTrainer):
             kwargs.get("policy_std_mode", "state_dependent"), kwargs.get("log_std_init", -.5),
             kwargs.get("mean_head_init_gain", .01),
             self_feature_dim,
+            observation_layout,
         ).to(self.device)
         self.actor_optimizer = torch.optim.Adam(
             self.actor.parameters(), lr=kwargs.get("actor_learning_rate", 3e-4))
@@ -68,6 +73,8 @@ class STEAMAPPOTrainer(MAPPOTrainer):
         }
         self.actor_hidden_dim = int(gru_hidden_dim)
         if self_feature_dim == 8: self.network_architecture['self_feature_dim'] = 8
+        if observation_layout != 'legacy':
+            self.network_architecture['observation_layout'] = observation_layout
         if self.critic_type == "attention":
             self.network_architecture["critic_attention_heads"] = self.attention_heads
         if self.actor.policy_std_mode == "state_independent":

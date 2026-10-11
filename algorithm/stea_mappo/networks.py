@@ -5,10 +5,15 @@ import torch
 from torch import nn
 from torch.distributions import Normal
 from algorithm.mappo.networks import SharedMAPPOActor
+from algorithm.common.entity_layout import entity_feature_dims
 
 
 def decompose_observations(observations: torch.Tensor):
     dimension = observations.shape[-1]
+    if dimension == 56:
+        prefix = observations.shape[:-1]
+        return (observations[..., :7], observations[..., 7:31].reshape(*prefix, 4, 6),
+                observations[..., 31:56].reshape(*prefix, 5, 5))
     self_dim = 8 if dimension % 13 == 1 else 7
     if (dimension - (self_dim-7)) % 13 or dimension < 26:
         raise ValueError('STEA observations must have 13*N features, N >= 2 (52 for 4v4)')
@@ -17,6 +22,11 @@ def decompose_observations(observations: torch.Tensor):
     prefix = observations.shape[:-1]
     return (observations[..., :self_dim], observations[..., self_dim:ally_end].reshape(*prefix, agents - 1, 7),
             observations[..., ally_end:].reshape(*prefix, agents, 6))
+
+
+def entity_valid_mask(features: torch.Tensor, alive: torch.Tensor, observation_dim: int):
+    valid = (features != 0).any(-1) if observation_dim == 56 else features[..., -1] > .5
+    return valid & (alive[..., None] > .5)
 
 
 class MaskedEntityAttention(nn.Module):
@@ -53,7 +63,8 @@ class SpatioTemporalEntityAttentionActor(nn.Module):
                  gru_layers: int = 1, action_dim: int = 3,
                  log_std_min: float = -5., log_std_max: float = 2.,
                  policy_std_mode: str = "state_dependent", log_std_init: float = -.5,
-                 mean_head_init_gain: float = .01, self_feature_dim: int = 7):
+                 mean_head_init_gain: float = .01, self_feature_dim: int = 7,
+                 observation_layout: str = 'legacy'):
         super().__init__()
         if gru_layers != 1:
             raise ValueError('STEA v1 requires one unidirectional GRU layer')
@@ -65,9 +76,11 @@ class SpatioTemporalEntityAttentionActor(nn.Module):
         self.log_std_min, self.log_std_max = log_std_min, log_std_max
         if self_feature_dim not in (7,8): raise ValueError('self_feature_dim must be 7 or 8')
         self.self_feature_dim = self_feature_dim
+        self.observation_layout = observation_layout
+        _, ally_dim, enemy_dim = entity_feature_dims(observation_layout, self_feature_dim)
         self.self_encoder = nn.Sequential(nn.Linear(self_feature_dim, entity_dim), nn.ReLU())
-        self.ally_encoder = nn.Sequential(nn.Linear(7, entity_dim), nn.ReLU())
-        self.enemy_encoder = nn.Sequential(nn.Linear(6, entity_dim), nn.ReLU())
+        self.ally_encoder = nn.Sequential(nn.Linear(ally_dim, entity_dim), nn.ReLU())
+        self.enemy_encoder = nn.Sequential(nn.Linear(enemy_dim, entity_dim), nn.ReLU())
         self.ally_attention = MaskedEntityAttention(entity_dim, entity_attention_heads)
         self.enemy_attention = MaskedEntityAttention(entity_dim, entity_attention_heads)
         self.spatial_fusion = nn.Sequential(nn.Linear(3*entity_dim, spatial_hidden_dim), nn.ReLU())
@@ -87,8 +100,8 @@ class SpatioTemporalEntityAttentionActor(nn.Module):
     def spatial(self, observations: torch.Tensor, alive: torch.Tensor):
         _, allies, enemies = decompose_observations(observations)
         own_embedding, ally_embeddings, enemy_embeddings = self.encode_entities(observations)
-        ally_valid = (allies[..., -1] > .5) & (alive[..., None] > .5)
-        enemy_valid = (enemies[..., -1] > .5) & (alive[..., None] > .5)
+        ally_valid = entity_valid_mask(allies, alive, observations.shape[-1])
+        enemy_valid = entity_valid_mask(enemies, alive, observations.shape[-1])
         ally_context, ally_weights = self.ally_attention(own_embedding, ally_embeddings, ally_valid)
         enemy_context, enemy_weights = self.enemy_attention(own_embedding, enemy_embeddings, enemy_valid)
         fused = self.spatial_fusion(torch.cat((own_embedding, ally_context, enemy_context), -1))
