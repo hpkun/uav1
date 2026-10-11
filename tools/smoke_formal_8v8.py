@@ -80,6 +80,7 @@ def run_smokes(output, names, seed=31, env_config=None):
             if env['environment_version']=='3.10': stem += '_v310'
             if env['environment_version']=='3.11': stem += '_v311'
             if env['environment_version']=='3.12': stem += '_v312'
+            if env['environment_version']=='3.13': stem += '_v313'
         config_path=ROOT/f'configs/{stem}.yaml'
         cfg=yaml.safe_load(config_path.read_text())
         run=output/name
