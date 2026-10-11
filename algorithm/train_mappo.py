@@ -56,11 +56,18 @@ def default_output_dir(seed: int) -> Path:
 
 
 def ensure_fresh_output_directory(output_dir: Path) -> None:
-    """Create or accept an empty directory, rejecting any existing contents."""
+    """Accept an empty run directory or a terminal.log opened by shell tee.
+
+    The shell can create terminal.log before Python starts. All training
+    artifacts still block a fresh run, so existing results cannot be overwritten.
+    """
     if output_dir.exists():
         if not output_dir.is_dir():
             raise RuntimeError(f"fresh output_dir is not a directory: {output_dir}")
-        if any(output_dir.iterdir()):
+        if any(
+            entry.name != "terminal.log" or entry.is_symlink() or not entry.is_file()
+            for entry in output_dir.iterdir()
+        ):
             raise RuntimeError(
                 f"fresh training output_dir is non-empty: {output_dir}; "
                 "choose a new run directory"

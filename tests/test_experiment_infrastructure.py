@@ -85,6 +85,29 @@ def test_fresh_output_directory_safety(tmp_path):
         ensure_fresh_output_directory(missing)
 
 
+@pytest.mark.parametrize("contents", ["", "previous failed launch\n"])
+def test_fresh_output_directory_accepts_shell_terminal_log(tmp_path, contents):
+    log = tmp_path / "terminal.log"
+    log.write_text(contents, encoding="utf-8")
+    ensure_fresh_output_directory(tmp_path)
+    assert log.read_text(encoding="utf-8") == contents
+
+
+@pytest.mark.parametrize("artifact", ["train.log", "checkpoint_4.pt", "env_config.yaml"])
+def test_terminal_log_does_not_bypass_existing_training_artifacts(tmp_path, artifact):
+    (tmp_path / "terminal.log").write_text("", encoding="utf-8")
+    (tmp_path / artifact).write_text("existing result", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="non-empty"):
+        ensure_fresh_output_directory(tmp_path)
+    assert (tmp_path / artifact).read_text(encoding="utf-8") == "existing result"
+
+
+def test_fresh_output_directory_rejects_terminal_log_directory(tmp_path):
+    (tmp_path / "terminal.log").mkdir()
+    with pytest.raises(RuntimeError, match="non-empty"):
+        ensure_fresh_output_directory(tmp_path)
+
+
 def test_fresh_rejection_occurs_before_runner_creation(tmp_path, monkeypatch):
     import algorithm.train_mappo as entry
 
