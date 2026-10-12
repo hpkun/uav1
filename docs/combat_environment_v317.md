@@ -4,7 +4,7 @@ v3.17 isolates weapon geometry from paper geometry. It inherits v3.16 and
 only overrides the version, build_weapon, and attempt_hit_for_pair.
 
 Weapon qualification requires both aircraft alive, ammo > 0, distance in
-[0, 4000] m, abs(body azimuth) <= pi/6 and abs(body elevation) <= pi/6.
+[0, 800] m, abs(body azimuth) <= pi/6 and abs(body elevation) <= pi/6.
 Both signed axes come from existing engagement_geometry. Paper ATA/HA are
 not weapon gates; off_boresight remains diagnostic and is not a cone gate.
 The rectangular window allows body azimuth=25 degrees/elevation=25 degrees
@@ -15,7 +15,10 @@ Formal weapon fields are boresight_azimuth_max, boresight_elevation_max,
 azimuth_noise_scale and elevation_noise_scale. Axis limits remain pi/6,
 noise scales remain 0.9984711359155588, effective_hit_distance remains
 2232.442506204989, ammo remains 6. Validators internally map to the frozen
-v3.16 numeric contract; old field names are rejected in the public schema.
+v3.16 numeric contract except range_max, which is strictly 800 m in v3.17/v3.18.
+The historical v3.16 range remains strictly 4000 m; range_min stays 0 m.
+Old field names are rejected in the public schema. Reward distance parameters
+remain unchanged at their historical 4000 m values.
 
 The actual step path calls engagement_geometry and passes its distance,
 signed boresight_azimuth_error and signed boresight_elevation_error to:

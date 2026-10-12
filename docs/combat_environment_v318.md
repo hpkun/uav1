@@ -4,6 +4,7 @@ v3.18 inherits v3.17. Only fire cadence changes, via _new_fire_states and
 _entry_attempts; step and reset remain inherited. Weapon/config/flight/paper
 Observation/Reward/scenario/Blue/action/termination semantics remain v3.17.
 Environment configuration differs only by environment_version.
+Weapon range is [0, 800] m, matching v3.17; reward distance parameters are unchanged.
 
 Each team has five independent existing FireState objects, one per attacker.
 Reset creates all ten with armed=True. No pair-level state or timers exist.

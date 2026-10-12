@@ -37,7 +37,7 @@ sensor:
   off_boresight_angle_max: 1.0471975511965976
 weapon:
   range_min: 0.0
-  range_max: 4000.0
+  range_max: 800.0
   boresight_azimuth_max: 0.5235987755982988
   boresight_elevation_max: 0.5235987755982988
   ammo_per_aircraft: 6

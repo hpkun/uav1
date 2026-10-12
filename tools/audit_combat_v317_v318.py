@@ -16,7 +16,7 @@ from env.v313_geometry import combat_geometry_v313
 
 
 class FixedNormal:
-    def __init__(self, epsilon=2.):
+    def __init__(self, epsilon=4.):
         self.epsilon, self.calls = epsilon, 0
 
     def normal(self, mean, std):
@@ -25,7 +25,7 @@ class FixedNormal:
         return self.epsilon
 
 
-def body_pair(pitch=0., azimuth=0., elevation=0., distance=3000., heading=0.):
+def body_pair(pitch=0., azimuth=0., elevation=0., distance=600., heading=0.):
     """Place a fixture LOS in the known body basis; runtime uses engagement_geometry."""
     attacker = AircraftState(0., 0., -3000., 225., math.radians(pitch), math.radians(heading))
     forward = attacker.velocity_vector() / attacker.v
@@ -47,10 +47,12 @@ def geometry_cases():
              ('negative_body_az25_el25', *body_pair(azimuth=-25,elevation=-25), True),
              ('az_boundary', *body_pair(azimuth=30), True),
              ('el_boundary', *body_pair(elevation=-30), True),
-             ('range_boundary', *body_pair(distance=4000), True),
-             ('range_outside', *body_pair(distance=4000.000001), False)]
+             ('range_799', *body_pair(distance=799), True),
+             ('range_801', *body_pair(distance=801), False),
+             ('range_boundary', *body_pair(distance=800), True),
+             ('range_outside', *body_pair(distance=800.000001), False)]
     attacker = AircraftState(0,0,-3000,225,math.pi/3,0)
-    target = AircraftState(3990*math.cos(math.radians(22)),0,-3000+3990*math.sin(math.radians(22)),225,0,0)
+    target = AircraftState(790*math.cos(math.radians(22)),0,-3000+790*math.sin(math.radians(22)),225,0,0)
     cases.append(('pitch60_LOS_minus22',attacker,target,False))
     return cases
 
@@ -60,9 +62,9 @@ def window_env(version='318'):
     env.reset(31)
     own, target = body_pair()
     env.red = [own] + [AircraftState(0,0,-3000,225,0,0,False) for _ in range(4)]
-    env.blue = [target, AircraftState(3500,0,-3000,225,0,0)] + [AircraftState(0,0,-3000,225,0,0,False) for _ in range(3)]
-    # Blue faces away from Red: only one Red attacker can attempt; epsilon=2 misses.
-    env.rng = FixedNormal(2.)
+    env.blue = [target, AircraftState(700,0,-3000,225,0,0)] + [AircraftState(0,0,-3000,225,0,0,False) for _ in range(3)]
+    # Blue faces away from Red: only one Red attacker can attempt; epsilon=4 misses.
+    env.rng = FixedNormal(4.)
     return env
 
 
@@ -104,7 +106,7 @@ def run(output):
     assert fire()==[] and e.red_ammo[0]==5 and e.rng.calls==1
     e.blue[1].x=5000
     assert fire()==[] and e.red_fire_states[0].armed
-    e.blue[1].x=3500
+    e.blue[1].x=700
     assert len(fire())==1 and e.red_ammo[0]==4 and e.rng.calls==2
     checks=dict(cuda_device=torch.cuda.get_device_name(),model_loaded=False,formal_training_started=False,
         pitch45_aligned_v316_rejected=True,pitch45_aligned_v317_allowed=True,pitch60_LOS_minus22_rejected=True,

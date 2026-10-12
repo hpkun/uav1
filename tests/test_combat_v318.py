@@ -37,7 +37,7 @@ def test_twenty_continuous_eligible_real_steps_one_attempt_ammo_and_rng():
 def test_new_target_with_nonempty_window_does_not_rearm(switch):
     e=window_env();assert fire(e)[0][1]==0
     if switch=='target_dead':e.blue[0].alive=False
-    else:e.blue[0].x=3800
+    else:e.blue[0].x=750
     assert fire(e)==[] and e.red_ammo[0]==5 and e.rng.calls==1
     assert not e.red_fire_states[0].armed
 
@@ -46,7 +46,7 @@ def test_empty_window_rearms_and_next_entry_fires_without_timer():
     e=window_env();assert len(fire(e))==1
     e.blue[0].x=e.blue[1].x=5000
     assert fire(e)==[] and e.red_fire_states[0].armed and e.rng.calls==1
-    e.blue[1].x=3500
+    e.blue[1].x=700
     assert fire(e)[0][1]==1 and e.red_ammo[0]==4 and e.rng.calls==2
 
 

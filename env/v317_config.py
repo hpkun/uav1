@@ -1,7 +1,8 @@
-"""Freeze v3.16 values while giving weapon-only body axes explicit names."""
+"""Freeze v3.16 values except the 800 m weapon range and body-axis names."""
 from copy import deepcopy
 import math
 from .v316_config import validate_v316
+from .v311_config import _frozen
 
 BODY_TO_LEGACY = {
     'boresight_azimuth_max': 'ata_max',
@@ -19,6 +20,9 @@ def validate_v317(config):
     weapon = legacy.get('weapon')
     if not isinstance(weapon, dict) or set(weapon) != WEAPON_KEYS:
         raise ValueError('v3.17 weapon requires only the body-frame schema')
+    _frozen(weapon['range_max'], 800., 'weapon.range_max')
+    # Validate all other values against v3.16 without changing its 4000 m contract.
+    weapon['range_max'] = 4000.
     for name in ('boresight_azimuth_max', 'boresight_elevation_max'):
         value = weapon[name]
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 < value <= math.pi:

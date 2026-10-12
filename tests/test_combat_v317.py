@@ -72,14 +72,14 @@ def test_legacy_and_extra_weapon_fields_rejected(field):
 @pytest.mark.parametrize('epsilon',[0,.5,-.5,2,-2])
 @pytest.mark.parametrize('angles',[(0,0),(.4,.2),(-.4,.2),(.4,-.2)])
 def test_shared_gaussian_signed_body_equation8(epsilon,angles):
-    w=env().weapon;rng=FixedNormal(epsilon);d=4000;az,el=angles
+    w=env().weapon;rng=FixedNormal(epsilon);d=w.range_max;az,el=angles
     threshold=math.pi*math.exp(-d/w.effective_hit_distance)
     assert w.attempt_hit(rng,d,az,el)==(abs(az+w.azimuth_noise_scale*epsilon)<=threshold and abs(el+w.elevation_noise_scale*epsilon)<=threshold)
     assert rng.calls==1
 
 
 def test_probability_is_shared_interval_intersection_and_never_samples():
-    w=env().weapon;d=4000;az,el=.4,-.4
+    w=env().weapon;d=w.range_max;az,el=.4,-.4
     threshold=math.pi*math.exp(-d/w.effective_hit_distance)
     lo=max((-threshold-az)/w.azimuth_noise_scale,(-threshold-el)/w.elevation_noise_scale)
     hi=min((threshold-az)/w.azimuth_noise_scale,(threshold-el)/w.elevation_noise_scale)
@@ -94,7 +94,7 @@ def test_probability_is_shared_interval_intersection_and_never_samples():
 def test_real_step_uses_body_inputs_and_one_draw(version):
     e=env(version);a,b=body_pair(pitch=45)
     dead=lambda:AircraftState(0,0,-3000,225,0,0,False)
-    e.red=[a,*[dead() for _ in range(4)]];e.blue=[b,*[dead() for _ in range(4)]];e.rng=FixedNormal(2)
+    e.red=[a,*[dead() for _ in range(4)]];e.blue=[b,*[dead() for _ in range(4)]];e.rng=FixedNormal(4)
     original=type(e.weapon).attempt_hit
     with patch.object(type(e.weapon),'attempt_hit',autospec=True,side_effect=original) as hit:
         obs,_,term,trunc,info=e.step(np.zeros((5,3)),np.zeros((5,3)))
@@ -153,3 +153,11 @@ def test_recording_dispatch(version):
     e=RecordingCombatEnv(f'configs/combat_environment_v{version}.yaml')
     assert isinstance(e,CombatEnvironmentV317 if version=='317' else CombatEnvironmentV318)
     assert e.reset(1)[0].shape==(5,56)
+
+
+@pytest.mark.parametrize('version,expected',[('316',4000.),('317',800.),('318',800.)])
+def test_formal_range_version_isolation(version,expected):
+    e=env(version)
+    assert e.weapon.range_max==expected and e.weapon.range_min==0.
+    cfg=deepcopy(e.config);cfg['weapon']['range_max']=800. if version=='316' else 4000.
+    with pytest.raises(ValueError):validate_config(cfg)
