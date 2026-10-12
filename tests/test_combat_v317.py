@@ -23,11 +23,13 @@ def env(version='317',seed=31):
 def test_minimal_inheritance_and_no_old_geometry_or_controller_changes():
     old,new=env('316'),env()
     assert type(new) is CombatEnvironmentV317
-    assert set(CombatEnvironmentV317.__dict__)-{'__module__','__doc__'}=={'environment_version','build_weapon','attempt_hit_for_pair'}
-    for name in ('__init__','reset','step','_advance','_observations','_entry_attempts','dense_combat_reward','_resolve_combat','_resolve_noncombat_losses','_outcome'):
+    assert set(CombatEnvironmentV317.__dict__)-{'__module__','__doc__'}=={'environment_version','build_weapon','attempt_hit_for_pair','reset'}
+    for name in ('__init__','step','_advance','_observations','_entry_attempts','dense_combat_reward','_resolve_combat','_resolve_noncombat_losses','_outcome'):
         assert getattr(CombatEnvironmentV317,name) is getattr(CombatEnvironmentV316,name)
     assert environment_dimensions(new.config)==(56,3,5)
-    for section in set(old.config)-{'weapon','environment_version'}:assert old.config[section]==new.config[section]
+    for section in set(old.config)-{'weapon','environment_version','scenario'}:assert old.config[section]==new.config[section]
+    scenario=deepcopy(new.config['scenario']);scenario['center_radius']=4800.
+    assert scenario==old.config['scenario']
     assert new.weapon.azimuth_noise_scale==old.weapon.ata_noise_scale
     assert new.weapon.elevation_noise_scale==old.weapon.ha_noise_scale
     assert new.weapon.effective_hit_distance==old.weapon.effective_hit_distance
@@ -113,6 +115,20 @@ def test_real_step_uses_body_inputs_and_one_draw(version):
 @pytest.mark.parametrize('seed',[1,31,10000000])
 def test_scenario_observation_and_control_exact(version,seed):
     old,new=env('316',seed),env(version,seed)
+    _,old_info=old.reset(seed);_,new_info=new.reset(seed)
+    assert old_info['nominal_anchor_separation']==9600.
+    assert new_info['nominal_anchor_separation']==8000.
+    assert new.config['scenario']['formation_offsets']==[-400.,-200.,0.,200.,400.]
+    alpha=new_info['radial_angle'];direction=np.array([np.cos(alpha),np.sin(alpha)])
+    for side,sign in [('red',-1),('blue',1)]:
+        np.testing.assert_array_equal(new_info[f'{side}_nominal_anchor'],sign*4000.*direction)
+        expected=np.array([s.as_array() for s in getattr(old,side)])
+        expected[:,:2]+=sign*(4000.-4800.)*direction
+        actual=np.array([s.as_array() for s in getattr(new,side)])
+        np.testing.assert_allclose(actual,expected,rtol=0,atol=1e-12)
+        assert np.all(np.linalg.norm(actual[:,:2],axis=1)<new.arena_radius)
+    # Compare unchanged observation/control semantics on identical states.
+    new.red,new.blue=deepcopy(old.red),deepcopy(old.blue)
     np.testing.assert_array_equal(old._observations(),new._observations())
     actions=np.tile([.4,.5,.8],(5,1))
     for side in ('red','blue'):
@@ -160,4 +176,12 @@ def test_formal_range_version_isolation(version,expected):
     e=env(version)
     assert e.weapon.range_max==expected and e.weapon.range_min==0.
     cfg=deepcopy(e.config);cfg['weapon']['range_max']=800. if version=='316' else 4000.
+    with pytest.raises(ValueError):validate_config(cfg)
+
+
+@pytest.mark.parametrize('version,expected',[('316',4800.),('317',4000.),('318',4000.)])
+def test_formal_center_radius_version_isolation(version,expected):
+    e=env(version)
+    assert e.config['scenario']['center_radius']==expected
+    cfg=deepcopy(e.config);cfg['scenario']['center_radius']=4000. if version=='316' else 4800.
     with pytest.raises(ValueError):validate_config(cfg)

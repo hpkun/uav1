@@ -1,4 +1,4 @@
-"""Freeze v3.16 values except the 800 m weapon range and body-axis names."""
+"""Freeze v3.16 values except body axes, 800 m range and 4000 m spawn radius."""
 from copy import deepcopy
 import math
 from .v316_config import validate_v316
@@ -17,6 +17,12 @@ def validate_v317(config):
     if not isinstance(config, dict) or str(config.get('environment_version')) != '3.17':
         raise ValueError('v3.17 requires version 3.17')
     legacy = deepcopy(config)
+    scenario = legacy.get('scenario')
+    if not isinstance(scenario, dict):
+        raise ValueError('v3.17 requires scenario')
+    _frozen(scenario.get('center_radius'), 4000., 'scenario.center_radius')
+    # Internal compatibility only; the caller's radius remains 4000 m.
+    scenario['center_radius'] = 4800.
     weapon = legacy.get('weapon')
     if not isinstance(weapon, dict) or set(weapon) != WEAPON_KEYS:
         raise ValueError('v3.17 weapon requires only the body-frame schema')

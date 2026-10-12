@@ -1,7 +1,8 @@
 # Combat Environment v3.17
 
 v3.17 isolates weapon geometry from paper geometry. It inherits v3.16 and
-only overrides the version, build_weapon, and attempt_hit_for_pair.
+overrides the version, build_weapon, attempt_hit_for_pair, and a thin reset
+wrapper that reports nominal anchors using the configured center radius.
 
 Weapon qualification requires both aircraft alive, ammo > 0, distance in
 [0, 800] m, abs(body azimuth) <= pi/6 and abs(body elevation) <= pi/6.
@@ -34,9 +35,13 @@ The analytic diagnostic intersects the two shared-epsilon intervals; it is
 never used for sampling. No hit parameter is recalibrated.
 
 Paper ATA/AA/HA geometry remains authoritative for Observation and Reward.
-56D ordering and slot4=0, R1-R4/Safety, Blue policy, scenario, dynamics, RK4,
+56D ordering and slot4=0, R1-R4/Safety, Blue policy, dynamics, RK4,
 desired target clipping, controller, action space and termination are inherited
 unchanged. Realized combat outcomes may change without changing reward formulas.
+Initial formation center radius is 4000 m (nominal separation 8000 m), with
+unchanged offsets [-400, -200, 0, 200, 400]. Arena radius remains 5000 m;
+initial altitude and speed are unchanged. v3.16 retains radius 4800 m and
+nominal separation 9600 m. Only this scenario field differs from v3.16.
 Repeat fire, nearest eligible target and simultaneous resolution remain v3.16.
 Historical v3.16 and earlier implementations/configurations remain isolated.
 

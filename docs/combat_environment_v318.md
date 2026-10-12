@@ -5,6 +5,8 @@ _entry_attempts; step and reset remain inherited. Weapon/config/flight/paper
 Observation/Reward/scenario/Blue/action/termination semantics remain v3.17.
 Environment configuration differs only by environment_version.
 Weapon range is [0, 800] m, matching v3.17; reward distance parameters are unchanged.
+Initial center radius is 4000 m and nominal anchor separation is 8000 m,
+matching v3.17. Offsets remain [-400, -200, 0, 200, 400]; arena radius remains 5000 m.
 
 Each team has five independent existing FireState objects, one per attacker.
 Reset creates all ten with armed=True. No pair-level state or timers exist.

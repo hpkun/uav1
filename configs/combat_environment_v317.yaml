@@ -23,7 +23,7 @@ arena:
   altitude_max: 6000.0
 scenario:
   team_size: 5
-  center_radius: 4800.0
+  center_radius: 4000.0
   formation_offsets:
   - -400.0
   - -200.0
