@@ -84,6 +84,7 @@ def run_smokes(output, names, seed=31, env_config=None):
             if env['environment_version']=='3.13': stem += '_v313'
             if env['environment_version']=='3.14': stem += '_v314'
             if env['environment_version']=='3.15': stem += '_v315'
+            if env['environment_version']=='3.16': stem += '_v316'
         config_path=ROOT/f'configs/{stem}.yaml'
         cfg=yaml.safe_load(config_path.read_text())
         run=output/name
@@ -181,7 +182,7 @@ def run_smokes(output, names, seed=31, env_config=None):
         seeds=range(int(cfg['implementation']['evaluation_seed_base']),int(cfg['implementation']['evaluation_seed_base'])+2)
         evaluation=evaluator(checkpoint,cfg,env,'cuda',seeds)
         assert evaluation['evaluation_episodes']==2 and evaluation['protocol_complete']
-        if env['environment_version'] in ('3.14','3.15'):
+        if env['environment_version'] in ('3.14','3.15','3.16'):
             assert evaluation['checkpoint_environment_version']==env['environment_version']
             # The official reloaded evaluation is the bounded smoke's history;
             # no additional episodes are needed solely to create the CSV.
