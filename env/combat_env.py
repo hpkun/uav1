@@ -32,6 +32,9 @@ class MultiUAVCombatEnv:
     def __new__(cls, config=DEFAULT_COMBAT_CONFIG):
         if cls is MultiUAVCombatEnv:
             candidate = config if isinstance(config, dict) else load_config(config)
+            if str(candidate.get('environment_version')) == '3.22':
+                from .combat_v322 import CombatEnvironmentV322
+                return object.__new__(CombatEnvironmentV322)
             if str(candidate.get('environment_version')) == '3.21':
                 from .combat_v321 import CombatEnvironmentV321
                 return object.__new__(CombatEnvironmentV321)
