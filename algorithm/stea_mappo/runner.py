@@ -102,7 +102,7 @@ class STEAMAPPOTrainingRunner(MAPPOTrainingRunner):
 
     def _evaluation_record(self):
         return {"sampled_steps":self.trainer.sampled_steps,"evaluation_seed_base":self.evaluation_seeds[0],
-            **({"environment_version":"3.14"} if self.env_config['environment_version']=='3.14' else {}),
+            **({"environment_version":self.env_config['environment_version']} if self.env_config['environment_version'] in ('3.14','3.15') else {}),
             "evaluation_seed_end":self.evaluation_seeds[-1],**evaluate(self.trainer,self.env_config,self.evaluation_seeds)}
 
     def save_checkpoint(self,path):
