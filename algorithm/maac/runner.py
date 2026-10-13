@@ -1,13 +1,13 @@
-"""Fresh on-policy parallel rollouts, compact logging and deterministic eval."""
+"""Off-policy MAAC replay cycles, compact logs and deterministic evaluation."""
 import json
-import math
 from pathlib import Path
 import numpy as np
 import torch
 from algorithm.common.vector_env import ParallelVectorEnv
-from algorithm.common.evaluator import evaluate, aggregate_combat_records, episode_return_metrics
+from algorithm.common.evaluator import evaluate,episode_return_metrics
 from algorithm.common.controller_diagnostics import controller_metric_values
-from .trainer import MAACTrainer, RolloutBatch
+from .trainer import MAACTrainer
+from .replay import JointReplayBuffer
 
 
 def steps_text(value):
@@ -15,45 +15,54 @@ def steps_text(value):
 
 
 class MAACTrainingRunner:
-    def __init__(self, env_config, config, output_dir, num_envs=None, total_sampled_steps=None,
-                 seed=None, device='cuda', smoke=False):
+    def __init__(self,env_config,config,output_dir,num_envs=None,total_sampled_steps=None,
+                 seed=None,device='cuda',smoke=False):
         if device!='cuda' or not torch.cuda.is_available():raise RuntimeError('MAAC training requires CUDA; no CPU fallback')
         self.env_config,self.config,self.output_dir=env_config,config,Path(output_dir)
         t=config['training'];self.seed=t['seed'] if seed is None else seed
-        self.num_envs=num_envs or t['num_train_envs']
-        self.total_steps=total_sampled_steps or (32 if smoke else t['total_sampled_steps'])
+        self.num_envs=t['num_train_envs'] if num_envs is None else num_envs
+        self.total_steps=(32 if smoke else t['total_sampled_steps']) if total_sampled_steps is None else total_sampled_steps
         if self.num_envs<=0 or self.total_steps<=0:raise ValueError('envs/steps must be positive')
-        self.rollout_length=4 if smoke else t['rollout_length']
+        if self.total_steps%self.num_envs:raise ValueError('total steps must be divisible by num_envs')
+        self.batch_size=min(16,t['minibatch_size']) if smoke else t['minibatch_size']
+        self.learning_starts=self.batch_size if smoke else max(t['learning_starts'],self.batch_size)
+        self.update_interval=4 if smoke else t['sampled_steps_per_update']
         base=config['implementation']['evaluation_seed_base']
         if self.seed+self.total_steps+self.num_envs>=base:raise ValueError('training/evaluation seed ranges may overlap')
         self.eval_seeds=list(range(base,base+(2 if smoke else t['evaluation_episodes'])))
         self.trainer=MAACTrainer(env_config,config,device,self.seed,smoke)
+        self.replay=JointReplayBuffer(min(128,t['replay_capacity']) if smoke else t['replay_capacity'],self.seed)
         self.vector=ParallelVectorEnv(self.num_envs,env_config,self.seed,self.eval_seeds)
         self.records=[];self.agent_returns=np.zeros((self.num_envs,5))
-        self.last_metrics={};self.evaluation_history=[];self.best_key=None
+        self.last_metrics={};self.evaluation_history=[];self.best_key=None;self.update_cycles=0
         try:self.observations=self.vector.reset()
         except BaseException:self.vector.close();raise
 
-    def collect(self, length):
-        storage={k:[] for k in RolloutBatch.__dataclass_fields__};infos=[]
-        for _ in range(length):
-            obs=self.observations.copy();alive=self.vector.current_alive_masks.copy()
-            actions=self.trainer.act(obs,alive)
-            result=self.vector.step_batch(actions)
-            values=dict(observations=obs,actions=actions,rewards=result.rewards,
-                next_observations=result.transition_next_observations,
-                dones=result.terminated|result.truncated,alive_masks=result.alive_masks,next_alive_masks=result.next_alive_masks)
-            for k,v in values.items():storage[k].append(v)
-            self.agent_returns+=result.rewards
-            for i,done in enumerate(result.terminated|result.truncated):
-                if done:
-                    team,agent=episode_return_metrics(self.agent_returns[i])
-                    self.records.append(dict(episode_return=team,mean_agent_episode_return=agent,**result.infos[i]))
-                    self.agent_returns[i].fill(0)
-            infos.extend(result.infos)
-            self.observations=result.observations
-            self.trainer.sampled_steps+=self.num_envs
-        return RolloutBatch(**{k:np.stack(v).astype(np.float32) for k,v in storage.items()}),infos
+    def collect_step(self):
+        obs=self.observations.copy();alive=self.vector.current_alive_masks.copy()
+        actions=self.trainer.act(obs,alive,deterministic=False)
+        result=self.vector.step_batch(actions)
+        self.replay.add_batch(obs,actions,result.rewards,result.transition_next_observations,
+            result.terminated|result.truncated,result.alive_masks,result.next_alive_masks)
+        self.agent_returns+=result.rewards
+        for i,done in enumerate(result.terminated|result.truncated):
+            if done:
+                team,agent=episode_return_metrics(self.agent_returns[i])
+                self.records.append(dict(episode_return=team,mean_agent_episode_return=agent,**result.infos[i]))
+                self.agent_returns[i].fill(0)
+        self.observations=result.observations
+        self.trainer.sampled_steps+=self.num_envs
+        return result.infos
+
+    def train_cycle(self):
+        t=self.config['training'];rows=[]
+        for _ in range(t['critic_updates_per_cycle']):
+            rows.append(self.trainer.update_critic(self.replay.sample(self.batch_size)))
+        for _ in range(t['policy_updates_per_cycle']):
+            rows.append(self.trainer.update_policies(self.replay.sample(self.batch_size)))
+        self.trainer.update_targets();self.update_cycles+=1
+        keys=set().union(*(r.keys() for r in rows))
+        self.last_metrics={k:float(np.mean([r[k] for r in rows if k in r])) for k in keys}
 
     def recent(self):
         rows=self.records[-self.config['training']['recent_episode_window']:]
@@ -63,8 +72,19 @@ class MAACTrainingRunner:
             fire_rate=float(np.mean([r['red_first_attempt_step'] is not None for r in rows])),
             kill_rate=float(np.mean([r['red_first_kill_step'] is not None for r in rows])))
 
-    def write(self, name, row):
+    def write(self,name,row):
         with (self.output_dir/name).open('a',encoding='utf-8') as f:f.write(json.dumps(row,allow_nan=False)+'\n')
+
+    def write_metrics(self,infos):
+        row=dict(record_type='maac_replay_cycle',sampled_steps=self.trainer.sampled_steps,
+            episodes=len(self.records),replay_size=len(self.replay),update_cycles=self.update_cycles,
+            **self.recent(),**self.last_metrics,
+            **{k:float(v.mean()) for k,v in controller_metric_values(infos).items()})
+        for side in ('red','blue'):
+            for field in ('step_fire_attempts','step_weapon_hits','step_attack_kills'):
+                key=f'{side}_{field}';row[key]=sum(i[key] for i in infos)
+        self.write('training_metrics.jsonl',row)
+        self.write('optimization_metrics.jsonl',dict(sampled_steps=self.trainer.sampled_steps,**self.last_metrics))
 
     def evaluate(self):
         row=dict(sampled_steps=self.trainer.sampled_steps,evaluation_mode='deterministic',
@@ -81,37 +101,30 @@ class MAACTrainingRunner:
         t=self.config['training'];next_log=t['console_interval_sampled_steps']
         next_eval=t['evaluation_interval_sampled_steps'];next_save=t['checkpoint_interval_sampled_steps']
         print(f"[START] MAAC | env=v3.29 | 5v5 | seed={self.seed} | cuda | envs={self.num_envs} | steps={steps_text(self.total_steps)}",flush=True)
+        pending=0;infos=[]
         try:
             while self.trainer.sampled_steps<self.total_steps:
-                length=min(self.rollout_length,math.ceil((self.total_steps-self.trainer.sampled_steps)/self.num_envs))
-                batch,infos=self.collect(length)
-                self.last_metrics=self.trainer.update(batch)
-                recent=self.recent()
-                row=dict(record_type='rollout_summary',sampled_steps=self.trainer.sampled_steps,
-                    episodes=len(self.records),rollout_transitions=len(infos),mean_step_reward=float(batch.rewards.mean()),
-                    **recent,**self.last_metrics,
-                    **{k:float(v.mean()) for k,v in controller_metric_values(infos).items()})
-                for side in ('red','blue'):
-                    for field in ('step_fire_attempts','step_weapon_hits','step_attack_kills'):
-                        key=f'{side}_{field}';row[key]=sum(i[key] for i in infos)
-                self.write('training_metrics.jsonl',row)
-                self.write('optimization_metrics.jsonl',dict(sampled_steps=self.trainer.sampled_steps,**self.last_metrics))
+                infos.extend(self.collect_step());pending+=self.num_envs
+                if pending>=self.update_interval and len(self.replay)>=self.learning_starts:
+                    self.train_cycle();self.write_metrics(infos);infos=[];pending=0
                 if self.trainer.sampled_steps>=next_log:
-                    self.log_train(recent)
+                    self.log_train(self.recent())
                     next_log=(self.trainer.sampled_steps//t['console_interval_sampled_steps']+1)*t['console_interval_sampled_steps']
                 if self.trainer.sampled_steps>=next_eval:
                     self.evaluate();next_eval=(self.trainer.sampled_steps//t['evaluation_interval_sampled_steps']+1)*t['evaluation_interval_sampled_steps']
                 if self.trainer.sampled_steps>=next_save:
                     self.trainer.save(self.output_dir/f'checkpoint_{self.trainer.sampled_steps}.pt')
                     next_save=(self.trainer.sampled_steps//t['checkpoint_interval_sampled_steps']+1)*t['checkpoint_interval_sampled_steps']
+            if infos:self.write_metrics(infos)
             self.log_train(self.recent())
             if not self.evaluation_history or self.evaluation_history[-1]['sampled_steps']!=self.trainer.sampled_steps:self.evaluate()
             for name in ('latest.pt','final.pt',f'checkpoint_{self.trainer.sampled_steps}.pt'):self.trainer.save(self.output_dir/name)
             return dict(algorithm='MAAC',variant=self.config['implementation']['variant'],environment_version='3.29',
-                sampled_steps=self.trainer.sampled_steps,completed_episodes=len(self.records),
-                actor_updates=self.trainer.actor_updates,critic_updates=self.trainer.critic_updates,
+                sampled_steps=self.trainer.sampled_steps,completed_episodes=len(self.records),replay_size=len(self.replay),
+                actor_updates=self.trainer.actor_updates,policy_updates=self.trainer.policy_updates,
+                critic_updates=self.trainer.critic_updates,target_updates=self.trainer.target_updates,update_cycles=self.update_cycles,
                 optimization_metrics=self.last_metrics,evaluation=self.evaluation_history[-1],
-                rollout_reuse=False,formal_exact_resume_supported=False)
+                formal_exact_resume_supported=False,replay_buffer_in_checkpoint=False)
         finally:self.vector.close()
 
     def log_train(self,recent):

@@ -1,4 +1,4 @@
-"""MAAC-inspired on-policy v3.29 training; only explicit CUDA execution."""
+"""Continuous off-policy MAAC v3.29 training; only explicit CUDA execution."""
 import argparse
 import json
 from pathlib import Path
@@ -32,7 +32,13 @@ def main():
     runner=MAACTrainingRunner(ec,ac,out,args.num_envs,args.total_sampled_steps,args.seed,args.device,args.smoke)
     (out/'run_config.json').write_text(json.dumps(dict(seed=runner.seed,num_envs=runner.num_envs,
         total_sampled_steps=runner.total_steps,device='cuda',smoke=args.smoke,
-        formal_exact_resume_supported=False),indent=2))
+        implementation_version=2,variant=ac['implementation']['variant'],
+        effective_hidden_dim=32 if args.smoke else ac['network']['hidden_dim'],
+        effective_minibatch_size=runner.batch_size,effective_learning_starts=runner.learning_starts,
+        effective_sampled_steps_per_update=runner.update_interval,
+        effective_baseline_samples=runner.trainer.baseline_samples,
+        effective_replay_capacity=runner.replay.capacity,
+        formal_exact_resume_supported=False,replay_buffer_in_checkpoint=False),indent=2))
     summary=runner.run();(out/'run_summary.json').write_text(json.dumps(summary,indent=2,allow_nan=False))
     print(f"[DONE] MAAC | steps={summary['sampled_steps']} | saved={out}",flush=True)
 

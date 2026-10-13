@@ -6,15 +6,24 @@ network:
   observation_dim: 56
   action_dim: 3
   num_agents: 5
-  hidden_dim: 256
-  attention_heads: 2
+  hidden_dim: 128
+  attention_heads: 4
 training:
   gamma: 0.99
-  lr_actor: 0.0003
-  lr_critic: 0.0003
-  rollout_length: 256
-  num_train_envs: 16
-  minibatch_size: 512
+  alpha: 0.01
+  tau: 0.005
+  lr_actor: 0.001
+  lr_critic: 0.001
+  num_train_envs: 12
+  replay_capacity: 1000000
+  minibatch_size: 1024
+  sampled_steps_per_update: 100
+  critic_updates_per_cycle: 4
+  policy_updates_per_cycle: 4
+  learning_starts: 1024
+  baseline_samples: 16
+  actor_grad_clip: 0.5
+  critic_grad_clip: 50.0
   total_sampled_steps: 3000000
   device: cuda
   seed: 1
@@ -24,5 +33,35 @@ training:
   console_interval_sampled_steps: 20000
   recent_episode_window: 100
 implementation:
-  variant: self_inclusive_context_only_on_policy_deterministic_v1
+  variant: paper_maac_continuous_eq8_mc_v2
   evaluation_seed_base: 10000000
+  log_std_min: -5.0
+  log_std_max: 2.0
+metadata:
+  paper_appendix:
+    hidden_dim: 128
+    attention_heads: 4
+    gamma: 0.99
+    alpha: 0.01
+    tau_online_weight: 0.005
+    lr_actor: 0.001
+    lr_critic: 0.001
+    num_train_envs: 12
+    replay_capacity: 1000000
+    minibatch_size: 1024
+    sampled_steps_per_update: 100
+    critic_updates_per_cycle: 4
+    policy_updates_per_cycle: 4
+    reference_episode_steps: 100
+  engineering_choices:
+    baseline_samples: 16
+    actor_distribution: tanh_gaussian
+    log_std_bounds: [-5.0, 2.0]
+    learning_starts: 1024
+    preserve_uav_episode_steps: 1000
+    total_sampled_steps: 3000000
+    exact_resume_supported: false
+  author_code_choices:
+    actor_grad_clip: 0.5
+    critic_grad_clip: 50.0
+    shared_critic_gradient_scale: 0.2

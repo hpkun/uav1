@@ -1,4 +1,4 @@
-"""Strict CUDA deterministic evaluation of the v3.29 MAAC-inspired variant."""
+"""Strict CUDA deterministic evaluation of the v3.29 continuous MAAC adaptation."""
 import argparse
 import json
 from pathlib import Path
