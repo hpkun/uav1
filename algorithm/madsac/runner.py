@@ -177,6 +177,10 @@ class MADSACTrainingRunner:
         }
         if rows:
             record.update(aggregate_combat_records(rows))
+        if self.env_config['environment_version'] == '3.29':
+            from algorithm.common.controller_diagnostics import controller_metric_values
+            record.update({key: float(value.mean())
+                           for key, value in controller_metric_values(result.infos).items()})
         for name in ("r1", "r2", "r3", "r4"):
             record[f"mean_{name}_reward"] = float(np.mean([info[f"{name}_rewards"] for info in result.infos]))
         with (self.output_dir / "training_metrics.jsonl").open("a", encoding="utf-8") as stream:
