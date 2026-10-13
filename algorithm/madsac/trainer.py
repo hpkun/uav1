@@ -10,9 +10,10 @@ import torch
 
 from .networks import CentralizedAttentionQCritic, SharedMADSACActor
 from .replay_buffer import ReplayBatch
+from .critic_contract import validate_critic_shapes
 
 
-MADSAC_IMPL_VERSION = 2
+MADSAC_IMPL_VERSION = 3
 
 
 def masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -261,6 +262,7 @@ class MADSACTrainer:
         state = torch.load(path, map_location=self.device, weights_only=False)
         if state.get("algorithm") != "madsac" or state.get("implementation_version") != MADSAC_IMPL_VERSION:
             raise RuntimeError("incompatible MADSAC checkpoint")
+        validate_critic_shapes(state, self.critic1.hidden_dim)
         self.actor.load_state_dict(state["actor"], strict=True)
         self.target_actor.load_state_dict(state["target_actor"], strict=True)
         self.sampled_steps = int(state["sampled_steps"])

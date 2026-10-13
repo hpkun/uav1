@@ -174,7 +174,8 @@ def test_offpolicy_v33_cuda_dimensions_checkpoint_and_eval(tmp_path,algorithm):
         from algorithm.madsac.factory import build_madsac_trainer
         from algorithm.madsac.evaluation import evaluate_madsac_episode
         validate_madsac_config(e,c);trainer=build_madsac_trainer(c,'cuda')
-        extra['network_architecture']=dict(hidden_dim=n['actor_hidden_layers'][0],attention_heads=n['attention_heads'])
+        from algorithm.madsac.critic_contract import CRITIC_ARCHITECTURE
+        extra['network_architecture']=dict(**CRITIC_ARCHITECTURE,hidden_dim=n['actor_hidden_layers'][0],attention_heads=n['attention_heads'])
         trainer.save(path,extra);saved=torch.load(path,map_location='cpu',weights_only=False)
         validate_madsac_checkpoint(saved,e,c);trainer.load_for_evaluation(path)
         record=evaluate_madsac_episode(trainer,e,38001000,mode='deterministic')

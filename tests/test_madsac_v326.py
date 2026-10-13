@@ -9,6 +9,7 @@ from algorithm.common.protocol import config_sha256
 from algorithm.madsac.factory import build_madsac_trainer
 from algorithm.madsac.protocol import validate_madsac_config,validate_madsac_checkpoint
 from algorithm.madsac.trainer import MADSACTrainer
+from algorithm.madsac.critic_contract import CRITIC_ARCHITECTURE
 
 
 def configs():
@@ -21,7 +22,7 @@ def metadata(e,c,smoke=False):
         algorithm_config_sha256=config_sha256(c),training_seed=c['training']['seed'],
         observation_dim=56,action_dim=3,num_agents=5,training_smoke=smoke,
         formal_exact_resume_supported=False,replay_buffer_in_checkpoint=False,
-        network_architecture=dict(shared_actor=True,twin_independent_critics=True,
+        network_architecture=dict(**CRITIC_ARCHITECTURE,shared_actor=True,twin_independent_critics=True,
             target_actor=True,target_critics=2,attention_heads=2,hidden_dim=32 if smoke else 256,
             observation_dim=56,action_dim=3,num_agents=5))
 

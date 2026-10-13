@@ -2,6 +2,7 @@
 from algorithm.common.protocol import config_sha256
 from env.config import ENVIRONMENT_VERSION, validate_config, environment_dimensions
 from .trainer import MADSAC_IMPL_VERSION
+from .critic_contract import CRITIC_ARCHITECTURE, validate_critic_shapes
 
 
 def validate_madsac_config(env_config: dict, algorithm_config: dict) -> None:
@@ -51,6 +52,9 @@ def validate_madsac_checkpoint(state: dict, env_config: dict, algorithm_config: 
         if extra.get(key) != value:
             raise RuntimeError(f'MADSAC checkpoint {key} mismatch')
     architecture = extra.get('network_architecture', {})
+    for key, value in CRITIC_ARCHITECTURE.items():
+        if architecture.get(key) != value:
+            raise RuntimeError(f'MADSAC checkpoint architecture {key} mismatch')
     n = algorithm_config['network']
     if env_config['environment_version'] == '3.26':
         for key, value in {'shared_actor': True, 'twin_independent_critics': True,
@@ -65,6 +69,7 @@ def validate_madsac_checkpoint(state: dict, env_config: dict, algorithm_config: 
     expected_hidden = 32 if extra.get('training_smoke') else int(n['actor_hidden_layers'][0])
     if architecture.get('hidden_dim') != expected_hidden:
         raise RuntimeError('MADSAC checkpoint hidden_dim mismatch')
+    validate_critic_shapes(state, expected_hidden)
     actor_weight = state.get('actor', {}).get('backbone.0.weight')
     if actor_weight is not None and tuple(actor_weight.shape) != (expected_hidden, expected['observation_dim']):
         raise RuntimeError('MADSAC checkpoint actor architecture mismatch')

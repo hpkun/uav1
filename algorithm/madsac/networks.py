@@ -68,7 +68,7 @@ class SharedMADSACActor(nn.Module):
 
 
 class CentralizedAttentionQCritic(nn.Module):
-    """Per-agent centralized Q(o_1:4,a_1:4) with two-head peer attention."""
+    """Per-agent centralized Q through self-inclusive multi-head context."""
 
     def __init__(self, observation_dim=52, action_dim=3, hidden_dim=256,
                  attention_heads=2, activation="relu"):
@@ -86,8 +86,9 @@ class CentralizedAttentionQCritic(nn.Module):
         self.wq = nn.Linear(hidden_dim, hidden_dim)
         self.wk = nn.Linear(hidden_dim, hidden_dim)
         self.wv = nn.Linear(hidden_dim, hidden_dim)
+        self.value_activation = nn.LeakyReLU(negative_slope=0.01)
         self.q_network = nn.Sequential(
-            nn.Linear(2 * hidden_dim, hidden_dim), act(),
+            nn.Linear(hidden_dim, hidden_dim), act(),
             nn.Linear(hidden_dim, hidden_dim), act(),
             nn.Linear(hidden_dim, 1),
         )
@@ -104,17 +105,16 @@ class CentralizedAttentionQCritic(nn.Module):
         def heads(value):
             return value.view(batch, agents, self.attention_heads, self.head_dim).transpose(1, 2)
 
-        query, key, value = heads(self.wq(embedding)), heads(self.wk(embedding)), heads(self.wv(embedding))
-        logits = query @ key.transpose(-2, -1) / math.sqrt(self.head_dim)
+        query, key, value = heads(self.wq(embedding)), heads(self.wk(embedding)), heads(self.value_activation(self.wv(embedding)))
+        logits = query @ key.transpose(-2, -1)
         alive = alive_mask > 0.5
-        not_self = ~torch.eye(agents, dtype=torch.bool, device=logits.device).view(1, 1, agents, agents)
-        valid = alive[:, None, None, :].expand(batch, self.attention_heads, agents, agents) & not_self
+        valid = alive[:, None, None, :].expand(batch, self.attention_heads, agents, agents)
         weights = torch.softmax(logits.masked_fill(~valid, -1e9), dim=-1)
         weights = weights * valid.to(weights.dtype)
         weights = weights / weights.sum(-1, keepdim=True).clamp_min(1e-12)
         weights = weights * alive[:, None, :, None].to(weights.dtype)
         context = (weights @ value).transpose(1, 2).contiguous().view(batch, agents, self.hidden_dim)
-        q = self.q_network(torch.cat((embedding, context), dim=-1)).squeeze(-1)
+        q = self.q_network(context).squeeze(-1)
         q = q * alive_mask
         return (q, weights) if return_attention else q
 

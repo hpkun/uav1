@@ -113,7 +113,8 @@ def test_official_checkpoint_record_and_evaluation_parity(tmp_path, name, config
     trainer = build(algorithm, 'cuda')
     n = algorithm['network']; architecture = getattr(trainer, 'network_architecture', {})
     if name == 'madsac':
-        architecture = {'hidden_dim': n['actor_hidden_layers'][0], 'attention_heads': n['attention_heads']}
+        from algorithm.madsac.critic_contract import CRITIC_ARCHITECTURE
+        architecture = {**CRITIC_ARCHITECTURE, 'hidden_dim': n['actor_hidden_layers'][0], 'attention_heads': n['attention_heads']}
     extra = {'environment_version': env['environment_version'],
         'environment_config_sha256': config_sha256(env), 'algorithm_config_sha256': config_sha256(algorithm),
         'observation_dim': n['observation_dim'], 'action_dim': 3, 'num_agents': n['num_agents'],

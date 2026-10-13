@@ -15,6 +15,9 @@ from algorithm.common.vector_env import ParallelVectorEnv, VectorStep
 from env.config import ENVIRONMENT_VERSION
 from .evaluation import evaluate_madsac
 from .protocol import validate_madsac_config
+from .critic_contract import CRITIC_ARCHITECTURE
+from .console import format_steps, combat_fields
+from algorithm.common.metrics import episode_is_timeout
 from .replay_buffer import JointReplayBuffer
 from .trainer import MADSACTrainer, MADSAC_IMPL_VERSION
 
@@ -123,14 +126,21 @@ class MADSACTrainingRunner:
 
     def start_log_line(self):
         s = self.startup_summary()
-        return (f"[START] algorithm=MADSAC | mode={s['mode']} | device={s['device']} "
-                f"| seed={s['seed']} | envs={s['num_envs']} | total={s['total_sampled_steps']} "
-                f"| obs={s['observation_dim']} | act={s['action_dim']} | agents={s['num_agents']} "
-                f"| hidden={s['hidden_dim']} | heads={s['attention_heads']} | gamma={s['gamma']} "
-                f"| alpha={s['alpha']} | tau={s['tau']} | delay={s['policy_delay']} "
-                f"| replay={s['replay_capacity']} | batch={s['minibatch_size']} "
-                f"| learning_starts={s['learning_starts']} | eval={s['evaluation_mode']} "
-                f"| environment_version={s['environment_version']}")
+        return (f"[START] MADSAC-v{MADSAC_IMPL_VERSION} | env=v{s['environment_version']} | "
+                f"{s['num_agents']}v{s['num_agents']} | seed={s['seed']} | {s['device']} | "
+                f"envs={s['num_envs']} | steps={format_steps(s['total_sampled_steps'], total=True)} | "
+                f"hidden={s['hidden_dim']} | heads={s['attention_heads']} | "
+                f"batch={s['minibatch_size']} | alpha={s['alpha']} | eval={s['evaluation_mode']}")
+
+    def train_log_line(self):
+        steps = self.trainer.sampled_steps
+        return (f"[TRAIN] {format_steps(steps)}/{format_steps(self.total_sampled_steps, total=True)} "
+                f"({100 * steps / self.total_sampled_steps:.1f}%) | ep={len(self.completed_records)} | "
+                + combat_fields(self.recent_metrics()))
+
+    def evaluation_log_line(self, row, best=False):
+        tag = '[EVAL*]' if best else '[EVAL]'
+        return f"{tag} {format_steps(row['sampled_steps'])} | {self.evaluation_mode} | " + combat_fields(row)
 
     def _completed(self, result: VectorStep):
         self.agent_episode_returns += result.rewards
@@ -196,12 +206,12 @@ class MADSACTrainingRunner:
                    self.evaluation_mode, self.evaluation_policy_seed,
                )}
         self.evaluation_history.append(row); self._write_evaluation()
-        if self.best_evaluation is None or self._evaluation_key(row) > self._evaluation_key(self.best_evaluation):
+        improved = self.best_evaluation is None or self._evaluation_key(row) > self._evaluation_key(self.best_evaluation)
+        if improved:
             self.best_evaluation = dict(row)
             self.best_sampled_steps = self.trainer.sampled_steps
             self.save_checkpoint(self.output_dir / "best_eval.pt")
-        print(f"[EVAL] steps={self.trainer.sampled_steps} | mode={self.evaluation_mode} "
-              f"| win={row['red_win_rate']:.2f} | R={row['average_return']:.2f}", flush=True)
+        print(self.evaluation_log_line(row, improved), flush=True)
         return row
 
     def checkpoint_extra(self):
@@ -224,6 +234,7 @@ class MADSACTrainingRunner:
             "replay_capacity": self.replay.capacity,
             "minibatch_size": self.minibatch_size,
             "network_architecture": {
+                **CRITIC_ARCHITECTURE,
                 "actor_class": type(self.trainer.actor).__name__,
                 "critic_class": type(self.trainer.critic1).__name__,
                 "shared_actor": True, "twin_independent_critics": True,
@@ -257,8 +268,16 @@ class MADSACTrainingRunner:
 
     def recent_metrics(self):
         rows = self.completed_records[-self.recent_episode_window:]
+        mean = lambda key: None if not rows else float(np.mean([row[key] for row in rows]))
+        rate = lambda predicate: None if not rows else float(np.mean([predicate(row) for row in rows]))
         return {
-            "return": None if not rows else float(np.mean([r["team_episode_return"] for r in rows])),
+            "red_win_rate": mean("red_success"),
+            "average_red_loss": mean("red_losses"), "average_blue_loss": mean("blue_losses"),
+            "red_attempt_episode_rate": rate(lambda row: row.get("red_first_attempt_step") is not None),
+            "red_kill_episode_rate": rate(lambda row: row.get("red_first_kill_step") is not None),
+            "timeout_rate": rate(episode_is_timeout),
+            "average_episode_length": mean("episode_length"),
+            "average_return": mean("team_episode_return"),
         }
 
     def run(self):
@@ -282,12 +301,7 @@ class MADSACTrainingRunner:
                         self._write_optimization(self.last_metrics)
                 self._write_training_metrics(result, rows)
                 if self.trainer.sampled_steps >= self.next_console:
-                    recent = self.recent_metrics()
-                    print(f"[TRAIN] steps={self.trainer.sampled_steps}/{self.total_sampled_steps} "
-                          f"| episodes={len(self.completed_records)} | recent_return={recent['return']} "
-                          f"| replay={len(self.replay)} "
-                          f"| critic_updates={self.trainer.critic_update_count} "
-                          f"| actor_updates={self.trainer.actor_update_count}", flush=True)
+                    print(self.train_log_line(), flush=True)
                     while self.next_console <= self.trainer.sampled_steps:
                         self.next_console += self.console_interval
                 if self.trainer.sampled_steps >= self.next_evaluation:
@@ -297,7 +311,7 @@ class MADSACTrainingRunner:
                 if self.trainer.sampled_steps >= self.next_checkpoint:
                     path = self.output_dir / f"checkpoint_{self.trainer.sampled_steps}.pt"
                     self.save_checkpoint(path)
-                    print(f"[CKPT] steps={self.trainer.sampled_steps} | saved={path.name}", flush=True)
+                    print(f"[CKPT] {format_steps(self.trainer.sampled_steps)} | saved", flush=True)
                     while self.next_checkpoint <= self.trainer.sampled_steps:
                         self.next_checkpoint += self.checkpoint_interval
             exact = self.output_dir / f"checkpoint_{self.trainer.sampled_steps}.pt"
