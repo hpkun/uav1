@@ -1,160 +1,156 @@
-# Continuous MAAC for Combat Environment v3.29
+# MAAC v3: Li et al. 2023 continuous shared-policy baseline
 
-This is an independent implementation of the MAAC structures and equations in
-Iqbal & Sha, **Actor-Attention-Critic for Multi-Agent Reinforcement Learning**
-(ICML 2019), adapted to the existing continuous-action UAV environment. It does
-not import the MADSAC trainer or reuse its networks, losses or replay class.
-The environment, MAPPO and MADSAC implementations are unchanged.
+The scientific target is the MAAC comparison baseline in Li et al. (2023),
+*Multi-UAV Cooperative Air Combat Decision-Making Based on Multi-Agent
+Double-Soft Actor-Critic*. Section 3.1.3 supplies Eq.(14)-(15); Section 4
+explicitly says MAAC was adapted to continuous actions and actor parameter
+sharing. Table 3's MAAC feature contract is CTDE, attention, maximum entropy
+and sharing, without double centralized critics or delayed policy updates.
 
-Sources:
+Primary source: https://www.mdpi.com/2226-4310/10/7/574
+Original MAAC reference: https://proceedings.mlr.press/v97/iqbal19a/iqbal19a.pdf
+Original supplementary: https://proceedings.mlr.press/v97/iqbal19a/iqbal19a-supp.pdf
+Original author code: https://github.com/shariqiqbal2810/MAAC
 
-- Paper: https://proceedings.mlr.press/v97/iqbal19a/iqbal19a.pdf
-- Supplement: https://proceedings.mlr.press/v97/iqbal19a/iqbal19a-supp.pdf
-- Public author implementation: https://github.com/shariqiqbal2810/MAAC
+This is a continuous UAV adaptation of that baseline, not a claim of exact
+reproduction of Li et al.'s unpublished continuous-baseline engineering details.
+The initial v1 on-policy draft and v2 independent-actor implementation are
+incompatible historical protocols, not the formal baseline.
 
-The title *Multi-Agent Actor-Critic for Mixed Cooperative-Competitive
-Environments* refers to Lowe et al.'s MADDPG (2017), not this MAAC paper.
-Author code is public. We do not claim exact replication of that code or its
-discrete benchmark experiments.
+## Authoritative shared policy
 
-## Confirmed protocol
+There is exactly one GaussianLocalActor, one shared target_actor copied from it,
+and one actor_optimizer. No actors/target_actors/actor_optimizers ModuleLists
+remain. Formal actor: 56 -> 128 -> 128 -> separate 3D mean/log_std heads,
+LeakyReLU hidden activations, Normal sampling and tanh squashing.
 
-The user superseded the initial on-policy, shared deterministic actor draft
-with the paper protocol, independent actors, Gaussian+tanh continuous policies,
-Eq.(8) score-function policy gradients and Monte Carlo counterfactual baselines.
+All five learning Red UAVs use the same parameters with their own local
+observations. Identical observations give identical distribution mean/std;
+stochastic samples may still differ. The network also processes [B,5,56]
+directly because its layers operate only on the final feature dimension.
+Dead-agent actions are zero. Blue is the unchanged fixed environment policy.
 
-- CTDE over the five learning Red agents; their local 56D observations already
-  contain the existing Blue-related observation fields. Blue remains the
-  unchanged fixed environment policy; it is not an additional learned actor.
-- Five independent local Gaussian actors, each with its own Adam optimizer.
-  Local observation alone is sufficient for execution. Tanh produces 3D actions.
-- One centralized multi-agent attention critic, with five separate observation-
-  action encoders and Q heads. Shared Q/K/V projections have four heads and
-  scaled dot-product attention. Self is excluded; dead agents are also excluded.
-- Value projection has LeakyReLU. Head i receives concatenated own embedding
-  and attention context, as in paper Eq.(5). This is not a context-only head.
-- One target attention critic and five target actors, initialized identically
-  to their online counterparts and frozen. No twin Q, minimum-Q or delayed actor
-  mechanism is added.
-- Off-policy joint replay, retaining the agent axis and true transition-next
-  observation/alive mask before the vector environment's automatic reset.
+The one target actor generates all next actions. It initializes identically
+to the online actor, is frozen, and updates using .005 online Polyak weight.
+Target actor parameter storage is separate from online storage.
 
-## Losses and Monte Carlo baseline
+## One shared-policy update
 
-Eq.(7), with UAV terminal/death masking:
+For one call to update_policies:
 
-```text
-a'_i ~ target_pi_i(o'_i)
-y_i = r_i + gamma * (1-done) * alive'_i
-                   * (target_Q_i(o',a') - alpha*log target_pi_i(a'_i|o'_i))
-L_Q = mean_batch sum_i alive_i * (Q_i(o,a) - y_i)^2
-```
-
-Both termination and the environment's finite-horizon timeout end bootstrap.
-Death stops an agent's future value but does not discard its immediate death
-reward if it was alive at transition start. The entropy correction is inside
-the discounted, terminal-masked bootstrap, following the paper equation.
-
-For each policy update, joint actions are freshly sampled from **all current
-policies**, not taken from replay's stored behavior actions. Before any actor
-optimizer step, draw independent alternative actions from each policy to form:
+1. Sample current joint actions with the one shared actor before any step.
+2. Evaluate Q_i and independent Monte Carlo counterfactual baselines for all i.
+3. Calculate all local log probabilities at the same policy parameter snapshot.
+4. Aggregate all living agent contributions into one scalar loss.
+5. Perform one zero_grad/backward/clip/actor_optimizer.step.
 
 ```text
-b_i(o,a_-i) = (1/K) sum_k Q_i(o,(alternative_a_i[k],a_-i))
-L_pi_i = mean_live log pi_i(a_i|o_i)
-                   * stop_gradient(alpha*log pi_i(a_i|o_i) - (Q_i-b_i))
+L_pi = sum_{batch,i} alive_i * log pi_phi(a_i|o_i)
+       * stop_gradient(alpha*log pi_phi(a_i|o_i) - Q_i + b_i)
+       / sum_{batch,i} alive_i
 ```
 
-Only i's action is replaced for baseline estimation; other sampled actions are
-held fixed. Baseline samples are separate from the selected policy-gradient
-action. K=16 is an explicit engineering choice for the paper's continuous-policy
-sampling option, not a reported paper hyperparameter.
+This is the Eq.(15) score-function structure. Normal.sample(), not rsample(),
+produces actions. Pre-tanh samples are detached when computing log probabilities;
+Q, baseline and the advantage coefficient are detached. The actor receives no
+critic/action-path reparameterization gradient. Contributions are aggregated
+before a single step, rather than five sequential steps on the same actor.
 
-Gaussian samples use `Normal.sample()`, not `rsample()`. The pre-tanh action is
-held fixed when evaluating its log probability. Q, baseline and the coefficient
-are detached, so the update is the Eq.(8) likelihood-ratio/score gradient, not
-the reparameterized SAC `alpha*log_prob-Q` action-path gradient. Tanh's log
-Jacobian is computed in a stable form without inverse-tanh of saturated actions.
+actor_updates counts actual shared actor optimizer steps. policy_updates counts
+successful update_policies calls. Each nonempty call increments both by one.
+An entirely dead batch increments neither. A configured training cycle still
+does four critic calls and four policy calls, followed by one target update;
+there is no delayed-policy skip mechanism.
 
-## Appendix parameter configuration
+## Preserved critic, replay and target
 
-| Parameter | Formal value |
+The centralized attention critic is unchanged from v2:
+five agent-specific (o_i,a_i) encoders, shared scaled Q/K/V attention
+transformations, LeakyReLU values, j != i attention with dead-agent masking,
+and Q_i=f_i(concat(e_i,context_i)). There is one critic and one target copy,
+not twin Q. No min-Q target is introduced. A lone survivor has zero context
+but retains its own embedding shortcut.
+
+Eq.(14) target with the existing terminal/death masks is unchanged:
+
+```text
+a'_i ~ shared target_pi(.|o'_i)
+y_i = r_i + gamma*(1-done)*alive'_i
+                 * (target_Q_i(o',a') - alpha*log target_pi(a'_i|o'_i))
+```
+
+Joint off-policy replay, true transition-next observations before auto-reset,
+entropy alpha=.01 and soft target updates remain. Replay source and critic
+network source are hash-protected during this change.
+
+For each i, baseline K=16 independent alternatives are sampled using the same
+shared actor on o_i. Only action i is replaced; other sampled agent actions
+are held fixed. K=16 is CONTINUOUS-ACTION ADAPTATION / ENGINEERING CHOICE,
+not a parameter explicitly published for Li et al.'s MAAC baseline.
+
+## Hyperparameter provenance
+
+Formal numeric parameters are unchanged:
+
+| Parameter | Value |
 |---|---:|
-| hidden dimension | 128 |
-| attention heads | 4 |
-| activation | LeakyReLU |
-| actor/critic learning rate | 0.001 / 0.001 |
-| gamma | 0.99 |
-| alpha | 0.01 |
-| tau (online weight) | 0.005 |
-| parallel environments | 12 |
-| joint replay capacity | 1,000,000 |
-| replay minibatch | 1,024 |
-| minimum sampled transitions between cycles | 100 |
-| critic/policy updates per cycle | 4 / 4 |
+| hidden / heads | 128 / 4 |
+| actor / critic lr | .001 / .001 |
+| gamma / alpha / tau online weight | .99 / .01 / .005 |
+| train environments | 12 |
+| replay / batch | 1e6 / 1024 |
+| minimum sampled transitions per cycle | 100 |
+| critic / policy updates per cycle | 4 / 4 |
 
-Each update samples a separate replay minibatch; all critic updates precede
-all policy updates, then targets update once per cycle. Counts refer to
-environment transitions, not agent transitions. With 12 synchronous workers,
-the 100-transition threshold is crossed at 108 transitions; the counter resets
-after a cycle as in supplementary Algorithm 1.
+These are ORIGINAL-MAAC / AUTHOR-CODE-BASED HYPERPARAMETERS, not a
+MAAC-specific parameter table published by the MADSAC paper. YAML metadata
+uses original_maac_reference and separately identifies Li paper modifications:
+continuous-action adaptation and shared actor parameters. The MADSAC paper's
+256/2/1e-4 settings are not imported into MAAC.
 
-Target interpolation uses `target=(1-tau)*target+tau*online`, with tau=.005.
-The supplement's Algorithm 1 and its prose use conflicting tau conventions;
-this implementation follows the prose's .005 online weight and author code.
+Engineering choices remain Gaussian+tanh, log_std bounds [-5,2], K=16 baseline,
+warmup=1024, UAV's unchanged 1000-step horizon, total budget and reporting schedules.
+The configured horizon is not replaced by the original MAAC benchmark's 100-step
+reset. Gradient clipping and shared attention gradient scaling retain their
+original-author-code provenance. No new reward, dynamics or controller is added.
 
-## Explicit adaptation and engineering choices
+## Identity and checkpoints
 
-- UAV environment remains v3.29, 5v5, 56D/3D, with its own 1000-step maximum;
-  the appendix's 100-step benchmark reset is not imposed on this environment.
-- Continuous Gaussian mean/log-std heads and log-std clipping [-5,2] replace
-  the author's discrete benchmark policy representation.
-- Replay warmup is 1024 transitions, sufficient to sample the first full batch.
-- Counterfactual K=16, total budget 3M, evaluation seeds and checkpoint/log
-  schedules are project choices; none are mislabelled as appendix values.
-- Actor gradient clipping .5, critic clipping 50 and averaging shared attention
-  parameter gradients across five tasks follow author-code choices. The loss
-  equations do not add its discrete-policy regularizers or critic weight decay.
-- Dead-agent masking is an environment adaptation. A lone survivor has zero
-  other-agent context but still gets Q from its own embedding. All-dead rows
-  return finite zero Q/attention.
-- Chunked replay preserves a one-million capacity while allocating storage
-  lazily, rather than allocating over 2GB when a short run starts.
+IMPLEMENTATION_VERSION=3
+variant=madsac_paper_maac_continuous_shared_eq15_mc_v3
 
-## Identity, checkpoint and logs
+Metadata records shared_actor=True, independent_actors=False, target_actors=1,
+single_attention_critic=True, self_attention=False, own_embedding_shortcut=True,
+maximum_entropy=True and delayed_policy_update=False. Dimensions remain 56/3/5.
+Version, variant, environment/algorithm fingerprints and architecture are strict.
 
-MAAC implementation version is 2 and variant is
-`paper_maac_continuous_eq8_mc_v2`. Strict validation includes environment version,
-56/3/5 dimensions, architecture, variant and environment/algorithm hashes.
-The previous version-1 deterministic draft checkpoint is rejected, as are
-v3.28, 4v4/52D, MAPPO, MADSAC and mismatched smoke/formal checkpoints.
+Checkpoints contain actor, target_actor, critic, target_critic, actor_optimizer,
+critic_optimizer, sampled_steps, actor_updates, critic_updates, policy_updates,
+target_updates and training seed. Plural actor/optimizer fields are removed.
+MAAC v1/v2 and incompatible environment/algorithm checkpoints are rejected for
+load, evaluation, recording and resume identity checks.
 
-Checkpoints save online and target networks, optimizers and update counters.
-Loading is supported for evaluation/recording. Exact training resume is not
-offered: replay, environment and full RNG continuation are not saved. Metadata
-explicitly sets `formal_exact_resume_supported=False` and
-`replay_buffer_in_checkpoint=False`.
+Exact resume is still unsupported because replay/environment/full RNG continuation
+is not checkpointed. The training --resume option explicitly checks identity and
+then rejects unsupported exact resume; it does not silently start a fresh run.
 
-START/TRAIN/EVAL console lines are compact and omit entropy. JSONL includes
-actor/critic loss, gradient norms, replay size, cycles, return/win/fire/kill,
-controller diagnostics and the existing firing-geometry funnel. `fire_rate`
-means at least one actual Red attempt per episode; `kill_rate` means at least
-one Red weapon kill. Evaluation JSON also keeps the distinct fire-window rate.
-MAPPO's existing console fire-window metric is not silently redefined.
+START/TRAIN/EVAL logs stay compact. JSONL retains gradients/loss, replay/cycle
+counts, controller/firing diagnostics and actual-attempt fire_rate. The existing
+MAPPO fire-window console meaning is not changed.
 
-## Commands
+## Validation
 
-Use WSL Ubuntu with `conda activate uav`; if WSL is unavailable use Windows
-PowerShell/uav. Training, evaluation and checkpoint recording require CUDA.
+Use WSL Ubuntu/uav, or Windows PowerShell/uav if WSL is unavailable. Training,
+evaluation and checkpoint audits require CUDA; CPU is used only for unit tests.
 
-```bash
+```text
 python -m pytest tests/test_maac.py -q
-python -u algorithm/train_maac.py --env-config configs/combat_environment_v329.yaml --algorithm-config configs/maac_5v5_v329.yaml --device cuda --seed 1 --num-envs 2 --total-sampled-steps 32 --smoke --output-dir outputs/maac_v329_validation/cuda_smoke_paper_v2
-python algorithm/evaluate_maac.py --checkpoint outputs/maac_v329_validation/cuda_smoke_paper_v2/latest.pt --episodes 2 --output outputs/maac_v329_validation/evaluation_paper_v2.json
+python -m pytest tests/test_mappo.py tests/test_madsac.py tests/test_madsac_v3.py tests/test_madsac_v326.py tests/test_combat_v329.py -q
+python -u algorithm/train_maac.py --device cuda --seed 1 --num-envs 2 --total-sampled-steps 32 --smoke --output-dir outputs/maac_v329_validation/shared_v3/cuda_smoke
 ```
 
-Output directories must be fresh. Smoke uses width=32, batch=16, replay=128,
-K=4 and update threshold=4 to exercise the same learning paths quickly; formal
-config values remain unchanged. Formal-width CUDA unit tests also exercise
-128/4 heads, batch=1024 and K=16. Smoke results only verify execution and
-numerical health, not learning performance. No formal long training is started.
+Training directories must be fresh. Smoke retains the existing reduced
+32-hidden/16-batch/K4 profile. CUDA formal-spec unit validation independently
+uses hidden=128, heads=4, batch=1024, K=16 and a real shared policy optimizer step.
+It is not a long training experiment. No 7M training is started or prescribed
+before the requested upload/review.

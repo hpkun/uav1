@@ -1,9 +1,9 @@
-"""Strict identity for paper MAAC's continuous score-gradient adaptation."""
+"""Strict Li et al. MAAC shared-policy continuous baseline identity."""
 from env.config import validate_config,environment_dimensions
 from algorithm.common.protocol import config_sha256
 
-IMPLEMENTATION_VERSION=2
-VARIANT='paper_maac_continuous_eq8_mc_v2'
+IMPLEMENTATION_VERSION=3
+VARIANT='madsac_paper_maac_continuous_shared_eq15_mc_v3'
 
 
 def validate_config_pair(env_config,config):
@@ -33,9 +33,10 @@ def identity(env_config,config,smoke=False):
         environment_config_sha256=config_sha256(env_config),algorithm_config_sha256=config_sha256(config),
         observation_dim=56,action_dim=3,num_agents=5,variant=VARIANT,training_smoke=bool(smoke),
         network_architecture=dict(hidden_dim=32 if smoke else n['hidden_dim'],attention_heads=n['attention_heads'],
-            independent_actors=5,shared_actor=False,single_attention_critic=True,self_attention=False,
-            own_embedding_shortcut=True,value_activation='leaky_relu',target_actors=5,target_critic=True,
-            actor_distribution='tanh_gaussian',policy_gradient='eq8_score_function',baseline='independent_monte_carlo'),
+            independent_actors=False,shared_actor=True,single_attention_critic=True,self_attention=False,
+            own_embedding_shortcut=True,value_activation='leaky_relu',target_actors=1,target_critic=True,
+            actor_distribution='tanh_gaussian',policy_gradient='eq15_score_function',baseline='independent_monte_carlo',
+            delayed_policy_update=False,maximum_entropy=True),
         gamma=t['gamma'],alpha=t['alpha'],tau=t['tau'],replay_buffer_in_checkpoint=False,
         formal_exact_resume_supported=False)
 
@@ -43,8 +44,13 @@ def identity(env_config,config,smoke=False):
 def validate_checkpoint(state,env_config,config):
     validate_config_pair(env_config,config)
     if state.get('algorithm')!='MAAC' or state.get('implementation_version')!=IMPLEMENTATION_VERSION:
-        raise RuntimeError('MAAC checkpoint algorithm/implementation identity mismatch (v1 draft is incompatible)')
+        raise RuntimeError('MAAC checkpoint algorithm/implementation identity mismatch (MAAC v1/v2 are incompatible with shared v3)')
     extra=state.get('extra',{})
     if type(extra.get('training_smoke')) is not bool:raise RuntimeError('MAAC checkpoint training_smoke missing/invalid')
     for k,v in identity(env_config,config,extra['training_smoke']).items():
         if extra.get(k)!=v:raise RuntimeError(f'MAAC checkpoint {k} mismatch')
+
+
+def validate_checkpoint_for_resume(state,env_config,config):
+    validate_checkpoint(state,env_config,config)
+    raise RuntimeError('MAAC exact resume unsupported: replay/environment/full RNG state are not saved')

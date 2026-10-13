@@ -9,6 +9,8 @@ import yaml
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 from algorithm.maac.protocol import validate_config_pair
+from algorithm.maac.protocol import IMPLEMENTATION_VERSION
+from algorithm.maac.protocol import validate_checkpoint_for_resume
 from algorithm.maac.runner import MAACTrainingRunner
 
 
@@ -17,6 +19,7 @@ def main():
     p.add_argument('--env-config',default='configs/combat_environment_v329.yaml')
     p.add_argument('--algorithm-config',default='configs/maac_5v5_v329.yaml')
     p.add_argument('--output-dir',required=True)
+    p.add_argument('--resume',help='Validate identity, then reject unsupported exact resume')
     p.add_argument('--device',choices=['cuda'],default='cuda')
     p.add_argument('--seed',type=int);p.add_argument('--num-envs',type=int)
     p.add_argument('--total-sampled-steps',type=int);p.add_argument('--smoke',action='store_true')
@@ -24,7 +27,11 @@ def main():
     if not torch.cuda.is_available():raise RuntimeError('CUDA mandatory; unavailable')
     resolve=lambda x:Path(x) if Path(x).is_absolute() else ROOT/x
     ec=yaml.safe_load(resolve(args.env_config).read_text());ac=yaml.safe_load(resolve(args.algorithm_config).read_text())
-    validate_config_pair(ec,ac);out=resolve(args.output_dir)
+    validate_config_pair(ec,ac)
+    if args.resume:
+        state=torch.load(resolve(args.resume),map_location='cuda',weights_only=False)
+        validate_checkpoint_for_resume(state,ec,ac)
+    out=resolve(args.output_dir)
     if out.exists() and any(out.iterdir()):raise RuntimeError('MAAC output directory must be fresh')
     out.mkdir(parents=True,exist_ok=True)
     for name,value in [('env_config.yaml',ec),('algorithm_config.yaml',ac)]:
@@ -32,7 +39,7 @@ def main():
     runner=MAACTrainingRunner(ec,ac,out,args.num_envs,args.total_sampled_steps,args.seed,args.device,args.smoke)
     (out/'run_config.json').write_text(json.dumps(dict(seed=runner.seed,num_envs=runner.num_envs,
         total_sampled_steps=runner.total_steps,device='cuda',smoke=args.smoke,
-        implementation_version=2,variant=ac['implementation']['variant'],
+        implementation_version=IMPLEMENTATION_VERSION,variant=ac['implementation']['variant'],
         effective_hidden_dim=32 if args.smoke else ac['network']['hidden_dim'],
         effective_minibatch_size=runner.batch_size,effective_learning_starts=runner.learning_starts,
         effective_sampled_steps_per_update=runner.update_interval,
