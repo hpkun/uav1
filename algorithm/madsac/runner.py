@@ -101,6 +101,7 @@ class MADSACTrainingRunner:
 
     def startup_summary(self):
         return {
+            "environment_version": self.env_config["environment_version"],
             "algorithm": "MADSAC", "mode": "smoke" if self.smoke else "formal",
             "device": self.device, "seed": self.seed, "num_envs": self.num_envs,
             "total_sampled_steps": self.total_sampled_steps,
@@ -128,7 +129,8 @@ class MADSACTrainingRunner:
                 f"| hidden={s['hidden_dim']} | heads={s['attention_heads']} | gamma={s['gamma']} "
                 f"| alpha={s['alpha']} | tau={s['tau']} | delay={s['policy_delay']} "
                 f"| replay={s['replay_capacity']} | batch={s['minibatch_size']} "
-                f"| learning_starts={s['learning_starts']} | eval={s['evaluation_mode']}")
+                f"| learning_starts={s['learning_starts']} | eval={s['evaluation_mode']} "
+                f"| environment_version={s['environment_version']}")
 
     def _completed(self, result: VectorStep):
         self.agent_episode_returns += result.rewards
@@ -310,6 +312,7 @@ class MADSACTrainingRunner:
     def summary(self):
         latest = self.evaluation_history[-1] if self.evaluation_history else None
         return {
+            "environment_version": self.env_config["environment_version"],
             "algorithm": "madsac", "implementation_version": MADSAC_IMPL_VERSION,
             "sampled_steps": self.trainer.sampled_steps,
             "vector_steps": self.trainer.vector_steps,

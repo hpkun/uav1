@@ -8,9 +8,18 @@ def validate_madsac_config(env_config: dict, algorithm_config: dict) -> None:
     validate_config(env_config)
     if algorithm_config.get('algorithm') != 'madsac':
         raise RuntimeError('algorithm config is not madsac')
-    if str(env_config.get('environment_version')) not in (ENVIRONMENT_VERSION,'3.3','3.4','3.5','3.6','3.7','3.8','3.9','3.10','3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18'):
-        raise RuntimeError('MADSAC environment_version mismatch: unsupported protocol; MADSAC supports only v2.3 4v4/52D or v3.3/v3.4/v3.5/v3.6/v3.7/v3.8/v3.9/v3.10/v3.11 5v5/66D or v3.12 5v5/56D')
+    if str(env_config.get('environment_version')) not in (ENVIRONMENT_VERSION,'3.3','3.4','3.5','3.6','3.7','3.8','3.9','3.10','3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.26'):
+        raise RuntimeError('MADSAC environment_version mismatch: unsupported protocol; MADSAC supports only v2.3 4v4/52D or v3.3/v3.4/v3.5/v3.6/v3.7/v3.8/v3.9/v3.10/v3.11 5v5/66D or v3.12-v3.18 and v3.26 5v5/56D')
     n, t, i = algorithm_config['network'], algorithm_config['training'], algorithm_config['implementation']
+    if env_config['environment_version'] == '3.26':
+        if algorithm_config.get('environment') != {'environment_version': '3.26', 'team_size': 5}:
+            raise RuntimeError('MADSAC v3.26 environment identity must be 3.26/5v5')
+        dimensions = tuple(n[key] for key in ('observation_dim', 'action_dim', 'num_agents'))
+        if dimensions != (56, 3, 5) or any(type(value) is not int for value in dimensions):
+            raise RuntimeError('MADSAC v3.26 requires exact dimensions 56/3/5')
+        if (n['actor_hidden_layers'] != [256, 256] or n['critic_hidden_layers'] != [256, 256]
+                or n['attention_heads'] != 2):
+            raise RuntimeError('MADSAC v3.26 requires 256/256 shared actor and two-head attention critics')
     actual = tuple(int(n[key]) for key in ('observation_dim', 'action_dim', 'num_agents'))
     expected=environment_dimensions(env_config)
     if actual != expected:
@@ -43,6 +52,14 @@ def validate_madsac_checkpoint(state: dict, env_config: dict, algorithm_config: 
             raise RuntimeError(f'MADSAC checkpoint {key} mismatch')
     architecture = extra.get('network_architecture', {})
     n = algorithm_config['network']
+    if env_config['environment_version'] == '3.26':
+        for key, value in {'shared_actor': True, 'twin_independent_critics': True,
+                           'target_actor': True, 'target_critics': 2,
+                           'observation_dim': 56, 'action_dim': 3, 'num_agents': 5}.items():
+            if architecture.get(key) != value:
+                raise RuntimeError(f'MADSAC checkpoint architecture {key} mismatch')
+        if extra.get('formal_exact_resume_supported') is not False or extra.get('replay_buffer_in_checkpoint') is not False:
+            raise RuntimeError('MADSAC checkpoint extra resume/replay provenance mismatch')
     if architecture.get('attention_heads') != n['attention_heads']:
         raise RuntimeError('MADSAC checkpoint attention_heads mismatch')
     expected_hidden = 32 if extra.get('training_smoke') else int(n['actor_hidden_layers'][0])

@@ -11,10 +11,10 @@ from algorithm.madsac.trainer import MADSACTrainer, actor_objective, batch_mean_
 
 def tiny_batch(batch_size=8):
     rng = np.random.default_rng(12)
-    return ReplayBatch(rng.normal(size=(batch_size, 4, 52)).astype(np.float32), rng.uniform(-1, 1, size=(batch_size, 4, 3)).astype(np.float32), rng.normal(size=(batch_size, 4)).astype(np.float32), rng.normal(size=(batch_size, 4, 52)).astype(np.float32), np.zeros(batch_size, dtype=np.bool_), np.ones((batch_size, 4), dtype=np.float32), np.ones((batch_size, 4), dtype=np.float32))
+    return ReplayBatch(rng.normal(size=(batch_size, 5, 56)).astype(np.float32), rng.uniform(-1, 1, size=(batch_size, 5, 3)).astype(np.float32), rng.normal(size=(batch_size, 5)).astype(np.float32), rng.normal(size=(batch_size, 5, 56)).astype(np.float32), np.zeros(batch_size, dtype=np.bool_), np.ones((batch_size, 5), dtype=np.float32), np.ones((batch_size, 5), dtype=np.float32))
 
 def tiny_trainer(seed=7, policy_delay=2):
-    return MADSACTrainer(hidden_dim=16, attention_heads=2, policy_delay=policy_delay, seed=seed, device='cuda')
+    return MADSACTrainer(observation_dim=56, num_agents=5, hidden_dim=16, attention_heads=2, policy_delay=policy_delay, seed=seed, device='cuda')
 
 def parameters(module):
     return [value.detach().clone() for value in module.parameters()]
@@ -23,19 +23,19 @@ def any_changed(before, module):
     return any((not torch.equal(old, new.detach()) for (old, new) in zip(before, module.parameters())))
 
 def test_actor_shapes_bounds_finite_log_prob_and_deterministic_identity():
-    actor = SharedMADSACActor(hidden_dim=16)
-    observations = torch.randn(3, 4, 52)
+    actor = SharedMADSACActor(observation_dim=56, hidden_dim=16)
+    observations = torch.randn(3, 5, 56)
     generator = torch.Generator().manual_seed(101)
     (actions, raw, log_prob) = actor.sample(observations, generator)
-    assert actions.shape == raw.shape == (3, 4, 3)
-    assert log_prob.shape == (3, 4)
+    assert actions.shape == raw.shape == (3, 5, 3)
+    assert log_prob.shape == (3, 5)
     assert torch.isfinite(log_prob).all()
     assert torch.all(actions >= -1) and torch.all(actions <= 1)
     assert torch.equal(actor.deterministic(observations), torch.tanh(actor.distribution(observations).mean))
 
 def test_actor_generator_reproducibility_and_flat_inputs():
-    actor = SharedMADSACActor(hidden_dim=16)
-    observations = torch.randn(5, 52)
+    actor = SharedMADSACActor(observation_dim=56, hidden_dim=16)
+    observations = torch.randn(5, 56)
     first = actor.sample(observations, torch.Generator().manual_seed(9))[0]
     second = actor.sample(observations, torch.Generator().manual_seed(9))[0]
     assert first.shape == (5, 3)
@@ -43,19 +43,19 @@ def test_actor_generator_reproducibility_and_flat_inputs():
 
 def test_critics_independent_shape_dead_masks_and_no_dead_key_value_influence():
     torch.manual_seed(3)
-    critic1 = CentralizedAttentionQCritic(hidden_dim=16, attention_heads=2)
-    critic2 = CentralizedAttentionQCritic(hidden_dim=16, attention_heads=2)
+    critic1 = CentralizedAttentionQCritic(observation_dim=56, hidden_dim=16, attention_heads=2)
+    critic2 = CentralizedAttentionQCritic(observation_dim=56, hidden_dim=16, attention_heads=2)
     assert not any((a.data_ptr() == b.data_ptr() for (a, b) in zip(critic1.parameters(), critic2.parameters())))
-    observations = torch.randn(2, 4, 52)
-    actions = torch.randn(2, 4, 3)
-    alive = torch.tensor([[1, 1, 0, 1], [1, 0, 1, 1]], dtype=torch.float32)
+    observations = torch.randn(2, 5, 56)
+    actions = torch.randn(2, 5, 3)
+    alive = torch.tensor([[1, 1, 0, 1, 1], [1, 0, 1, 1, 1]], dtype=torch.float32)
     (baseline, attention) = critic1(observations, actions, alive, return_attention=True)
     (changed_obs, changed_actions) = (observations.clone(), actions.clone())
     changed_obs[alive == 0] = 1000000.0
     changed_actions[alive == 0] = -1000000.0
     changed = critic1(changed_obs, changed_actions, alive)
-    assert baseline.shape == (2, 4)
-    assert attention.shape == (2, 2, 4, 4)
+    assert baseline.shape == (2, 5)
+    assert attention.shape == (2, 2, 5, 5)
     assert torch.equal(baseline[alive == 0], torch.zeros_like(baseline[alive == 0]))
     assert torch.allclose(baseline[alive > 0], changed[alive > 0], atol=1e-06)
 
@@ -68,15 +68,15 @@ def test_target_networks_are_hard_copied_frozen_and_have_no_optimizer():
     assert not any((id(parameter) in optimizer_ids for module in (trainer.target_actor, trainer.target_critic1, trainer.target_critic2) for parameter in module.parameters()))
 
 def test_replay_stores_joint_transition_and_true_terminal_next_observation():
-    replay = JointReplayBuffer(capacity=4, seed=2)
-    original = np.zeros((1, 4, 52), np.float32)
-    transition_next = np.full((1, 4, 52), 7, np.float32)
-    auto_reset = np.full((1, 4, 52), 99, np.float32)
-    result = VectorStep(auto_reset, transition_next, np.ones((1, 4), np.float32), np.array([True]), np.array([False]), [{}], np.ones((1, 4), np.float32), np.zeros((1, 4), np.float32))
+    replay = JointReplayBuffer(num_agents=5, observation_dim=56, capacity=4, seed=2)
+    original = np.zeros((1, 5, 56), np.float32)
+    transition_next = np.full((1, 5, 56), 7, np.float32)
+    auto_reset = np.full((1, 5, 56), 99, np.float32)
+    result = VectorStep(auto_reset, transition_next, np.ones((1, 5), np.float32), np.array([True]), np.array([False]), [{}], np.ones((1, 5), np.float32), np.zeros((1, 5), np.float32))
     runner = object.__new__(MADSACTrainingRunner)
     runner.replay = replay
-    runner.store_vector_step(original, np.zeros((1, 4, 3), np.float32), result)
-    assert replay.observations.shape == (4, 4, 52)
+    runner.store_vector_step(original, np.zeros((1, 5, 3), np.float32), result)
+    assert replay.observations.shape == (4, 5, 56)
     assert np.all(replay.next_observations[0] == 7)
     assert not np.any(replay.next_observations[0] == 99)
     assert bool(replay.dones[0])
@@ -116,10 +116,10 @@ def test_actor_objective_sign():
 
 def test_q_i_backward_has_only_own_action_gradient():
     torch.manual_seed(14)
-    critic = CentralizedAttentionQCritic(hidden_dim=16, attention_heads=2)
-    observations = torch.randn(3, 4, 52)
-    actions = torch.randn(3, 4, 3, requires_grad=True)
-    alive = torch.ones(3, 4)
+    critic = CentralizedAttentionQCritic(observation_dim=56, hidden_dim=16, attention_heads=2)
+    observations = torch.randn(3, 5, 56)
+    actions = torch.randn(3, 5, 3, requires_grad=True)
+    alive = torch.ones(3, 5)
     agent_index = 2
     own_only = joint_actions_with_own_gradient(actions, agent_index)
     critic(observations, own_only, alive)[:, agent_index].sum().backward()
@@ -144,7 +144,7 @@ def test_delayed_actor_and_targets_update_only_on_delay_and_critics_not_actor_op
     assert second['actor_gradient_norm'] > 0
 
 def test_actor_step_has_q_gradient_without_changing_frozen_critic_parameters():
-    trainer = MADSACTrainer(hidden_dim=16, attention_heads=2, policy_delay=1, seed=8, critic_learning_rate=0.0, device='cuda')
+    trainer = MADSACTrainer(observation_dim=56, num_agents=5, hidden_dim=16, attention_heads=2, policy_delay=1, seed=8, critic_learning_rate=0.0, device='cuda')
     (critic1_before, critic2_before) = (parameters(trainer.critic1), parameters(trainer.critic2))
     actor_before = parameters(trainer.actor)
     metrics = trainer.update(tiny_batch())
@@ -164,7 +164,7 @@ def test_polyak_formula_exact():
 
 def test_checkpoint_reload_actor_for_evaluation(tmp_path):
     trainer = tiny_trainer(seed=19)
-    observations = np.ones((1, 4, 52), np.float32)
+    observations = np.ones((1, 5, 56), np.float32)
     before = trainer.act(observations, deterministic=True)
     checkpoint = tmp_path / 'madsac.pt'
     trainer.save(checkpoint)
@@ -179,8 +179,8 @@ def test_evaluation_modes_and_rng_isolation(monkeypatch):
     training_rng_before = trainer.policy_generator.get_state().clone()
 
     def fake_episode(local_trainer, _config, seed, mode, generator):
-        obs = np.full((1, 4, 52), float(seed % 3), np.float32)
-        action = local_trainer.act(obs, np.ones((1, 4), np.float32), mode == 'deterministic', generator)[0]
+        obs = np.full((1, 5, 56), float(seed % 3), np.float32)
+        action = local_trainer.act(obs, np.ones((1, 5), np.float32), mode == 'deterministic', generator)[0]
         return {'episode_return': float(action.sum()), 'mean_agent_episode_return': float(action.mean()), 'red_success': 0.0, 'blue_win': 0.0, 'draw': 1.0, 'termination_reason': 'red_failure_timeout', 'red_losses': 0, 'blue_losses': 0, 'red_boundary_exits': 0, 'red_ground_losses': 0, 'episode_length': 1, 'red_survivors': 4, 'blue_survivors': 4, **{f'{side}_{event}': 0 for side in ('red', 'blue') for event in ('fire_attempts', 'weapon_hits', 'attack_kills', 'boundary_exits', 'ground_losses')}, **{f'{side}_first_{event}_step': None for side in ('red', 'blue') for event in ('fire_window', 'attempt', 'hit', 'kill')}, **{f'episode_{name}_total': 0 for name in ('r1', 'r2', 'r3', 'r4')}}
     monkeypatch.setattr('algorithm.madsac.evaluation.evaluate_madsac_episode', fake_episode)
     stochastic1 = evaluate_madsac(trainer, {}, (44000000, 44000001), 'stochastic', 770001)
@@ -215,12 +215,12 @@ def test_per_scenario_policy_rng_is_stable_distinct_and_order_independent(monkey
     assert torch.equal(training_before, trainer.policy_generator.get_state())
 
 def test_ongoing_transition_not_done_but_timeout_is_done():
-    replay = JointReplayBuffer(capacity=4)
+    replay = JointReplayBuffer(num_agents=5, observation_dim=56, capacity=4)
     runner = object.__new__(MADSACTrainingRunner)
     runner.replay = replay
-    zeros_obs = np.zeros((2, 4, 52), np.float32)
-    result = VectorStep(zeros_obs, zeros_obs, np.zeros((2, 4), np.float32), np.array([False, False]), np.array([False, True]), [{}, {}], np.ones((2, 4), np.float32), np.ones((2, 4), np.float32))
-    runner.store_vector_step(zeros_obs, np.zeros((2, 4, 3), np.float32), result)
+    zeros_obs = np.zeros((2, 5, 56), np.float32)
+    result = VectorStep(zeros_obs, zeros_obs, np.zeros((2, 5), np.float32), np.array([False, False]), np.array([False, True]), [{}, {}], np.ones((2, 5), np.float32), np.ones((2, 5), np.float32))
+    runner.store_vector_step(zeros_obs, np.zeros((2, 5, 3), np.float32), result)
     assert replay.dones[:2].tolist() == [False, True]
 
 def test_sampled_steps_count_environment_transitions_not_agents():
