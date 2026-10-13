@@ -99,6 +99,12 @@ def load_recording_policy(checkpoint, env_config, config, device='cuda'):
         actor_width, critic_width = checkpoint_widths(state)
         trainer = build_mappo_trainer(config, device, actor_width, critic_width)
         trainer.load(checkpoint)
+    elif algorithm == 'maac':
+        from algorithm.maac.protocol import validate_checkpoint
+        from algorithm.maac.trainer import MAACTrainer
+        validate_checkpoint(state, env_config, config)
+        trainer = MAACTrainer(env_config, config, device, state['training_seed'], extra['training_smoke'])
+        trainer.load(checkpoint)
     elif algorithm == 'madsac':
         validate_madsac_checkpoint(state, env_config, config, expected_training_seed=extra['training_seed'])
         trainer = build_madsac_trainer(config, device, extra['network_architecture']['hidden_dim'], extra['training_seed'])

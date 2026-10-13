@@ -1,0 +1,28 @@
+algorithm: MAAC
+environment:
+  environment_version: '3.29'
+  team_size: 5
+network:
+  observation_dim: 56
+  action_dim: 3
+  num_agents: 5
+  hidden_dim: 256
+  attention_heads: 2
+training:
+  gamma: 0.99
+  lr_actor: 0.0003
+  lr_critic: 0.0003
+  rollout_length: 256
+  num_train_envs: 16
+  minibatch_size: 512
+  total_sampled_steps: 3000000
+  device: cuda
+  seed: 1
+  evaluation_episodes: 20
+  evaluation_interval_sampled_steps: 100000
+  checkpoint_interval_sampled_steps: 500000
+  console_interval_sampled_steps: 20000
+  recent_episode_window: 100
+implementation:
+  variant: self_inclusive_context_only_on_policy_deterministic_v1
+  evaluation_seed_base: 10000000
