@@ -140,3 +140,11 @@ def test_historical_checkpoint_rejected(name,previous):
         checks=(validate_checkpoint,)
     for check in checks:
         with pytest.raises(RuntimeError,match='environment_version'):check(state,ec,cfg)
+
+
+@pytest.mark.parametrize('version',['334','335'])
+@pytest.mark.parametrize('distance',[500,1000])
+def test_expected_angle_probability_never_increases(version,distance):
+    w=env(version).weapon
+    probabilities=[w.expected_hit_probability(distance,math.radians(angle),math.radians(angle)) for angle in (0,10,20,30)]
+    assert all(a>b for a,b in zip(probabilities,probabilities[1:]))

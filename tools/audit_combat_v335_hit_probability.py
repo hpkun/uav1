@@ -18,7 +18,7 @@ def monte_carlo(weapon,distance,azimuth,elevation,samples,seed):
     observed=hits/samples
     standard_error=math.sqrt(expected*(1-expected)/samples)
     return dict(samples=samples,seed=seed,hits=hits,observed_probability=observed,
-        expected_probability=expected,error=observed-expected,standard_error=standard_error,
+        expected_probability=expected,error=observed-expected,absolute_error=abs(observed-expected),standard_error=standard_error,
         within_six_standard_errors=abs(observed-expected)<=6*standard_error+1/samples)
 
 
@@ -40,6 +40,7 @@ def main():
         normalized.append(dict(rho=rho,threshold_old_4km=old,threshold_new_1km=new,equal=True))
     result=dict(device=torch.cuda.get_device_name(0),samples_per_case=args.samples,
         perfect_alignment=perfect,normalized_threshold=normalized,
+        angle_conditions={v:{str(d):{str(angle):e.weapon.expected_hit_probability(d,math.radians(angle),math.radians(angle)) for angle in (0,10,20,30)} for d in (500,1000)} for v,e in envs.items()},
         note='Diagnostic only. Every sample calls unchanged BodyFrameGaussianWeapon.attempt_hit, with one shared epsilon. Six-SE is an audit flag, not an environment threshold. Default sample count and angle cases are explicitly chosen diagnostic settings.',cases=[])
     angles=((0,0),(15,15),(30,30),(30,-30))
     for v,e in envs.items():

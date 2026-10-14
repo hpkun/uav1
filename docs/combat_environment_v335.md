@@ -19,8 +19,9 @@ unchanged `validate_v334`. All other fields are identical.
 The retained value equals `4000 / ln(6)`, associated with the previous 4 km
 scale. The weapon envelope is currently 1 km. v3.35 preserves the normalized
 ratio `D_hit / D_fire_max = 1 / ln(6)` by scaling D_hit by one quarter.
-This is a project distance-scale recalibration, not a new paper-derived hidden
-parameter or a simultaneous angular-noise calibration.
+558.1106265512473 is not a parameter publicly specified by the paper.
+This is a project calibration preserving the historical normalized-range decay
+scale. It does not recalibrate angular noise.
 
 The unchanged `BodyFrameGaussianWeapon` uses
 `threshold(d)=pi*exp(-d/D_hit)` and one shared Gaussian epsilon for the two
@@ -70,3 +71,15 @@ The three existing algorithm runners receive minimal 32-transition CUDA smokes,
 followed by official checkpoint reload and evaluation. All commands use the
 PowerShell uav Conda environment. No formal training is run. Measured Monte
 Carlo, smoke and regression results are in `outputs/v335_validation/report.md`.
+
+
+The angle audit also computes expected probabilities at 500/1000 m for equal
+azimuth/elevation errors 0/10/20/30 degrees. Analytic unit tests verify they
+strictly decrease; Monte Carlo outcomes are never asserted in unit tests.
+`tools/audit_combat_v335_engagement.py` runs both versions with identical seeds
+0-199 and identical initial states using the existing fixed nearest-target
+pursuit policies. It records outcome, attacks/hits/kills, ammo, first fire
+range/time, observed first misses and continuation after a miss, and reuses
+the unchanged v3.34 read-only R4 funnel. Counts never enter reward or policy.
+The comparison can share the trajectory until hit outcomes diverge; subsequent
+trajectories are not forced to remain equal. No result-driven tuning is done.
