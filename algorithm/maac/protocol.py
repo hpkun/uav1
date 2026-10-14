@@ -4,14 +4,14 @@ from algorithm.common.protocol import config_sha256
 
 IMPLEMENTATION_VERSION=3
 VARIANT='madsac_paper_maac_continuous_shared_eq15_mc_v3'
-DIMENSIONS={'3.29':(56,3,5),'3.30':(45,3,4)}
+DIMENSIONS={'3.29':(56,3,5),'3.30':(45,3,4),'3.31':(45,3,4)}
 
 
 def validate_config_pair(env_config,config):
     validate_config(env_config)
     expected_dims=DIMENSIONS.get(env_config.get('environment_version'))
     if expected_dims is None or environment_dimensions(env_config)!=expected_dims:
-        raise RuntimeError('MAAC requires exact environment_version 3.29/56/3/5 or 3.30/45/3/4')
+        raise RuntimeError('MAAC requires exact environment_version 3.29/56/3/5 or 3.30/45/3/4 or 3.31/45/3/4')
     if config.get('algorithm')!='MAAC' or config.get('environment')!={'environment_version':env_config['environment_version'],'team_size':expected_dims[2]}:
         raise RuntimeError('MAAC algorithm/environment identity mismatch')
     n,t=config['network'],config['training']
