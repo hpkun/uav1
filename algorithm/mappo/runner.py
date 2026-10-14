@@ -140,7 +140,7 @@ class MAPPOTrainingRunner:
                 f"| epochs={s['ppo_epochs']} | minibatch={s['minibatch_size']} "
                 f"| gamma={s['gamma']} | lambda={s['gae_lambda']} | clip={s['clip_ratio']} "
                 f"| max_steps={s['max_steps']}" +
-                (f" | environment_version={s['environment_version']}" if s['environment_version'] in ('3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36') else ""))
+                (f" | environment_version={s['environment_version']}" if s['environment_version'] in ('3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36','3.37') else ""))
 
     @staticmethod
     def _display(value: float | None, digits: int) -> str:
@@ -214,7 +214,7 @@ class MAPPOTrainingRunner:
         for name in ("r1", "r2", "r3", "r4"):
             values[f"mean_{name}_reward"] = np.concatenate([
                 np.asarray(info[f"{name}_rewards"]).reshape(-1) for info in result.infos])
-        if str(getattr(self, 'env_config', {}).get('environment_version')) in ('3.9', '3.10','3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36'):
+        if str(getattr(self, 'env_config', {}).get('environment_version')) in ('3.9', '3.10','3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36','3.37'):
             for name in ('paper', 'safety', 'extended'):
                 values[f'mean_{name}_reward'] = np.concatenate([
                     np.asarray(info[f'{name}_rewards']).reshape(-1) for info in result.infos])
@@ -265,10 +265,10 @@ class MAPPOTrainingRunner:
         }
         if rows:
             record.update(aggregate_combat_records(rows))
-        if str(getattr(self, 'env_config', {}).get('environment_version')) in ('3.9', '3.10','3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36'):
+        if str(getattr(self, 'env_config', {}).get('environment_version')) in ('3.9', '3.10','3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36','3.37'):
             for name in ('paper_reward', 'safety', 'extended_reward'):
                 record[f'episode_{name}_total'] = mean(f'episode_{name}_total')
-        if str(getattr(self, 'env_config', {}).get('environment_version')) in ('3.10', '3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36'):
+        if str(getattr(self, 'env_config', {}).get('environment_version')) in ('3.10', '3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36','3.37'):
             for name in ('paper_nearest_agent_steps', 'target_switches'):
                 record[f'average_blue_{name}'] = mean(f'blue_{name}')
         return record
@@ -357,7 +357,7 @@ class MAPPOTrainingRunner:
             "sampled_steps": self.trainer.sampled_steps,
             "evaluation_seed_base": int(self.evaluation_seeds[0]),
             "evaluation_seed_end": int(self.evaluation_seeds[-1]),
-            **({"environment_version": self.env_config['environment_version']} if self.env_config['environment_version'] in ('3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36') else {}),
+            **({"environment_version": self.env_config['environment_version']} if self.env_config['environment_version'] in ('3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36','3.37') else {}),
             **evaluate(self.trainer, self.env_config, self.evaluation_seeds),
         }
 
@@ -453,16 +453,16 @@ class MAPPOTrainingRunner:
             "last_update_metrics": self.last_metrics, "evaluation_history": self.evaluation_history,
             **({f"average_blue_{name}": mean(f"blue_{name}")
                 for name in ('paper_nearest_agent_steps', 'target_switches')}
-               if str(getattr(self, 'env_config', {}).get('environment_version')) in ('3.10', '3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36') else {}),
+               if str(getattr(self, 'env_config', {}).get('environment_version')) in ('3.10', '3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36','3.37') else {}),
             **({f"average_episode_{name}_total": mean(f"episode_{name}_total")
                 for name in ('paper_reward', 'safety', 'extended_reward')}
-               if str(getattr(self, 'env_config', {}).get('environment_version')) in ('3.9', '3.10','3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36') else {}),
+               if str(getattr(self, 'env_config', {}).get('environment_version')) in ('3.9', '3.10','3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36','3.37') else {}),
             **({f"average_episode_{name}_total": mean(f"episode_{name}_total")
                 for name in ('individual_event','team_casualty')}
-               if str(getattr(self,'env_config',{}).get('environment_version')) in ('3.3','3.4','3.5','3.6','3.7','3.8','3.9','3.10','3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36') else {}),
+               if str(getattr(self,'env_config',{}).get('environment_version')) in ('3.3','3.4','3.5','3.6','3.7','3.8','3.9','3.10','3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36','3.37') else {}),
             **({f"average_episode_{name}_total": mean(f"episode_{name}_total")
                 for name in ('guide','tactical_offense','tactical_defense','tactical')}
-               if str(getattr(self,'env_config',{}).get('environment_version')) in ('3.6','3.7','3.8','3.9','3.10','3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36') else {}),
+               if str(getattr(self,'env_config',{}).get('environment_version')) in ('3.6','3.7','3.8','3.9','3.10','3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36','3.37') else {}),
             "best_evaluation_steps": best.get("sampled_steps"),
             "best_evaluation_win_rate": best.get("win_rate"),
             "best_evaluation_return": best.get("average_return"),
