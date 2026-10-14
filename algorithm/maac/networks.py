@@ -58,7 +58,7 @@ class CentralizedAttentionCritic(nn.Module):
         if (observations.ndim!=3 or observations.shape[1:]!=(self.num_agents,self.observation_dim)
                 or actions.shape!=(*observations.shape[:2],self.action_dim)
                 or alive_masks.shape!=observations.shape[:2]):
-            raise ValueError('critic requires obs [B,5,56], actions [B,5,3], alive [B,5]')
+            raise ValueError(f'critic requires joint [B,N,D]/[B,N,A] with N={self.num_agents}, D={self.observation_dim}')
         alive=alive_masks.bool()
         z=torch.cat((observations,actions),-1).masked_fill(~alive[...,None],0.)
         embedding=torch.stack([encoder(z[:,i]) for i,encoder in enumerate(self.encoders)],1)

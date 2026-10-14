@@ -9,15 +9,15 @@ def validate_madsac_config(env_config: dict, algorithm_config: dict) -> None:
     validate_config(env_config)
     if algorithm_config.get('algorithm') != 'madsac':
         raise RuntimeError('algorithm config is not madsac')
-    if str(env_config.get('environment_version')) not in (ENVIRONMENT_VERSION,'3.3','3.4','3.5','3.6','3.7','3.8','3.9','3.10','3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.26','3.27','3.28','3.29'):
-        raise RuntimeError('MADSAC environment_version mismatch: unsupported protocol; MADSAC supports only v2.3 4v4/52D or v3.3/v3.4/v3.5/v3.6/v3.7/v3.8/v3.9/v3.10/v3.11 5v5/66D or v3.12-v3.18 and v3.26-v3.29 5v5/56D')
+    if str(env_config.get('environment_version')) not in (ENVIRONMENT_VERSION,'3.3','3.4','3.5','3.6','3.7','3.8','3.9','3.10','3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.26','3.27','3.28','3.29','3.30'):
+        raise RuntimeError('MADSAC environment_version mismatch: unsupported protocol; MADSAC supports only v2.3 4v4/52D or v3.3/v3.4/v3.5/v3.6/v3.7/v3.8/v3.9/v3.10/v3.11 5v5/66D or v3.12-v3.18 and v3.26-v3.29 5v5/56D or v3.30 4v4/45D')
     n, t, i = algorithm_config['network'], algorithm_config['training'], algorithm_config['implementation']
-    if env_config['environment_version'] in ('3.26', '3.27', '3.28','3.29'):
-        if algorithm_config.get('environment') != {'environment_version': env_config['environment_version'], 'team_size': 5}:
-            raise RuntimeError(f"MADSAC environment identity must be {env_config['environment_version']}/5v5")
+    if env_config['environment_version'] in ('3.26', '3.27', '3.28','3.29','3.30'):
+        if algorithm_config.get('environment') != {'environment_version': env_config['environment_version'], 'team_size': environment_dimensions(env_config)[2]}:
+            raise RuntimeError(f"MADSAC environment identity must be {env_config['environment_version']}/{environment_dimensions(env_config)[2]}v{environment_dimensions(env_config)[2]}")
         dimensions = tuple(n[key] for key in ('observation_dim', 'action_dim', 'num_agents'))
-        if dimensions != (56, 3, 5) or any(type(value) is not int for value in dimensions):
-            raise RuntimeError('MADSAC v3.26-v3.29 requires exact dimensions 56/3/5')
+        if dimensions != environment_dimensions(env_config) or any(type(value) is not int for value in dimensions):
+            raise RuntimeError(f'MADSAC requires exact dimensions {environment_dimensions(env_config)}')
         if (n['actor_hidden_layers'] != [256, 256] or n['critic_hidden_layers'] != [256, 256]
                 or n['attention_heads'] != 2):
             raise RuntimeError('MADSAC v3.26-v3.29 requires 256/256 shared actor and two-head attention critics')
@@ -56,10 +56,10 @@ def validate_madsac_checkpoint(state: dict, env_config: dict, algorithm_config: 
         if architecture.get(key) != value:
             raise RuntimeError(f'MADSAC checkpoint architecture {key} mismatch')
     n = algorithm_config['network']
-    if env_config['environment_version'] in ('3.26', '3.27', '3.28','3.29'):
+    if env_config['environment_version'] in ('3.26', '3.27', '3.28','3.29','3.30'):
         for key, value in {'shared_actor': True, 'twin_independent_critics': True,
                            'target_actor': True, 'target_critics': 2,
-                           'observation_dim': 56, 'action_dim': 3, 'num_agents': 5}.items():
+                           **dict(zip(('observation_dim','action_dim','num_agents'),environment_dimensions(env_config)))}.items():
             if architecture.get(key) != value:
                 raise RuntimeError(f'MADSAC checkpoint architecture {key} mismatch')
         if extra.get('formal_exact_resume_supported') is not False or extra.get('replay_buffer_in_checkpoint') is not False:

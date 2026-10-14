@@ -4,18 +4,21 @@ from algorithm.common.protocol import config_sha256
 
 IMPLEMENTATION_VERSION=3
 VARIANT='madsac_paper_maac_continuous_shared_eq15_mc_v3'
+DIMENSIONS={'3.29':(56,3,5),'3.30':(45,3,4)}
 
 
 def validate_config_pair(env_config,config):
     validate_config(env_config)
-    if env_config.get('environment_version')!='3.29' or environment_dimensions(env_config)!=(56,3,5):
-        raise RuntimeError('MAAC requires exact environment_version 3.29 and 56/3/5')
-    if config.get('algorithm')!='MAAC' or config.get('environment')!={'environment_version':'3.29','team_size':5}:
+    expected_dims=DIMENSIONS.get(env_config.get('environment_version'))
+    if expected_dims is None or environment_dimensions(env_config)!=expected_dims:
+        raise RuntimeError('MAAC requires exact environment_version 3.29/56/3/5 or 3.30/45/3/4')
+    if config.get('algorithm')!='MAAC' or config.get('environment')!={'environment_version':env_config['environment_version'],'team_size':expected_dims[2]}:
         raise RuntimeError('MAAC algorithm/environment identity mismatch')
     n,t=config['network'],config['training']
-    expected=dict(observation_dim=56,action_dim=3,num_agents=5,hidden_dim=128,attention_heads=4)
+    expected=dict(zip(('observation_dim','action_dim','num_agents'),expected_dims))
+    expected.update(hidden_dim=128,attention_heads=4)
     if any(type(n.get(k)) is not int or n[k]!=v for k,v in expected.items()):
-        raise RuntimeError('MAAC exact dimensions/appendix architecture must be 56/3/5, hidden=128, heads=4')
+        raise RuntimeError(f'MAAC exact dimensions must be {expected_dims}, hidden=128, heads=4')
     if config.get('implementation',{}).get('variant')!=VARIANT:raise RuntimeError('MAAC variant identity mismatch')
     for k in ('num_train_envs','total_sampled_steps','minibatch_size','replay_capacity','learning_starts',
               'sampled_steps_per_update','critic_updates_per_cycle','policy_updates_per_cycle',
@@ -31,7 +34,7 @@ def identity(env_config,config,smoke=False):
     n=config['network'];t=config['training']
     return dict(environment_version=env_config['environment_version'],
         environment_config_sha256=config_sha256(env_config),algorithm_config_sha256=config_sha256(config),
-        observation_dim=56,action_dim=3,num_agents=5,variant=VARIANT,training_smoke=bool(smoke),
+        **dict(zip(('observation_dim','action_dim','num_agents'),environment_dimensions(env_config))),variant=VARIANT,training_smoke=bool(smoke),
         network_architecture=dict(hidden_dim=32 if smoke else n['hidden_dim'],attention_heads=n['attention_heads'],
             independent_actors=False,shared_actor=True,single_attention_critic=True,self_attention=False,
             own_embedding_shortcut=True,value_activation='leaky_relu',target_actors=1,target_critic=True,

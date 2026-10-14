@@ -177,7 +177,7 @@ class MADSACTrainingRunner:
         }
         if rows:
             record.update(aggregate_combat_records(rows))
-        if self.env_config['environment_version'] == '3.29':
+        if self.env_config['environment_version'] in ('3.29','3.30'):
             from algorithm.common.controller_diagnostics import controller_metric_values
             record.update({key: float(value.mean())
                            for key, value in controller_metric_values(result.infos).items()})

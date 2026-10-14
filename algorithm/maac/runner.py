@@ -31,9 +31,10 @@ class MAACTrainingRunner:
         if self.seed+self.total_steps+self.num_envs>=base:raise ValueError('training/evaluation seed ranges may overlap')
         self.eval_seeds=list(range(base,base+(2 if smoke else t['evaluation_episodes'])))
         self.trainer=MAACTrainer(env_config,config,device,self.seed,smoke)
-        self.replay=JointReplayBuffer(min(128,t['replay_capacity']) if smoke else t['replay_capacity'],self.seed)
+        self.replay=JointReplayBuffer(min(128,t['replay_capacity']) if smoke else t['replay_capacity'],self.seed,
+            observation_dim=self.trainer.observation_dim,num_agents=self.trainer.num_agents,action_dim=self.trainer.action_dim)
         self.vector=ParallelVectorEnv(self.num_envs,env_config,self.seed,self.eval_seeds)
-        self.records=[];self.agent_returns=np.zeros((self.num_envs,5))
+        self.records=[];self.agent_returns=np.zeros((self.num_envs,self.trainer.num_agents))
         self.last_metrics={};self.evaluation_history=[];self.best_key=None;self.update_cycles=0
         try:self.observations=self.vector.reset()
         except BaseException:self.vector.close();raise
@@ -100,7 +101,7 @@ class MAACTrainingRunner:
     def run(self):
         t=self.config['training'];next_log=t['console_interval_sampled_steps']
         next_eval=t['evaluation_interval_sampled_steps'];next_save=t['checkpoint_interval_sampled_steps']
-        print(f"[START] MAAC | env=v3.29 | 5v5 | seed={self.seed} | cuda | envs={self.num_envs} | steps={steps_text(self.total_steps)}",flush=True)
+        print(f"[START] MAAC | env=v{self.env_config['environment_version']} | {self.trainer.num_agents}v{self.trainer.num_agents} | seed={self.seed} | cuda | envs={self.num_envs} | steps={steps_text(self.total_steps)}",flush=True)
         pending=0;infos=[]
         try:
             while self.trainer.sampled_steps<self.total_steps:
@@ -119,7 +120,7 @@ class MAACTrainingRunner:
             self.log_train(self.recent())
             if not self.evaluation_history or self.evaluation_history[-1]['sampled_steps']!=self.trainer.sampled_steps:self.evaluate()
             for name in ('latest.pt','final.pt',f'checkpoint_{self.trainer.sampled_steps}.pt'):self.trainer.save(self.output_dir/name)
-            return dict(algorithm='MAAC',variant=self.config['implementation']['variant'],environment_version='3.29',
+            return dict(algorithm='MAAC',variant=self.config['implementation']['variant'],environment_version=self.env_config['environment_version'],
                 sampled_steps=self.trainer.sampled_steps,completed_episodes=len(self.records),replay_size=len(self.replay),
                 actor_updates=self.trainer.actor_updates,policy_updates=self.trainer.policy_updates,
                 critic_updates=self.trainer.critic_updates,target_updates=self.trainer.target_updates,update_cycles=self.update_cycles,

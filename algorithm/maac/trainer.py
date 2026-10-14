@@ -17,10 +17,11 @@ class MAACTrainer:
         self.env_config,self.config,self.device,self.smoke=env_config,config,torch.device(device),bool(smoke)
         torch.manual_seed(seed);self.seed=seed
         n,t,impl=config['network'],config['training'],config['implementation']
+        self.observation_dim,self.action_dim,self.num_agents=(n[k] for k in ('observation_dim','action_dim','num_agents'))
         width=32 if smoke else n['hidden_dim']
-        self.actor=GaussianLocalActor(hidden_dim=width,log_std_min=impl['log_std_min'],
+        self.actor=GaussianLocalActor(self.observation_dim,self.action_dim,hidden_dim=width,log_std_min=impl['log_std_min'],
             log_std_max=impl['log_std_max']).to(self.device)
-        self.critic=CentralizedAttentionCritic(hidden_dim=width,attention_heads=n['attention_heads']).to(self.device)
+        self.critic=CentralizedAttentionCritic(self.observation_dim,self.action_dim,self.num_agents,hidden_dim=width,attention_heads=n['attention_heads']).to(self.device)
         self.target_actor=deepcopy(self.actor).requires_grad_(False).eval()
         self.target_critic=deepcopy(self.critic).requires_grad_(False).eval()
         self.actor_optimizer=torch.optim.Adam(self.actor.parameters(),lr=t['lr_actor'])
@@ -34,8 +35,8 @@ class MAACTrainer:
     def batch_tensors(self,batch):
         data={k:self.tensor(v) for k,v in vars(batch).items()}
         b=len(data['observations'])
-        expected=dict(observations=(b,5,56),actions=(b,5,3),rewards=(b,5),next_observations=(b,5,56),
-            dones=(b,),alive_masks=(b,5),next_alive_masks=(b,5))
+        expected=dict(observations=(b,self.num_agents,self.observation_dim),actions=(b,self.num_agents,self.action_dim),rewards=(b,self.num_agents),next_observations=(b,self.num_agents,self.observation_dim),
+            dones=(b,),alive_masks=(b,self.num_agents),next_alive_masks=(b,self.num_agents))
         for key,shape in expected.items():
             if data[key].shape!=shape or not torch.isfinite(data[key]).all():raise ValueError(f'invalid replay {key}')
         for key in ('dones','alive_masks','next_alive_masks'):
@@ -45,8 +46,8 @@ class MAACTrainer:
     @torch.no_grad()
     def act(self,observations,alive_masks=None,deterministic=True):
         obs=self.tensor(observations)
-        if obs.ndim not in (2,3) or obs.shape[-2:]!=(5,56) or not torch.isfinite(obs).all():
-            raise ValueError('actor team observations must be finite [5,56] or [B,5,56]')
+        if obs.ndim not in (2,3) or obs.shape[-2:]!=(self.num_agents,self.observation_dim) or not torch.isfinite(obs).all():
+            raise ValueError(f'actor observations must be finite [N,D] or [B,N,D], N={self.num_agents}, D={self.observation_dim}')
         batched=obs.ndim==3
         if not batched:obs=obs[None]
         alive=torch.ones(obs.shape[:2],device=self.device) if alive_masks is None else self.tensor(alive_masks).reshape(obs.shape[:2])
@@ -69,9 +70,9 @@ class MAACTrainer:
         alternative=self.actor.sample(observations[:,index].unsqueeze(0).expand(k,-1,-1))[0]
         joint=joint_actions.unsqueeze(0).expand(k,-1,-1,-1).clone()
         joint[:,:,index]=alternative*alive[:,index][None,:,None]
-        o=observations.unsqueeze(0).expand(k,-1,-1,-1).reshape(k*b,5,56)
-        m=alive.unsqueeze(0).expand(k,-1,-1).reshape(k*b,5)
-        return self.critic(o,joint.reshape(k*b,5,3),m)[:,index,0].reshape(k,b).mean(0)
+        o=observations.unsqueeze(0).expand(k,-1,-1,-1).reshape(k*b,self.num_agents,self.observation_dim)
+        m=alive.unsqueeze(0).expand(k,-1,-1).reshape(k*b,self.num_agents)
+        return self.critic(o,joint.reshape(k*b,self.num_agents,self.action_dim),m)[:,index,0].reshape(k,b).mean(0)
 
     def update_critic(self,batch):
         d=self.batch_tensors(batch);alive=d['alive_masks']
@@ -84,7 +85,7 @@ class MAACTrainer:
         self.critic_optimizer.zero_grad(set_to_none=True);loss.backward()
         # Shared attention parameters receive five tasks' gradients.
         for p in self.critic.shared_parameters():
-            if p.grad is not None:p.grad.div_(5)
+            if p.grad is not None:p.grad.div_(self.num_agents)
         norm=self.check_and_clip(self.critic,self.config['training']['critic_grad_clip'])
         self.critic_optimizer.step();self.critic_optimizer.zero_grad(set_to_none=True)
         self.critic_updates+=1
@@ -98,7 +99,7 @@ class MAACTrainer:
             actions,_,raw=self.actor.sample(o)
             joint=actions*alive[...,None]
             qs=self.critic(o,joint,alive).squeeze(-1)
-            baselines=torch.stack([self.counterfactual_baseline(o,joint,alive,i) for i in range(5)],1)
+            baselines=torch.stack([self.counterfactual_baseline(o,joint,alive,i) for i in range(self.num_agents)],1)
         self.critic.requires_grad_(False)
         try:
             log_prob=self.actor.log_prob(o,raw)

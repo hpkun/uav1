@@ -18,9 +18,11 @@ class JointReplayBuffer:
     shapes=dict(observations=(5,56),actions=(5,3),rewards=(5,),next_observations=(5,56),
                 dones=(),alive_masks=(5,),next_alive_masks=(5,))
 
-    def __init__(self,capacity=1000000,seed=0,chunk_size=4096):
+    def __init__(self,capacity=1000000,seed=0,chunk_size=4096,observation_dim=56,num_agents=5,action_dim=3):
         if capacity<=0 or chunk_size<=0:raise ValueError('positive replay/chunk size required')
         self.capacity,self.chunk_size=int(capacity),int(chunk_size)
+        self.shapes=dict(observations=(num_agents,observation_dim),actions=(num_agents,action_dim),rewards=(num_agents,),
+            next_observations=(num_agents,observation_dim),dones=(),alive_masks=(num_agents,),next_alive_masks=(num_agents,))
         self.size=self.position=0;self.chunks={};self.rng=np.random.default_rng(seed)
 
     def __len__(self):return self.size
