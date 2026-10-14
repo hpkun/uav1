@@ -3,6 +3,8 @@
 v3.30 directly subclasses CombatEnvironmentV329. Its only scientific change
 is 5v5 -> true 4v4, with derived 56D -> 45D observations and four formation
 offsets. No fifth aircraft is constructed, masked or padded in production.
+The separate mutual-destruction classification bug fix described below changes
+outcome labels only; it does not change the scale experiment's mechanics.
 
 The question is whether current learning difficulty mainly comes from the
 5v5 scale or from the existing reward/weapon design. This version does not
@@ -27,7 +29,8 @@ Controller remains shared paper increment tracking, 10G and 2s constants.
 Blue remains 225m/s, step-start nearest live Red in real 3D with smaller-index
 tie breaking, and strictly coupled pursuit/fire target. No persistent lock.
 Arena, altitude/speed bounds, dt=.1, max_steps=1000, scenario centers, RK4,
-PointMassDynamics and existing outcomes remain frozen.
+PointMassDynamics remain frozen. Single-team elimination, timeout and ongoing
+outcomes retain v3.29 semantics; mutual destruction is classified as draw.
 
 ## 45D observation
 
@@ -92,12 +95,46 @@ of Blue's diagnostic target-switch counters. Both teams use 225m/s, the shared
 10G controller and identical weapons. Blue coupling and Red eligible-target
 selection are intentionally retained as environmental mechanics.
 
-Important inherited outcome convention: when both teams are eliminated in the
-same step, v3.29's actual v3.11 outcome method checks Blue extinction first and
-records red_win_elimination. v3.30 preserves this precedence. Fairness output
-therefore records mutual_destruction separately rather than pretending those
-episodes were symmetric wins. If headline win rates are skewed, report this
-fact without modifying the environment.
+Current v3.30 outcome convention: if Red and Blue are both eliminated in the
+same simulation step, mutual destruction is classified as draw:
+
+```text
+terminated = True
+red_win = False
+blue_win = False
+red_success = False
+draw = True
+termination_reason = "draw_mutual_destruction"
+```
+
+The fix changes only outcome classification fields: red_win, blue_win, draw,
+red_success and termination_reason. Combat resolution, attack kills, aircraft
+states, R1/R2/R3/R4, episode reward, Weapon and Controller remain unchanged.
+Single-team elimination, timeout and ongoing still inherit v3.29 semantics.
+
+The latest fixed-vs-fixed fairness audit ran 200 seeds (0-199):
+
+| Metric | Count |
+|---|---:|
+| Red win | 27 |
+| Blue win | 26 |
+| Draw | 147 |
+| Timeout | 0 |
+| Mutual destruction | 147 |
+| Red attack kills | 774 |
+| Blue attack kills | 773 |
+| Red noncombat losses | 0 |
+| Blue noncombat losses | 0 |
+
+All 147 mutual-destruction episodes are included in draw and no longer count
+as Red wins. Actual single-team wins are 27 vs 26 and attack kills are 774 vs
+773. This fixed-pursuit mirror sanity check shows no obvious Red/Blue physical
+capability bias in these 200 seeds. Per-seed comparisons confirm that all
+non-outcome audit fields, including kills, losses and R1-R4, match the pre-fix
+run exactly.
 
 Artifacts are written under outputs/v330_validation: fairness.json,
-smoke_validation.json and validation.json. No formal training is launched.
+smoke_validation.json and validation.json. The latest outcome-corrected audit
+is outputs/v330_validation/outcome_fix/fairness.json, with comparison results
+in outcome_fix/regression.json; the older fairness.json predates this fix.
+No formal training is launched.

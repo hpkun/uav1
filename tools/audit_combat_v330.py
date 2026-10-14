@@ -54,7 +54,7 @@ def main():
         'red_attack_kills','blue_attack_kills','red_noncombat_losses','blue_noncombat_losses')}
     result=dict(reset=reset,controller_grid=dict(max_nz=max(load),saturation_fraction=float(np.mean(np.array(load)>=9.9))),
         totals=totals,episodes=args.episodes,rows=rows,
-        note='Outcome precedence and firing candidate asymmetry are inherited unchanged; this is not a training policy.')
+        note='Mutual destruction is classified as draw in v3.30; other elimination, timeout and ongoing outcome semantics remain inherited. This audit uses identical nearest-target pursuit mathematics for both teams and is not a training policy.')
     args.output.parent.mkdir(parents=True,exist_ok=True);args.output.write_text(json.dumps(result,indent=2))
     print(json.dumps(totals),flush=True)
 
