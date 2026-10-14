@@ -20,7 +20,7 @@ def validate_madsac_config(env_config: dict, algorithm_config: dict) -> None:
             raise RuntimeError(f'MADSAC requires exact dimensions {environment_dimensions(env_config)}')
         if (n['actor_hidden_layers'] != [256, 256] or n['critic_hidden_layers'] != [256, 256]
                 or n['attention_heads'] != 2):
-            raise RuntimeError('MADSAC v3.26-v3.29 requires 256/256 shared actor and two-head attention critics')
+            raise RuntimeError('MADSAC v3.26-v3.30 requires 256/256 shared actor and two-head attention critics')
     actual = tuple(int(n[key]) for key in ('observation_dim', 'action_dim', 'num_agents'))
     expected=environment_dimensions(env_config)
     if actual != expected:

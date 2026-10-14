@@ -8,7 +8,7 @@ OBSERVATION_DIM = 45
 
 def build_team_observations_v330(team, opponents, config):
     if len(team) != 4 or len(opponents) != 4:
-        raise ValueError('v3.24 observations require 4v4')
+        raise ValueError('v3.30 observations require 4v4')
     result = np.zeros((4, OBSERVATION_DIM), dtype=np.float64)
     for i, own in enumerate(team):
         if not own.alive:

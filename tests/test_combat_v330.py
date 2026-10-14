@@ -85,8 +85,8 @@ def test_red_four_candidates_cooldown_and_simultaneous_resolution():
         _,r,terminated,_,info=e.step(np.zeros((4,3)))
     assert terminated and not e.red[0].alive and not e.blue[0].alive
     assert info['red_attack_kills']==info['blue_attack_kills']==1
-    # Actual inherited v3.11 outcome gives Red precedence when both are gone.
-    assert info['red_win'] and info['termination_reason']=='red_win_elimination'
+    assert not info['red_win'] and not info['blue_win'] and info['draw']
+    assert info['termination_reason']=='draw_mutual_destruction'
 
 
 @pytest.mark.parametrize('kind',['ground','horizontal','ceiling'])
@@ -97,6 +97,51 @@ def test_noncombat_loss_symmetry(kind):
     result=e._resolve_noncombat_losses();assert not e.red[0].alive and not e.blue[0].alive
     assert result[0]==result[1] and result[2]==result[3]
     assert e.combat_counts['red']==e.combat_counts['blue']
+
+
+@pytest.mark.parametrize('red_alive,blue_alive,truncated',[
+    (False,False,False),(False,False,True),(True,False,False),
+    (False,True,False),(True,True,True),(True,True,False)])
+def test_outcome_only_mutual_destruction_changes(red_alive,blue_alive,truncated):
+    e=env();old=env('329')
+    for instance in (e,old):
+        instance.red=[state(alive=red_alive) for _ in range(instance.team_size)]
+        instance.blue=[state(alive=blue_alive) for _ in range(instance.team_size)]
+    if not red_alive and not blue_alive:
+        assert e._outcome(truncated)==(False,False,True,'draw_mutual_destruction')
+        assert old._outcome(truncated)==(True,False,False,'red_win_elimination')
+    else:
+        assert e._outcome(truncated)==old._outcome(truncated)
+
+
+def test_mutual_destruction_reward_and_transition_regression():
+    current,previous=env(),env()
+    for e in (current,previous):
+        e.red=[state()]+[dead() for _ in range(3)]
+        e.blue=[state(500)]+[dead() for _ in range(3)]
+        e.blue[0].psi=math.pi;e.rng=FixedNormal(0)
+    with patch.object(current,'_advance',return_value=np.zeros(4)), \
+         patch.object(previous,'_advance',return_value=np.zeros(4)), \
+         patch.object(previous,'_outcome',side_effect=lambda truncated: CombatEnvironmentV329._outcome(previous,truncated)):
+        after=current.step(np.zeros((4,3)));before=previous.step(np.zeros((4,3)))
+    for i in range(4):np.testing.assert_equal(after[i],before[i])
+    assert after[2] and not after[3]
+    changed={'red_success','red_win','blue_win','draw','termination_reason'}
+    assert after[4].keys()==before[4].keys()
+    for k in after[4].keys()-changed:np.testing.assert_equal(after[4][k],before[4][k])
+    # blue_win remains False; all other outcome aliases change as intended.
+    assert after[4]['red_success']==after[4]['red_win']==False
+    assert not after[4]['blue_win'] and after[4]['draw']
+    assert before[4]['red_win'] and not before[4]['draw']
+    for i in range(1,5):
+        np.testing.assert_array_equal(after[4][f'r{i}_rewards'],before[4][f'r{i}_rewards'])
+        np.testing.assert_array_equal(after[4][f'episode_r{i}_rewards'],before[4][f'episode_r{i}_rewards'])
+    assert after[4]['red_attack_kills']==after[4]['blue_attack_kills']==1
+    assert current.red==previous.red and current.blue==previous.blue
+    from algorithm.common.evaluator import aggregate_combat_records
+    record=dict(after[4],episode_return=float(after[1].sum()),mean_agent_episode_return=float(after[1].mean()))
+    metrics=aggregate_combat_records([record])
+    assert metrics['win_rate']==metrics['blue_win_rate']==0 and metrics['draw_rate']==1
 
 
 @pytest.mark.parametrize('a',[[0,0,0],[.1,.1,.1],[1,-1,1],[-1,1,-1]])
@@ -113,7 +158,7 @@ def test_frozen_v329_transition_for_four_live_aircraft():
     e,old=env(),env('329');old.red=deepcopy(e.red)+[dead()];old.blue=deepcopy(e.blue)+[dead()]
     assert environment_dimensions(old.config)==(56,3,5)
     assert old._observations().shape==(5,56)
-    for name in ('dense_combat_reward','build_weapon','attempt_hit_for_pair','_entry_attempts','_resolve_combat','_resolve_noncombat_losses','_outcome'):
+    for name in ('dense_combat_reward','build_weapon','attempt_hit_for_pair','_entry_attempts','_resolve_combat','_resolve_noncombat_losses'):
         assert getattr(type(e),name) is getattr(type(old),name)
     rng=np.random.default_rng(5)
     for _ in range(40):

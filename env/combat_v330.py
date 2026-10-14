@@ -52,6 +52,12 @@ class CombatEnvironmentV330(CombatEnvironmentV329):
         zero=np.zeros(self.team_size,dtype=float)
         return zero,dict(distance=zero.copy(),angle=zero.copy())
 
+    def _outcome(self, truncated):
+        if not self.red_alive_mask.any() and not self.blue_alive_mask.any():
+            return False, False, True, 'draw_mutual_destruction'
+        # Preserve v3.29 elimination, timeout and ongoing classifications.
+        return super()._outcome(truncated)
+
     def _observations(self):
         return build_team_observations_v330(self.red,self.blue,self.config['observation'])
 
