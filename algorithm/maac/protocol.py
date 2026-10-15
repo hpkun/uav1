@@ -4,7 +4,7 @@ from algorithm.common.protocol import config_sha256
 
 IMPLEMENTATION_VERSION=3
 VARIANT='madsac_paper_maac_continuous_shared_eq15_mc_v3'
-DIMENSIONS={'3.29':(56,3,5),'3.30':(45,3,4),'3.31':(45,3,4),'3.32':(45,3,4),'3.33':(45,3,4),'3.34':(45,3,4),'3.35':(45,3,4),'3.36':(45,3,4),'3.37':(45,3,4)}
+DIMENSIONS={'3.29':(56,3,5),'3.30':(45,3,4),'3.31':(45,3,4),'3.32':(45,3,4),'3.33':(45,3,4),'3.34':(45,3,4),'3.35':(45,3,4),'3.36':(45,3,4),'3.37':(45,3,4),'3.38':(45,3,4)}
 
 
 def validate_config_pair(env_config,config):
