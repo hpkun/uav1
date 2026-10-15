@@ -1,3 +1,5 @@
+> Historical document: implementation-v3 results are legacy. Current configs and production MADSAC use [implementation-v4](madsac_implementation_v4.md); v3 checkpoints are incompatible.
+
 # MADSAC for Combat Environment v3.26
 
 The current MADSAC implementation version is 3. Attention critic architecture

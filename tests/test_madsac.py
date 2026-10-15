@@ -127,27 +127,28 @@ def test_q_i_backward_has_only_own_action_gradient():
     other = torch.cat((actions.grad[:, :agent_index], actions.grad[:, agent_index + 1:]), dim=1)
     assert torch.count_nonzero(other).item() == 0
 
-def test_delayed_actor_and_targets_update_only_on_delay_and_critics_not_actor_optimized():
+def test_split_updates_do_not_implicitly_update_policy_or_targets():
     trainer = tiny_trainer(policy_delay=2)
     actor_before = parameters(trainer.actor)
     target_before = parameters(trainer.target_actor)
-    first = trainer.update(tiny_batch())
-    assert first['actor_updated'] == 0
+    trainer.update_critics(tiny_batch())
     assert not any_changed(actor_before, trainer.actor)
     assert not any_changed(target_before, trainer.target_actor)
-    critic_after_first = parameters(trainer.critic1)
-    second = trainer.update(tiny_batch())
-    assert second['actor_updated'] == 1
+    critics = parameters(trainer.critic1)
+    metrics = trainer.update_actor(tiny_batch())
+    assert metrics['actor_gradient_norm'] > 0
     assert any_changed(actor_before, trainer.actor)
+    assert not any_changed(critics, trainer.critic1)
+    assert not any_changed(target_before, trainer.target_actor)
+    trainer.update_targets()
     assert any_changed(target_before, trainer.target_actor)
-    assert any_changed(critic_after_first, trainer.critic1)
-    assert second['actor_gradient_norm'] > 0
+
 
 def test_actor_step_has_q_gradient_without_changing_frozen_critic_parameters():
     trainer = MADSACTrainer(observation_dim=56, num_agents=5, hidden_dim=16, attention_heads=2, policy_delay=1, seed=8, critic_learning_rate=0.0, device='cuda')
     (critic1_before, critic2_before) = (parameters(trainer.critic1), parameters(trainer.critic2))
     actor_before = parameters(trainer.actor)
-    metrics = trainer.update(tiny_batch())
+    metrics = trainer.update_actor(tiny_batch())
     assert metrics['actor_updated'] == 1
     assert metrics['actor_gradient_norm'] > 0
     assert not any_changed(critic1_before, trainer.critic1)

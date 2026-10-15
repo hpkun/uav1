@@ -12,4 +12,5 @@ def build_madsac_trainer(config: dict, device: str, hidden_dim: int | None = Non
         t['alpha'], t['tau'], t['policy_delay'], device,
         t['seed'] if seed is None else seed, i['actor_activation'],
         i['critic_activation'], i['log_std_min'], i['log_std_max'],
+        steps_per_update=t['steps_per_update'], num_updates=t['num_updates'],
     )

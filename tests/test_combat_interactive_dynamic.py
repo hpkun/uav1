@@ -35,7 +35,7 @@ def test_interactive_all_aircraft_frame_mapping_and_playback(tmp_path, monkeypat
     buttons = {b.label: b for b in figure.layout.updatemenus[0].buttons}
     for speed in (.25, .5, 1., 2.):
         assert buttons[f'Play ({speed:g}x)'].args[1]['frame']['duration'] == pytest.approx(100/speed)
-    text = output.read_text()
+    text = output.read_text(encoding="utf-8")
     assert '<script src=' not in text.lower() and 'Pause' in text and 'scrollZoom' in text
     with pytest.raises(ValueError, match='playback speed'):
         render(directory/'episode_trace.npz', directory/'metadata.json', tmp_path/'bad.html', playback_speed=0)

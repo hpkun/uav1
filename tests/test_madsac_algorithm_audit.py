@@ -11,8 +11,8 @@ from algorithm.madsac.replay_buffer import ReplayBatch
 from algorithm.madsac.trainer import own_action_twin_q, critic_target, actor_objective, batch_mean_agent_sum
 from algorithm.madsac.networks import SharedMADSACActor
 from tools.audit_madsac_attention import collect
-from tools.audit_madsac_training_schedule import theoretical_counts
-from tools.madsac_audit_reference import offline_forward, attention_rows, summarize_rows
+from tools.validate_madsac_v4 import expected_counts
+
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -27,29 +27,6 @@ def setup():
     data=collect(e,tr,16,80000,random_policy=True)
     tensors=tuple(torch.tensor(x,device='cuda',dtype=torch.float32) for x in data)
     return tr,tensors,c
-
-
-def test_offline_current_reconstructs_production_and_scale_factor(setup):
-    tr,(obs,act,alive),_=setup
-    for critic in (tr.critic1,tr.critic2):
-        q,w=critic(obs,act,alive,True)
-        qr,wr,z,_=offline_forward(critic,obs,act,alive)
-        _,_,zs,_=offline_forward(critic,obs,act,alive,True)
-        torch.testing.assert_close(q,qr);torch.testing.assert_close(w,wr)
-        torch.testing.assert_close(z,zs*np.sqrt(128))
-
-
-def test_dead_queries_and_keys_excluded_and_singleton_separate(setup):
-    tr,(obs,act,alive),_=setup
-    alive=alive.clone();alive[0]=0;alive[1]=0;alive[1,2]=1;alive[2,1]=0
-    q,w,z,_=offline_forward(tr.critic1,obs,act,alive)
-    rows=attention_rows(z,w,alive)
-    assert all(r['item']!=0 and (r['item']!=1 or r['query']==2) for r in rows)
-    assert not w[0].any() and not q[0].any() and not w[2,:,:,1].any()
-    singleton=[r for r in rows if r['item']==1]
-    assert len(singleton)==2 and all(r['max_attention_weight']==1 for r in singleton)
-    assert all(r['normalized_attention_entropy'] is None for r in singleton)
-    assert summarize_rows(rows)['single_alive_query_head_count']==2
 
 
 def test_own_action_autograd_zero_peer_nonzero_own(setup):
@@ -78,31 +55,21 @@ def test_twin_independence_targets_equal_and_optimizers_independent(setup):
     assert {id(p) for group in tr.critic2_optimizer.param_groups for p in group['params']}=={id(p) for p in p2}
 
 
-def test_actual_update_target_policy_and_delayed_polyak(setup):
+def test_actual_update_target_policy_and_explicit_polyak(setup):
     tr,(obs,act,alive),_=setup
     cpu=lambda x:x.detach().cpu().numpy()
     batch=ReplayBatch(cpu(obs),cpu(act),np.zeros(alive.shape,np.float32),cpu(obs),
                       np.zeros(len(obs),np.bool_),cpu(alive),cpu(alive))
-    snapshots={name:deepcopy(getattr(tr,'target_'+name).state_dict()) for name in ('actor','critic1','critic2')}
     import algorithm.madsac.trainer as module
-    original=module.polyak_update
     with patch.object(tr.target_actor,'sample',wraps=tr.target_actor.sample) as target_sample, \
          patch.object(tr.actor,'sample',wraps=tr.actor.sample) as actor_sample, \
-         patch.object(module,'polyak_update',wraps=original) as polyak:
-        m=tr.update(batch)
-        assert target_sample.call_count==1 and actor_sample.call_count==0
-        assert polyak.call_count==0 and m['actor_updated']==0
-        for name in snapshots:
-            for k,v in getattr(tr,'target_'+name).state_dict().items():
-                torch.testing.assert_close(v,snapshots[name][k],rtol=0,atol=0)
-        m=tr.update(batch)
-        assert target_sample.call_count==2 and actor_sample.call_count==1
-        assert polyak.call_count==3 and m['actor_updated']==1
-        for name in snapshots:
-            for k,v in getattr(tr,'target_'+name).state_dict().items():
-                expected=(1-tr.tau)*snapshots[name][k]+tr.tau*getattr(tr,name).state_dict()[k]
-                torch.testing.assert_close(v,expected)
-    assert tr.critic_update_count==2 and tr.actor_update_count==1
+         patch.object(module,'polyak_update',wraps=module.polyak_update) as polyak:
+        tr.update_critics(batch)
+        assert target_sample.call_count==1 and actor_sample.call_count==0 and polyak.call_count==0
+        tr.update_actor(batch)
+        assert target_sample.call_count==1 and actor_sample.call_count==1 and polyak.call_count==0
+        tr.update_targets()
+        assert polyak.call_count==3 and tr.target_update_count==1
 
 
 def test_entropy_sign_min_q_terminal_mask_and_reduction(setup):
@@ -131,12 +98,10 @@ def test_tanh_logprob_correction_and_reparameterization(setup):
 
 
 def test_schedule_boundaries_and_paired_optimizer_convention(setup):
-    _,_,c=setup
-    full=theoretical_counts(c)
-    assert full['first_update_sampled_steps']==10008
-    assert full['critic_update_count']==124584 and full['actor_update_count']==62292
-    assert full['combined_critic_optimizer_steps']==249168
-    smoke=theoretical_counts(c,24000)
-    assert smoke['critic_update_count']==584 and smoke['actor_update_count']==292
-    assert theoretical_counts(c,9984)['critic_update_count']==0
-    assert theoretical_counts(c,10008)['critic_update_count']==1
+    _,_,_=setup
+    smoke=expected_counts(4800)
+    assert smoke['first_update_sampled_steps']==1032
+    assert smoke['critic_update_count']==128 and smoke['actor_update_count']==64
+    assert smoke['critic_optimizer_steps']==256
+    assert expected_counts(1008)['critic_update_count']==0
+    assert expected_counts(1032)['critic_update_count']==4

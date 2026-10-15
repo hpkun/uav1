@@ -106,7 +106,7 @@ class CentralizedAttentionQCritic(nn.Module):
             return value.view(batch, agents, self.attention_heads, self.head_dim).transpose(1, 2)
 
         query, key, value = heads(self.wq(embedding)), heads(self.wk(embedding)), heads(self.value_activation(self.wv(embedding)))
-        logits = query @ key.transpose(-2, -1)
+        logits = (query @ key.transpose(-2, -1)) / math.sqrt(self.head_dim)
         alive = alive_mask > 0.5
         valid = alive[:, None, None, :].expand(batch, self.attention_heads, agents, agents)
         weights = torch.softmax(logits.masked_fill(~valid, -1e9), dim=-1)

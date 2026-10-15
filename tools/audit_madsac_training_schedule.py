@@ -38,6 +38,9 @@ def theoretical_counts(config,total=None):
 
 
 def run(config,env_config,output,total=24000):
+    from algorithm.madsac.trainer import MADSAC_IMPL_VERSION
+    if MADSAC_IMPL_VERSION != 3:
+        raise RuntimeError('Legacy implementation-v3 audit is frozen; use tools/validate_madsac_v4.py for v4')
     require_cuda(); torch.set_num_threads(1)
     c=yaml.safe_load(Path(config).read_text(encoding='utf-8'))
     e=yaml.safe_load(Path(env_config).read_text(encoding='utf-8'))

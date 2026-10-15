@@ -117,6 +117,7 @@ def load_recording_policy(checkpoint, env_config, config, device='cuda'):
     if torch.device(device).type != 'cuda' or not torch.cuda.is_available():
         raise RuntimeError('CUDA is required for checkpoint recording')
     checkpoint = Path(checkpoint)
+    original_hash = checkpoint_sha256(checkpoint)
     state = torch.load(checkpoint, map_location='cpu', weights_only=False)
     extra = state.get('extra', {})
     algorithm = str(state['algorithm']).lower()
@@ -154,8 +155,10 @@ def load_recording_policy(checkpoint, env_config, config, device='cuda'):
         raise RuntimeError('checkpoint environment config fingerprint mismatch')
     if extra.get('algorithm_config_sha256') != config_sha256(config):
         raise RuntimeError('checkpoint algorithm config fingerprint mismatch')
+    if checkpoint_sha256(checkpoint) != original_hash:
+        raise RuntimeError('checkpoint changed during load; use a stable checkpoint snapshot')
     return trainer, state, {'algorithm': state['algorithm'], 'checkpoint_path': str(checkpoint),
-        'checkpoint_sha256': checkpoint_sha256(checkpoint),
+        'checkpoint_sha256': original_hash,
         'environment_config_sha256': config_sha256(env_config),
         'checkpoint_sampled_steps': int(state['sampled_steps']),
         'training_seed': extra.get('training_seed',state.get('training_seed')),

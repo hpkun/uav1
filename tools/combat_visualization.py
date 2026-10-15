@@ -24,9 +24,9 @@ def states_array(states: list[AircraftState]) -> np.ndarray:
 class RecordingCombatEnv(MultiUAVCombatEnv):
     """Observe original event results without adding RNG draws or transitions."""
     def __new__(cls, config=DEFAULT_COMBAT_CONFIG):
-        if cls is RecordingCombatEnv:
+        if issubclass(cls, RecordingCombatEnv):
             base = type(MultiUAVCombatEnv.__new__(MultiUAVCombatEnv, config))
-            if base is not MultiUAVCombatEnv:
+            if base is not MultiUAVCombatEnv and not issubclass(cls, base):
                 # Keep recording hooks first while resolving initialization and
                 # combat/reset through the actual versioned environment class.
                 recording_class = type(f'Recording{base.__name__}', (cls, base), {})

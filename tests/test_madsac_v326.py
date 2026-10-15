@@ -9,7 +9,7 @@ from algorithm.common.protocol import config_sha256
 from algorithm.madsac.factory import build_madsac_trainer
 from algorithm.madsac.protocol import validate_madsac_config,validate_madsac_checkpoint
 from algorithm.madsac.trainer import MADSACTrainer
-from algorithm.madsac.critic_contract import CRITIC_ARCHITECTURE
+from algorithm.madsac.critic_contract import CRITIC_ARCHITECTURE,schedule_contract
 
 
 def configs():
@@ -18,12 +18,13 @@ def configs():
 
 
 def metadata(e,c,smoke=False):
-    return dict(environment_version='3.26',environment_config_sha256=config_sha256(e),
+    return dict(implementation_version=4,training_schedule=schedule_contract(c['training']['steps_per_update'],c['training']['num_updates'],c['training']['policy_delay']),environment_version='3.26',environment_config_sha256=config_sha256(e),
         algorithm_config_sha256=config_sha256(c),training_seed=c['training']['seed'],
         observation_dim=56,action_dim=3,num_agents=5,training_smoke=smoke,
         formal_exact_resume_supported=False,replay_buffer_in_checkpoint=False,
         network_architecture=dict(**CRITIC_ARCHITECTURE,shared_actor=True,twin_independent_critics=True,
             target_actor=True,target_critics=2,attention_heads=2,hidden_dim=32 if smoke else 256,
+            attention_head_dim=16 if smoke else 128,
             observation_dim=56,action_dim=3,num_agents=5))
 
 
@@ -34,11 +35,11 @@ def test_formal_config_and_implementation_choice_metadata():
         actor_hidden_layers=[256,256],critic_hidden_layers=[256,256],attention_heads=2)
     for k,v in dict(actor_learning_rate=1e-4,critic_learning_rate=1e-4,gamma=.99,
         alpha=.1,tau=.001,replay_capacity=1000000,minibatch_size=1024,
-        num_train_envs=24,total_sampled_steps=3000000,device='cuda',
-        learning_starts=10000,policy_delay=2,gradient_steps_per_vector_step=1).items():
+        num_train_envs=24,total_sampled_steps=8400000,device='cuda',
+        steps_per_update=100,policy_delay=2,num_updates=4).items():
         assert c['training'][k]==v
-    for k in ('learning_starts','policy_delay','gradient_steps_per_vector_step'):
-        assert k in c['metadata']['project_implementation_choice']
+    for k in ('steps_per_update','policy_delay','num_updates'):
+        assert k in c['metadata']['paper_unspecified']
         assert k not in c['metadata']['paper_reported']
 
 

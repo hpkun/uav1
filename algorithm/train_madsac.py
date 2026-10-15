@@ -14,6 +14,8 @@ if str(ROOT) not in sys.path:
 from algorithm.common.protocol import config_sha256
 from algorithm.madsac.protocol import validate_madsac_config
 from algorithm.madsac.runner import MADSACTrainingRunner
+from algorithm.madsac.trainer import MADSAC_IMPL_VERSION
+from algorithm.madsac.critic_contract import schedule_contract
 
 
 def resolved(path):
@@ -50,13 +52,15 @@ def main():
         (output / name).write_text(yaml.safe_dump(value, sort_keys=False), encoding="utf-8")
     training = algorithm_config["training"]
     num_envs = int(args.num_envs or training["num_train_envs"])
-    smoke_steps = num_envs * max(8, (32 + num_envs - 1) // num_envs)
+    smoke_steps = num_envs * max(100, (2400 + num_envs - 1) // num_envs)
     run_config = {
         "algorithm": "madsac", "seed": int(training["seed"] if args.seed is None else args.seed),
         "device": str(args.device or training["device"]),
         "num_envs": num_envs,
         "total_sampled_steps": int(args.total_sampled_steps or (smoke_steps if args.smoke else training["total_sampled_steps"])),
-        "smoke": bool(args.smoke), "effective_hidden_dim": 32 if args.smoke else int(algorithm_config["network"]["actor_hidden_layers"][0]),
+        "smoke": bool(args.smoke), "effective_hidden_dim": int(algorithm_config["network"]["actor_hidden_layers"][0]),
+        "implementation_version": MADSAC_IMPL_VERSION,
+        "training_schedule": schedule_contract(training['steps_per_update'],training['num_updates'],training['policy_delay']),
         "training_gamma": float(training["gamma"]),
         "environment_config_path": str(env_path), "algorithm_config_path": str(algorithm_path),
         "environment_config_sha256": config_sha256(env_config),
@@ -69,6 +73,7 @@ def main():
         "objective_reduction": "per_transition_agent_sum_then_replay_batch_mean",
         "evaluation_policy_rng": "independent_deterministic_stream_per_environment_seed",
         "paper_reported": algorithm_config["metadata"]["paper_reported"],
+        "paper_unspecified": algorithm_config["metadata"]["paper_unspecified"],
         "project_implementation_choice": algorithm_config["metadata"]["project_implementation_choice"],
     }
     (output / "run_config.json").write_text(json.dumps(run_config, indent=2), encoding="utf-8")

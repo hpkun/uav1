@@ -8,6 +8,7 @@ import subprocess
 def configure_ffmpeg(binary=None):
     import matplotlib
     candidate=binary or os.environ.get('FFMPEG_BINARY') or shutil.which('ffmpeg')
+    if candidate:candidate=shutil.which(str(candidate)) or candidate
     if not candidate:
         configured=matplotlib.rcParams['animation.ffmpeg_path']
         candidate=configured if Path(configured).is_file() else None

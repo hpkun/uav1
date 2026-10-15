@@ -19,6 +19,8 @@ def validate_trace(trace, metadata=None):
         required |= set(TRANSITION_FIELDS) | {'dt'}
     if required - trace.keys():
         raise ValueError(f'missing combat trace fields: {sorted(required-trace.keys())}')
+    if np.asarray(trace['trace_schema_version']).shape != () or (version==3 and np.asarray(trace['dt']).shape != ()):
+        raise ValueError('schema version and dt must be scalar')
     for key, value in trace.items():
         if value.dtype.kind not in 'biuf' or not np.isfinite(value).all():
             raise ValueError(f'non-finite or non-numerical trace field: {key}')
@@ -47,6 +49,10 @@ def validate_trace(trace, metadata=None):
     if metadata is not None and (not np.isclose(metadata['dt'],dt,rtol=0,atol=1e-12)
                                 or metadata['episode_steps'] != t):
         raise ValueError('trace/metadata timing mismatch')
+    if metadata is not None and version==3:
+        if (metadata.get('reward_component_names') != ['R1','R2','R3','R4']
+                or metadata.get('reward_component_axis')!=1 or metadata.get('agent_axis')!=2):
+            raise ValueError('metadata reward component axes/order mismatch')
     shapes = dict(red_actions=(t,n,3),local_rewards=(t,n),reward_components=(t,4,n),
                   terminated=(t,),truncated=(t,))
     if version == 3:

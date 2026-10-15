@@ -30,6 +30,9 @@ def collect(env_config, trainer, count, seed, random_policy=False, reset_each=Fa
 
 
 def run(output, config, env_config, transitions=2400):
+    from algorithm.madsac.trainer import MADSAC_IMPL_VERSION
+    if MADSAC_IMPL_VERSION != 3:
+        raise RuntimeError('Legacy implementation-v3 audit is frozen; use tools/validate_madsac_v4.py for v4')
     require_cuda(); torch.set_num_threads(1)
     output=Path(output); output.mkdir(parents=True,exist_ok=True)
     c=yaml.safe_load(Path(config).read_text(encoding='utf-8'))

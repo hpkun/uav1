@@ -1,4 +1,4 @@
-"""Paper-faithful fixed-alpha multi-agent double-soft actor-critic."""
+"""MADSAC-v4 fixed-alpha objectives; the runner owns Algorithm-1 scheduling."""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -10,10 +10,10 @@ import torch
 
 from .networks import CentralizedAttentionQCritic, SharedMADSACActor
 from .replay_buffer import ReplayBatch
-from .critic_contract import validate_critic_shapes
+from .critic_contract import CRITIC_ARCHITECTURE, schedule_contract, validate_v4_contract
 
 
-MADSAC_IMPL_VERSION = 3
+MADSAC_IMPL_VERSION = 4
 
 
 def masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -80,7 +80,8 @@ class MADSACTrainer:
                  hidden_dim=256, attention_heads=2, actor_learning_rate=1e-4,
                  critic_learning_rate=1e-4, gamma=.99, alpha=.1, tau=.001,
                  policy_delay=2, device="cpu", seed=0, actor_activation="relu",
-                 critic_activation="relu", log_std_min=-5., log_std_max=2.):
+                 critic_activation="relu", log_std_min=-5., log_std_max=2.,
+                 steps_per_update=100, num_updates=4):
         self.device = torch.device(device)
         if self.device.type == "cuda" and not torch.cuda.is_available():
             raise RuntimeError("CUDA requested but unavailable")
@@ -114,6 +115,15 @@ class MADSACTrainer:
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_learning_rate)
         self.critic1_optimizer = torch.optim.Adam(self.critic1.parameters(), lr=critic_learning_rate)
         self.critic2_optimizer = torch.optim.Adam(self.critic2.parameters(), lr=critic_learning_rate)
+        self.steps_per_update = int(steps_per_update)
+        self.num_updates = int(num_updates)
+        if self.steps_per_update <= 0 or self.num_updates <= 0:
+            raise ValueError("update-cycle parameters must be positive")
+        self.update_cycle_count = 0
+        self.transitions_since_update = 0
+        self.replay_sample_count_critic = 0
+        self.replay_sample_count_actor = 0
+        self.target_update_count = 0
         self.sampled_steps = 0
         self.vector_steps = 0
         self.critic_update_count = 0
@@ -135,106 +145,117 @@ class MADSACTrainer:
     def _tensor(self, value):
         return torch.as_tensor(value, dtype=torch.float32, device=self.device)
 
-    def update(self, batch: ReplayBatch) -> dict[str, float]:
-        obs, actions, rewards = map(self._tensor, (batch.observations, batch.actions, batch.rewards))
-        next_obs = self._tensor(batch.next_observations)
-        dones = self._tensor(batch.dones)
-        alive, next_alive = map(self._tensor, (batch.alive_masks, batch.next_alive_masks))
+    def counters(self):
+        return dict(update_cycle_count=self.update_cycle_count,
+                    transitions_since_update=self.transitions_since_update,
+                    critic_update_count=self.critic_update_count,
+                    actor_update_count=self.actor_update_count,
+                    critic_optimizer_steps=2*self.critic_update_count,
+                    actor_optimizer_steps=self.actor_update_count,
+                    target_update_count=self.target_update_count,
+                    replay_sample_count_critic=self.replay_sample_count_critic,
+                    replay_sample_count_actor=self.replay_sample_count_actor)
 
+    @staticmethod
+    def _finite(metrics):
+        if not all(math.isfinite(value) for value in metrics.values()):
+            raise FloatingPointError(f"non-finite MADSAC optimization metrics: {metrics}")
+        return metrics
+
+    def update_critics(self, batch: ReplayBatch) -> dict[str, float]:
+        """One independent optimization step for each centralized Q; no policy/target step."""
+        obs, actions, rewards = map(self._tensor, (batch.observations, batch.actions, batch.rewards))
+        next_obs, dones = map(self._tensor, (batch.next_observations, batch.dones))
+        alive, next_alive = map(self._tensor, (batch.alive_masks, batch.next_alive_masks))
         with torch.no_grad():
             next_actions, _, next_log_prob = self.target_actor.sample(next_obs, self.policy_generator)
             next_actions = next_actions * next_alive.unsqueeze(-1)
             next_log_prob = next_log_prob * next_alive
             target_q1 = self.target_critic1(next_obs, next_actions, next_alive)
             target_q2 = self.target_critic2(next_obs, next_actions, next_alive)
-            target = critic_target(
-                rewards, dones, next_alive, target_q1, target_q2,
-                next_log_prob, self.gamma, self.alpha,
-            )
-
-        q1 = self.critic1(obs, actions, alive)
-        q2 = self.critic2(obs, actions, alive)
-        critic1_loss = batch_mean_agent_sum((q1 - target).square(), alive)
-        critic2_loss = batch_mean_agent_sum((q2 - target).square(), alive)
+            target = critic_target(rewards, dones, next_alive, target_q1, target_q2,
+                                   next_log_prob, self.gamma, self.alpha)
+        # Low-frequency diagnostics reuse the Q forward; they never enter the loss.
+        diagnostics = self.critic_update_count % 100 == 0
+        if diagnostics:
+            q1, attention1 = self.critic1(obs, actions, alive, return_attention=True)
+            q2, attention2 = self.critic2(obs, actions, alive, return_attention=True)
+        else:
+            q1 = self.critic1(obs, actions, alive)
+            q2 = self.critic2(obs, actions, alive)
+        loss1 = batch_mean_agent_sum((q1 - target).square(), alive)
+        loss2 = batch_mean_agent_sum((q2 - target).square(), alive)
         self.critic1_optimizer.zero_grad(set_to_none=True)
-        critic1_loss.backward()
-        critic1_grad = gradient_norm(self.critic1.parameters())
+        loss1.backward()
+        grad1 = gradient_norm(self.critic1.parameters())
         self.critic1_optimizer.step()
         self.critic2_optimizer.zero_grad(set_to_none=True)
-        critic2_loss.backward()
-        critic2_grad = gradient_norm(self.critic2.parameters())
+        loss2.backward()
+        grad2 = gradient_norm(self.critic2.parameters())
         self.critic2_optimizer.step()
         self.critic_update_count += 1
+        metrics = dict(critic1_loss=float(loss1.item()), critic2_loss=float(loss2.item()),
+            critic1_gradient_norm=grad1, critic2_gradient_norm=grad2,
+            q1_mean=float(masked_mean(q1.detach(),alive)), q2_mean=float(masked_mean(q2.detach(),alive)),
+            qmin_mean=float(masked_mean(torch.minimum(q1,q2).detach(),alive)),
+            target_q_mean=float(masked_mean(target,alive)),
+            target_q_std=float(target[alive>.5].std(unbiased=False)) if (alive>.5).any() else 0.,
+            critic_learning_rate=float(self.critic1_optimizer.param_groups[0]['lr']),
+            actor_updated=0., **self.counters())
+        if diagnostics:
+            with torch.no_grad():
+                for index, weights in enumerate((attention1.detach(),attention2.detach()),1):
+                    live_queries = (alive>.5)[:,None,:].expand(weights.shape[:-1])
+                    entropy = -(weights * weights.clamp_min(1e-12).log()).sum(-1)
+                    for name, values in (('entropy',entropy),('max_weight',weights.max(-1).values)):
+                        metrics[f'critic{index}_attention_{name}'] = float(values[live_queries].mean()) if live_queries.any() else 0.
+        return self._finite(metrics)
 
-        actor_updated = self.critic_update_count % self.policy_delay == 0
-        actor_loss_value = actor_grad = 0.0
-        entropy = mean_log_prob = qmin_mean = 0.0
-        sampled_actions = actions.detach()
-        if actor_updated:
-            critics = (self.critic1, self.critic2)
-            requires_grad = [
-                [parameter.requires_grad for parameter in critic.parameters()]
-                for critic in critics
-            ]
-            for critic in critics:
-                critic.requires_grad_(False)
-            try:
-                sampled_actions, _, log_prob = self.actor.sample(obs, self.policy_generator)
-                sampled_actions = sampled_actions * alive.unsqueeze(-1)
-                log_prob = log_prob * alive
-                actor_qmin = own_action_twin_q(
-                    self.critic1, self.critic2, obs, sampled_actions, alive
-                )
-                actor_loss = actor_objective(
-                    log_prob, actor_qmin, actor_qmin, alive, self.alpha
-                )
-                self.actor_optimizer.zero_grad(set_to_none=True)
-                actor_loss.backward()
-                actor_grad = gradient_norm(self.actor.parameters())
-                self.actor_optimizer.step()
-            finally:
-                for critic, flags in zip(critics, requires_grad):
-                    for parameter, flag in zip(critic.parameters(), flags):
-                        parameter.requires_grad_(flag)
-            polyak_update(self.target_actor, self.actor, self.tau)
-            polyak_update(self.target_critic1, self.critic1, self.tau)
-            polyak_update(self.target_critic2, self.critic2, self.tau)
-            self.actor_update_count += 1
-            actor_loss_value = float(actor_loss.item())
-            entropy = float(masked_mean(-log_prob.detach(), alive).item())
-            mean_log_prob = float(masked_mean(log_prob.detach(), alive).item())
-            qmin_mean = float(masked_mean(actor_qmin.detach(), alive).item())
-        else:
-            qmin_mean = float(masked_mean(torch.minimum(q1, q2).detach(), alive).item())
+    def update_actor(self, batch: ReplayBatch) -> dict[str, float]:
+        """One own-action reparameterized policy step; no critic/target optimization."""
+        obs, alive = map(self._tensor,(batch.observations,batch.alive_masks))
+        critics=(self.critic1,self.critic2)
+        flags=[[p.requires_grad for p in c.parameters()] for c in critics]
+        for critic in critics:
+            critic.requires_grad_(False)
+        try:
+            sampled_actions, _, log_prob = self.actor.sample(obs,self.policy_generator)
+            sampled_actions = sampled_actions * alive.unsqueeze(-1)
+            log_prob = log_prob * alive
+            qmin = own_action_twin_q(self.critic1,self.critic2,obs,sampled_actions,alive)
+            loss = actor_objective(log_prob,qmin,qmin,alive,self.alpha)
+            self.actor_optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            grad = gradient_norm(self.actor.parameters())
+            self.actor_optimizer.step()
+        finally:
+            for critic, values in zip(critics,flags):
+                for parameter, flag in zip(critic.parameters(),values):
+                    parameter.requires_grad_(flag)
+        self.actor_update_count += 1
+        return self._finite(dict(actor_loss=float(loss.item()),actor_updated=1.,
+            actor_gradient_norm=grad,entropy=float(masked_mean(-log_prob.detach(),alive)),
+            mean_log_prob=float(masked_mean(log_prob.detach(),alive)),
+            qmin_mean=float(masked_mean(qmin.detach(),alive)),
+            action_abs_mean=float(masked_mean(sampled_actions.detach().abs().mean(-1),alive)),
+            action_saturation_fraction=float(masked_mean((sampled_actions.detach().abs()>.9).float().mean(-1),alive)),
+            actor_learning_rate=float(self.actor_optimizer.param_groups[0]['lr']),**self.counters()))
 
-        metrics = {
-            "critic1_loss": float(critic1_loss.item()),
-            "critic2_loss": float(critic2_loss.item()),
-            "actor_loss": actor_loss_value, "actor_updated": float(actor_updated),
-            "entropy": entropy, "mean_log_prob": mean_log_prob,
-            "q1_mean": float(masked_mean(q1.detach(), alive).item()),
-            "q2_mean": float(masked_mean(q2.detach(), alive).item()),
-            "qmin_mean": qmin_mean,
-            "target_q_mean": float(masked_mean(target, alive).item()),
-            "target_q_std": float(target[alive > .5].std(unbiased=False).item()),
-            "actor_gradient_norm": actor_grad,
-            "critic1_gradient_norm": critic1_grad,
-            "critic2_gradient_norm": critic2_grad,
-            "actor_update_count": float(self.actor_update_count),
-            "critic_update_count": float(self.critic_update_count),
-            "actor_learning_rate": float(self.actor_optimizer.param_groups[0]["lr"]),
-            "critic_learning_rate": float(self.critic1_optimizer.param_groups[0]["lr"]),
-            "action_abs_mean": float(masked_mean(sampled_actions.detach().abs().mean(-1), alive).item()),
-            "action_saturation_fraction": float(masked_mean((sampled_actions.detach().abs() > .9).float().mean(-1), alive).item()),
-        }
-        if not all(math.isfinite(value) for value in metrics.values()):
-            raise FloatingPointError(f"non-finite MADSAC optimization metrics: {metrics}")
-        return metrics
+    def update_targets(self):
+        """One Polyak update of the three targets after a complete delayed actor cycle."""
+        polyak_update(self.target_actor,self.actor,self.tau)
+        polyak_update(self.target_critic1,self.critic1,self.tau)
+        polyak_update(self.target_critic2,self.critic2,self.tau)
+        self.target_update_count += 1
 
     def checkpoint_state(self, extra=None):
         return {
             "algorithm": "madsac", "implementation_version": MADSAC_IMPL_VERSION,
             "sampled_steps": self.sampled_steps, "vector_steps": self.vector_steps,
+            **self.counters(),
+            "network_architecture": dict(CRITIC_ARCHITECTURE,hidden_dim=self.critic1.hidden_dim,
+                attention_heads=self.critic1.attention_heads,attention_head_dim=self.critic1.head_dim),
+            "training_schedule": schedule_contract(self.steps_per_update,self.num_updates,self.policy_delay),
             "critic_update_count": self.critic_update_count,
             "actor_update_count": self.actor_update_count,
             "actor": self.actor.state_dict(), "target_actor": self.target_actor.state_dict(),
@@ -260,15 +281,19 @@ class MADSACTrainer:
 
     def load_for_evaluation(self, path):
         state = torch.load(path, map_location=self.device, weights_only=False)
-        if state.get("algorithm") != "madsac" or state.get("implementation_version") != MADSAC_IMPL_VERSION:
-            raise RuntimeError("incompatible MADSAC checkpoint")
-        validate_critic_shapes(state, self.critic1.hidden_dim)
-        self.actor.load_state_dict(state["actor"], strict=True)
-        self.target_actor.load_state_dict(state["target_actor"], strict=True)
+        validate_v4_contract(state,self.critic1.hidden_dim,self.critic1.attention_heads)
+        if state['training_schedule'] != schedule_contract(self.steps_per_update,self.num_updates,self.policy_delay):
+            raise RuntimeError('MADSAC v4 checkpoint configured schedule mismatch')
+        for name in ('actor','target_actor','critic1','critic2','target_critic1','target_critic2'):
+            getattr(self,name).load_state_dict(state[name], strict=True)
+            getattr(self,name).eval()
         self.sampled_steps = int(state["sampled_steps"])
         self.vector_steps = int(state["vector_steps"])
         self.critic_update_count = int(state["critic_update_count"])
         self.actor_update_count = int(state["actor_update_count"])
+        for key in ('update_cycle_count','transitions_since_update','replay_sample_count_critic',
+                    'replay_sample_count_actor','target_update_count'):
+            setattr(self,key,int(state[key]))
         self.actor.eval(); self.target_actor.eval()
         return state
 

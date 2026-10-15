@@ -33,13 +33,51 @@ def test_factory_and_public_api_are_combat_only():
     assert env.__all__ == ['AircraftSpec', 'AircraftState', 'ControlCommand', 'EngagementGeometry',
         'FireState', 'MultiUAVCombatEnv', 'WeaponEnvelope', 'engagement_geometry', 'make_combat_environment']
     assert sorted(p.name for p in (ROOT / 'configs').glob('*.yaml')) == [
-        'combat_environment.yaml', 'combat_environment_v24.yaml', 'combat_environment_v25.yaml', 'combat_environment_v26.yaml', 'combat_environment_v27.yaml', 'combat_environment_v28.yaml', 'combat_environment_v29.yaml', 'combat_environment_v30.yaml', 'combat_environment_v31.yaml', 'combat_environment_v310.yaml', 'combat_environment_v311.yaml', 'combat_environment_v312.yaml', 'combat_environment_v313.yaml', 'combat_environment_v314.yaml', 'combat_environment_v315.yaml', 'combat_environment_v316.yaml', 'combat_environment_v317.yaml', 'combat_environment_v318.yaml', 'combat_environment_v319.yaml', 'combat_environment_v32.yaml', 'combat_environment_v320.yaml', 'combat_environment_v321.yaml', 'combat_environment_v322.yaml', 'combat_environment_v323.yaml', 'combat_environment_v324.yaml', 'combat_environment_v325.yaml', 'combat_environment_v326.yaml', 'combat_environment_v327.yaml', 'combat_environment_v328.yaml', 'combat_environment_v33.yaml', 'combat_environment_v34.yaml', 'combat_environment_v35.yaml', 'combat_environment_v36.yaml', 'combat_environment_v37.yaml', 'combat_environment_v38.yaml', 'combat_environment_v39.yaml',
-        'ea_mappo_5v5.yaml', 'ea_mappo_5v5_v30.yaml', 'ea_mappo_5v5_v31.yaml', 'ea_mappo_5v5_v310.yaml', 'ea_mappo_5v5_v311.yaml', 'ea_mappo_5v5_v312.yaml', 'ea_mappo_5v5_v313.yaml', 'ea_mappo_5v5_v314.yaml', 'ea_mappo_5v5_v315.yaml', 'ea_mappo_5v5_v316.yaml', 'ea_mappo_5v5_v317.yaml', 'ea_mappo_5v5_v318.yaml', 'ea_mappo_5v5_v32.yaml', 'ea_mappo_5v5_v33.yaml', 'ea_mappo_5v5_v34.yaml', 'ea_mappo_5v5_v35.yaml', 'ea_mappo_5v5_v36.yaml', 'ea_mappo_5v5_v37.yaml', 'ea_mappo_5v5_v38.yaml', 'ea_mappo_5v5_v39.yaml', 'ea_mappo_8v8.yaml',
-        'maddpg_5v5.yaml', 'maddpg_8v8.yaml',
-        'madsac.yaml', 'madsac_5v5_v326.yaml', 'madsac_5v5_v327.yaml', 'madsac_5v5_v328.yaml', 'mappo.yaml', 'mappo_5v5.yaml', 'mappo_5v5_v30.yaml', 'mappo_5v5_v31.yaml', 'mappo_5v5_v310.yaml', 'mappo_5v5_v311.yaml', 'mappo_5v5_v312.yaml', 'mappo_5v5_v313.yaml', 'mappo_5v5_v314.yaml', 'mappo_5v5_v315.yaml', 'mappo_5v5_v316.yaml', 'mappo_5v5_v317.yaml', 'mappo_5v5_v318.yaml', 'mappo_5v5_v319.yaml', 'mappo_5v5_v32.yaml', 'mappo_5v5_v320.yaml', 'mappo_5v5_v321.yaml', 'mappo_5v5_v322.yaml', 'mappo_5v5_v323.yaml', 'mappo_5v5_v324.yaml', 'mappo_5v5_v325.yaml', 'mappo_5v5_v326.yaml', 'mappo_5v5_v327.yaml', 'mappo_5v5_v328.yaml', 'mappo_5v5_v33.yaml', 'mappo_5v5_v34.yaml', 'mappo_5v5_v35.yaml', 'mappo_5v5_v36.yaml', 'mappo_5v5_v37.yaml', 'mappo_5v5_v38.yaml', 'mappo_5v5_v39.yaml', 'mappo_8v8.yaml',
-        'mappo_8v8_formal.yaml', 'rmappo_5v5.yaml', 'rmappo_5v5_v30.yaml', 'rmappo_5v5_v31.yaml', 'rmappo_5v5_v310.yaml', 'rmappo_5v5_v311.yaml', 'rmappo_5v5_v312.yaml', 'rmappo_5v5_v313.yaml', 'rmappo_5v5_v314.yaml', 'rmappo_5v5_v315.yaml', 'rmappo_5v5_v316.yaml', 'rmappo_5v5_v317.yaml', 'rmappo_5v5_v318.yaml', 'rmappo_5v5_v32.yaml', 'rmappo_5v5_v33.yaml', 'rmappo_5v5_v34.yaml', 'rmappo_5v5_v35.yaml', 'rmappo_5v5_v36.yaml', 'rmappo_5v5_v37.yaml', 'rmappo_5v5_v38.yaml', 'rmappo_5v5_v39.yaml', 'rmappo_8v8.yaml',
-        'stea_mappo.yaml', 'stea_mappo_5v5.yaml', 'stea_mappo_5v5_v30.yaml', 'stea_mappo_5v5_v31.yaml', 'stea_mappo_5v5_v310.yaml', 'stea_mappo_5v5_v311.yaml', 'stea_mappo_5v5_v312.yaml', 'stea_mappo_5v5_v313.yaml', 'stea_mappo_5v5_v314.yaml', 'stea_mappo_5v5_v315.yaml', 'stea_mappo_5v5_v316.yaml', 'stea_mappo_5v5_v317.yaml', 'stea_mappo_5v5_v318.yaml', 'stea_mappo_5v5_v32.yaml', 'stea_mappo_5v5_v33.yaml', 'stea_mappo_5v5_v34.yaml', 'stea_mappo_5v5_v35.yaml', 'stea_mappo_5v5_v36.yaml', 'stea_mappo_5v5_v37.yaml', 'stea_mappo_5v5_v38.yaml', 'stea_mappo_5v5_v39.yaml', 'stea_mappo_8v8.yaml',
-        'stea_mappo_8v8_formal.yaml']
+        'combat_environment.yaml', 'combat_environment_v24.yaml', 'combat_environment_v25.yaml', 'combat_environment_v26.yaml',
+        'combat_environment_v27.yaml', 'combat_environment_v28.yaml', 'combat_environment_v29.yaml', 'combat_environment_v30.yaml',
+        'combat_environment_v31.yaml', 'combat_environment_v310.yaml', 'combat_environment_v311.yaml', 'combat_environment_v312.yaml',
+        'combat_environment_v313.yaml', 'combat_environment_v314.yaml', 'combat_environment_v315.yaml', 'combat_environment_v316.yaml',
+        'combat_environment_v317.yaml', 'combat_environment_v318.yaml', 'combat_environment_v319.yaml', 'combat_environment_v32.yaml',
+        'combat_environment_v320.yaml', 'combat_environment_v321.yaml', 'combat_environment_v322.yaml', 'combat_environment_v323.yaml',
+        'combat_environment_v324.yaml', 'combat_environment_v325.yaml', 'combat_environment_v326.yaml', 'combat_environment_v327.yaml',
+        'combat_environment_v328.yaml', 'combat_environment_v329.yaml', 'combat_environment_v33.yaml', 'combat_environment_v330.yaml',
+        'combat_environment_v331.yaml', 'combat_environment_v332.yaml', 'combat_environment_v333.yaml', 'combat_environment_v334.yaml',
+        'combat_environment_v335.yaml', 'combat_environment_v336.yaml', 'combat_environment_v337.yaml', 'combat_environment_v34.yaml',
+        'combat_environment_v35.yaml', 'combat_environment_v36.yaml', 'combat_environment_v37.yaml', 'combat_environment_v38.yaml',
+        'combat_environment_v39.yaml', 'ea_mappo_5v5.yaml', 'ea_mappo_5v5_v30.yaml', 'ea_mappo_5v5_v31.yaml',
+        'ea_mappo_5v5_v310.yaml', 'ea_mappo_5v5_v311.yaml', 'ea_mappo_5v5_v312.yaml', 'ea_mappo_5v5_v313.yaml',
+        'ea_mappo_5v5_v314.yaml', 'ea_mappo_5v5_v315.yaml', 'ea_mappo_5v5_v316.yaml', 'ea_mappo_5v5_v317.yaml',
+        'ea_mappo_5v5_v318.yaml', 'ea_mappo_5v5_v32.yaml', 'ea_mappo_5v5_v33.yaml', 'ea_mappo_5v5_v34.yaml',
+        'ea_mappo_5v5_v35.yaml', 'ea_mappo_5v5_v36.yaml', 'ea_mappo_5v5_v37.yaml', 'ea_mappo_5v5_v38.yaml',
+        'ea_mappo_5v5_v39.yaml', 'ea_mappo_8v8.yaml', 'maac_4v4_v330.yaml', 'maac_4v4_v331.yaml',
+        'maac_4v4_v332.yaml', 'maac_4v4_v333.yaml', 'maac_4v4_v334.yaml', 'maac_4v4_v335.yaml',
+        'maac_4v4_v336.yaml', 'maac_4v4_v337.yaml', 'maac_5v5_v329.yaml', 'maddpg_5v5.yaml',
+        'maddpg_8v8.yaml', 'madsac.yaml', 'madsac_4v4_v330.yaml', 'madsac_4v4_v331.yaml',
+        'madsac_4v4_v332.yaml', 'madsac_4v4_v333.yaml', 'madsac_4v4_v334.yaml', 'madsac_4v4_v335.yaml',
+        'madsac_4v4_v336.yaml', 'madsac_4v4_v337.yaml', 'madsac_5v5_v326.yaml', 'madsac_5v5_v327.yaml',
+        'madsac_5v5_v328.yaml', 'madsac_5v5_v329.yaml', 'mappo.yaml', 'mappo_4v4_v330.yaml',
+        'mappo_4v4_v331.yaml', 'mappo_4v4_v332.yaml', 'mappo_4v4_v333.yaml', 'mappo_4v4_v334.yaml',
+        'mappo_4v4_v335.yaml', 'mappo_4v4_v336.yaml', 'mappo_4v4_v337.yaml', 'mappo_5v5.yaml',
+        'mappo_5v5_v30.yaml', 'mappo_5v5_v31.yaml', 'mappo_5v5_v310.yaml', 'mappo_5v5_v311.yaml',
+        'mappo_5v5_v312.yaml', 'mappo_5v5_v313.yaml', 'mappo_5v5_v314.yaml', 'mappo_5v5_v315.yaml',
+        'mappo_5v5_v316.yaml', 'mappo_5v5_v317.yaml', 'mappo_5v5_v318.yaml', 'mappo_5v5_v319.yaml',
+        'mappo_5v5_v32.yaml', 'mappo_5v5_v320.yaml', 'mappo_5v5_v321.yaml', 'mappo_5v5_v322.yaml',
+        'mappo_5v5_v323.yaml', 'mappo_5v5_v324.yaml', 'mappo_5v5_v325.yaml', 'mappo_5v5_v326.yaml',
+        'mappo_5v5_v327.yaml', 'mappo_5v5_v328.yaml', 'mappo_5v5_v329.yaml', 'mappo_5v5_v33.yaml',
+        'mappo_5v5_v34.yaml', 'mappo_5v5_v35.yaml', 'mappo_5v5_v36.yaml', 'mappo_5v5_v37.yaml',
+        'mappo_5v5_v38.yaml', 'mappo_5v5_v39.yaml', 'mappo_8v8.yaml', 'mappo_8v8_formal.yaml',
+        'rmappo_5v5.yaml', 'rmappo_5v5_v30.yaml', 'rmappo_5v5_v31.yaml', 'rmappo_5v5_v310.yaml',
+        'rmappo_5v5_v311.yaml', 'rmappo_5v5_v312.yaml', 'rmappo_5v5_v313.yaml', 'rmappo_5v5_v314.yaml',
+        'rmappo_5v5_v315.yaml', 'rmappo_5v5_v316.yaml', 'rmappo_5v5_v317.yaml', 'rmappo_5v5_v318.yaml',
+        'rmappo_5v5_v32.yaml', 'rmappo_5v5_v33.yaml', 'rmappo_5v5_v34.yaml', 'rmappo_5v5_v35.yaml',
+        'rmappo_5v5_v36.yaml', 'rmappo_5v5_v37.yaml', 'rmappo_5v5_v38.yaml', 'rmappo_5v5_v39.yaml',
+        'rmappo_8v8.yaml', 'stea_mappo.yaml', 'stea_mappo_5v5.yaml', 'stea_mappo_5v5_v30.yaml',
+        'stea_mappo_5v5_v31.yaml', 'stea_mappo_5v5_v310.yaml', 'stea_mappo_5v5_v311.yaml', 'stea_mappo_5v5_v312.yaml',
+        'stea_mappo_5v5_v313.yaml', 'stea_mappo_5v5_v314.yaml', 'stea_mappo_5v5_v315.yaml', 'stea_mappo_5v5_v316.yaml',
+        'stea_mappo_5v5_v317.yaml', 'stea_mappo_5v5_v318.yaml', 'stea_mappo_5v5_v32.yaml', 'stea_mappo_5v5_v33.yaml',
+        'stea_mappo_5v5_v34.yaml', 'stea_mappo_5v5_v35.yaml', 'stea_mappo_5v5_v36.yaml', 'stea_mappo_5v5_v37.yaml',
+        'stea_mappo_5v5_v38.yaml', 'stea_mappo_5v5_v39.yaml', 'stea_mappo_8v8.yaml', 'stea_mappo_8v8_formal.yaml',
+    ]
     assert list(inspect.signature(validate_checkpoint_for_evaluation).parameters) == [
         'state', 'env_config', 'algorithm_config']
     assert list(inspect.signature(evaluate_mappo_checkpoint).parameters) == [
@@ -91,12 +129,16 @@ def test_cuda_training_checkpoint_and_evaluation_closed_loop(tmp_path, algorithm
     config['training']['evaluation_interval_sampled_steps'] = 16
     config['implementation']['checkpoint_interval_sampled_steps'] = 16
     runner_class = MAPPOTrainingRunner if algorithm == 'mappo' else MADSACTrainingRunner
-    runner = runner_class(environment, config, num_envs=1, total_sampled_steps=32,
+    total = 32 if algorithm == 'mappo' else 2400
+    if algorithm == 'madsac':
+        config['training']['evaluation_interval_sampled_steps']=total
+        config['implementation']['checkpoint_interval_sampled_steps']=total
+    runner = runner_class(environment, config, num_envs=1, total_sampled_steps=total,
                          device='cuda', output_dir=tmp_path, smoke=True)
     summary = runner.run()
     checkpoint = tmp_path / 'latest.pt'
     state = torch.load(checkpoint, map_location='cpu', weights_only=False)
-    assert summary['sampled_steps'] == 32
+    assert summary['sampled_steps'] == total
     assert (tmp_path / 'best_eval.pt').is_file()
     assert state['extra']['environment_version'] == '2.3'
     expected_fields = ['environment_config_sha256', 'environment_version']
@@ -113,7 +155,7 @@ def test_cuda_training_checkpoint_and_evaluation_closed_loop(tmp_path, algorithm
     else:
         assert summary['actor_update_count'] > 0 and summary['critic_update_count'] > 0
         validate_madsac_checkpoint(state, environment, config)
-        trainer = build_madsac_trainer(config, 'cuda', hidden_dim=32)
+        trainer = build_madsac_trainer(config, 'cuda')
         trainer.load_for_evaluation(checkpoint)
         result = evaluate_madsac(trainer, environment, seeds)
         changed = copy.deepcopy(state); changed['extra']['environment_version'] = '0'

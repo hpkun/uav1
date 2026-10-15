@@ -36,6 +36,9 @@ def table(headers, rows):
 
 
 def main():
+    from algorithm.madsac.trainer import MADSAC_IMPL_VERSION
+    if MADSAC_IMPL_VERSION != 3:
+        raise RuntimeError('Legacy implementation-v3 audit is frozen; use tools/validate_madsac_v4.py for v4')
     require_cuda()
     main_sha=git('rev-parse','main');head=git('rev-parse','HEAD')
     changes=git('diff','HEAD','--name-only')

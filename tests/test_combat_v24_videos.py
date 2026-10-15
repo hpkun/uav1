@@ -114,13 +114,20 @@ def test_official_checkpoint_record_and_evaluation_parity(tmp_path, name, config
     n = algorithm['network']; architecture = getattr(trainer, 'network_architecture', {})
     if name == 'madsac':
         from algorithm.madsac.critic_contract import CRITIC_ARCHITECTURE
-        architecture = {**CRITIC_ARCHITECTURE, 'hidden_dim': n['actor_hidden_layers'][0], 'attention_heads': n['attention_heads']}
+        # Use the current official trainer contract in this isolated fixture.
+        # Replay itself must never fill in absent checkpoint provenance.
+        contract = trainer.checkpoint_state()
+        architecture = contract.get('network_architecture',
+            {**CRITIC_ARCHITECTURE, 'hidden_dim': n['actor_hidden_layers'][0], 'attention_heads': n['attention_heads']})
     extra = {'environment_version': env['environment_version'],
         'environment_config_sha256': config_sha256(env), 'algorithm_config_sha256': config_sha256(algorithm),
         'observation_dim': n['observation_dim'], 'action_dim': 3, 'num_agents': n['num_agents'],
         'training_seed': algorithm['training']['seed'], 'training_gamma': trainer.gamma,
         'training_num_envs': 1, 'training_total_sampled_steps': 1, 'training_smoke': False,
         'effective_hidden_dim': n['critic_hidden_layers'][0], 'network_architecture': architecture}
+    if name == 'madsac':
+        for key in ('training_schedule','implementation_version'):
+            if key in contract:extra[key]=contract[key]
     if name in ('rmappo', 'ea_mappo', 'stea_mappo'):
         extra[f'{name}_impl_version'] = 1
         for label, module in (('actor', trainer.actor), ('critic', trainer.critic)):
@@ -187,7 +194,10 @@ def test_mp4_probe_and_stride_fire_event_visible(tmp_path):
         assert len(scene.event_artists) == 1
     finally:
         plt.close(fig)
-    movie = render(output / 'episode_trace.npz', output / 'metadata.json', tmp_path / 'video.mp4')
+    import shutil
+    if not shutil.which('ffmpeg') or not shutil.which('ffprobe'):
+        pytest.skip('FFmpeg/ffprobe unavailable; PNG and event visibility checked')
+    movie = render(output / 'episode_trace.npz', output / 'metadata.json', tmp_path / 'video.mp4', stride=4, fps=20)
     probe = probe_video(movie)
     assert probe['frame_count'] == 2 and probe['duration_s'] > 0
 

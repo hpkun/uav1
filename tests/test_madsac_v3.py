@@ -1,4 +1,4 @@
-"""Implementation-v3 attention reconstruction and combat console contracts."""
+"""Implementation-v4 successors of the legacy-v3 attention tests and combat console contracts."""
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -35,7 +35,7 @@ def test_self_dead_mask_single_survivor_and_all_dead():
     assert c.q_network[0].in_features==16
 
 
-def test_unscaled_dot_product_and_value_activation_context():
+def test_scaled_dot_product_and_value_activation_context():
     c=CentralizedAttentionQCritic(observation_dim=1,action_dim=3,hidden_dim=4,attention_heads=2)
     c.embedding=nn.Identity()
     with torch.no_grad():
@@ -47,9 +47,8 @@ def test_unscaled_dot_product_and_value_activation_context():
     hook=c.q_network.register_forward_pre_hook(lambda module,args:captured.append(args[0].detach().clone()))
     _,weights=c(embedding[:,:,:1],embedding[:,:,1:],torch.ones(1,5),True);hook.remove()
     heads=embedding.view(1,5,2,2).transpose(1,2);logits=heads@heads.transpose(-2,-1)
-    expected=torch.softmax(logits,-1)
+    expected=torch.softmax(logits/np.sqrt(2),-1)
     torch.testing.assert_close(weights,expected)
-    assert not torch.allclose(weights,torch.softmax(logits/np.sqrt(2),-1))
     expected_values=torch.tensor([-.01,-.02,3.,4.]).expand(1,5,4)
     torch.testing.assert_close(captured[0],expected_values)
     assert c.value_activation.negative_slope==.01
@@ -57,18 +56,18 @@ def test_unscaled_dot_product_and_value_activation_context():
 
 @pytest.mark.parametrize('forged',[False,True])
 def test_old_checkpoint_implementation_or_self_shortcut_rejected(tmp_path,forged):
-    assert MADSAC_IMPL_VERSION==3
+    assert MADSAC_IMPL_VERSION==4
     e,c=configs();trainer=build_madsac_trainer(c,'cuda',hidden_dim=32)
     state=trainer.checkpoint_state(metadata(e,c,True))
     if forged:state['critic1']['q_network.0.weight']=torch.zeros(32,64)
-    else:state['implementation_version']=2
+    else:state['implementation_version']=3
     path=tmp_path/'old.pt';torch.save(state,path)
     with pytest.raises(RuntimeError):validate_madsac_checkpoint(state,e,c)
     with pytest.raises(RuntimeError):trainer.load_for_evaluation(path)
 
 
 @pytest.mark.parametrize('key,value',[('attention_self_inclusive',False),('attention_value_activation','relu'),
-    ('attention_value_negative_slope',.2),('attention_logit_scaling','sqrt'),('critic_raw_self_shortcut',True)])
+    ('attention_value_negative_slope',.2),('attention_logit_scaling','none'),('critic_raw_self_shortcut',True)])
 def test_critic_metadata_required(key,value):
     e,c=configs();trainer=build_madsac_trainer(c,'cuda',hidden_dim=32)
     extra=metadata(e,c,True);extra['network_architecture'][key]=value
@@ -111,9 +110,9 @@ def test_start_console_keeps_only_experiment_fields():
     r=runner()
     summary=dict(environment_version='3.26',num_agents=5,seed=1,device='cuda',num_envs=24,
         total_sampled_steps=3000000,hidden_dim=256,attention_heads=2,minibatch_size=1024,
-        alpha=.1,evaluation_mode='stochastic')
+        alpha=.1,evaluation_mode='stochastic',steps_per_update=100,num_updates=4,policy_delay=2)
     with patch.object(r,'startup_summary',return_value=summary):line=r.start_log_line()
-    assert line=='[START] MADSAC-v3 | env=v3.26 | 5v5 | seed=1 | cuda | envs=24 | steps=3.0M | hidden=256 | heads=2 | batch=1024 | alpha=0.1 | eval=stochastic'
+    assert line=='[START] MADSAC-v4 | env=v3.26 | 5v5 | seed=1 | cuda | envs=24 | steps=3.0M | hidden=256 | heads=2 | scaled_attention=true | steps_per_update=100 | num_updates=4 | policy_delay=2 | batch=1024 | alpha=0.1 | eval=stochastic'
 
 
 def test_eval_same_metrics_and_best_only_on_improvement(tmp_path,capsys):

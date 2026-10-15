@@ -138,9 +138,13 @@ def write_report(trace,metadata,output):
         point=lambda x: '('+', '.join(f'{v:.3f}' for v in (x[0],x[1],-x[2]))+')'
         lines.append(f"| {row['label']} | {row['alive']} | {row['final_time_s']:.3f} | {point(initial)} | {point(state)} | {state[3]:.3f} | {np.rad2deg(state[4]):.3f} / {np.rad2deg(state[5]):.3f} | {row['path_length_m']:.3f} | {row['hits']} / {row['credited_kill_events']} | {row['remaining_ammo']} | {row['loss_cause']} |")
     lines+=['','Shared kill events can credit multiple attackers; this is distinct from total victim count. Destroyed UAV trajectories stop at loss; their stored later states may remain frozen.','',
-        '![Trajectory](trajectory.png)','',
-        '[MP4](episode.mp4) · [Interactive replay](interactive.html) · [All UAV states](all_uav_states.csv) · [Fire events](fire_events.csv)','',
         'Single-episode replay is a research audit and does not replace the official evaluator or its statistical evaluation protocol.']
+    if (output/'trajectory.png').is_file():
+        lines+=['','![Trajectory](trajectory.png)']
+    artifacts=(('MP4','episode.mp4'),('Interactive replay','interactive.html'),
+               ('All UAV states','all_uav_states.csv'),('Fire events','fire_events.csv'))
+    links=[f'[{label}]({name})' for label,name in artifacts if (output/name).is_file()]
+    if links:lines+=['',' · '.join(links)]
     (output/'detailed_report.md').write_text('\n'.join(lines)+'\n',encoding='utf-8')
     return a
 
@@ -148,5 +152,7 @@ def write_report(trace,metadata,output):
 def export_analysis(trace_path,metadata_path,output,formats=('csv','report')):
     metadata=json.loads(Path(metadata_path).read_text(encoding='utf-8'))
     trace=read_trace(trace_path,metadata)
+    if int(trace['trace_schema_version'])!=3 and set(formats)&{'csv','report'}:
+        raise ValueError('Historical schema 2 is render-only; unavailable authoritative data cannot be reconstructed')
     if 'csv' in formats:export_csv(trace,metadata,output)
     if 'report' in formats:return write_report(trace,metadata,output)

@@ -15,7 +15,7 @@ from algorithm.common.vector_env import ParallelVectorEnv, VectorStep
 from env.config import ENVIRONMENT_VERSION
 from .evaluation import evaluate_madsac
 from .protocol import validate_madsac_config
-from .critic_contract import CRITIC_ARCHITECTURE
+from .critic_contract import CRITIC_ARCHITECTURE, schedule_contract
 from .console import format_steps, combat_fields
 from algorithm.common.metrics import episode_is_timeout
 from .replay_buffer import JointReplayBuffer
@@ -54,7 +54,7 @@ class MADSACTrainingRunner:
         self.observation_dim = int(network["observation_dim"])
         self.action_dim = int(network["action_dim"])
         self.num_agents = int(network["num_agents"])
-        hidden_dim = 32 if self.smoke else int(network["actor_hidden_layers"][0])
+        hidden_dim = int(network["actor_hidden_layers"][0])
         self.effective_hidden_dim = hidden_dim
         self.trainer = MADSACTrainer(
             self.observation_dim, self.action_dim, self.num_agents, hidden_dim,
@@ -64,17 +64,20 @@ class MADSACTrainingRunner:
             int(training["policy_delay"]), self.device, self.seed,
             implementation["actor_activation"], implementation["critic_activation"],
             float(implementation["log_std_min"]), float(implementation["log_std_max"]),
+            steps_per_update=int(training["steps_per_update"]),num_updates=int(training["num_updates"]),
         )
-        replay_capacity = min(256, int(training["replay_capacity"])) if self.smoke else int(training["replay_capacity"])
-        self.minibatch_size = min(16, int(training["minibatch_size"])) if self.smoke else int(training["minibatch_size"])
-        self.learning_starts = min(self.num_envs * 2, int(training["learning_starts"])) if self.smoke else int(training["learning_starts"])
-        self.gradient_steps = int(training["gradient_steps_per_vector_step"])
+        replay_capacity = int(training["replay_capacity"])
+        self.minibatch_size = int(training["minibatch_size"])
+        self.steps_per_update = int(training["steps_per_update"])
+        self.num_updates = int(training["num_updates"])
+        self.policy_delay = int(training["policy_delay"])
+        self.first_update_sampled_steps = None
         self.replay = JointReplayBuffer(
             replay_capacity, self.num_agents, self.observation_dim,
             self.action_dim, seed=self.seed ^ 0x31A5,
         )
         evaluation_base = int(implementation["evaluation_seed_base"])
-        evaluation_count = 2 if self.smoke else int(training["evaluation_episodes"])
+        evaluation_count = int(training["evaluation_episodes"])
         self.evaluation_seeds = tuple(range(evaluation_base, evaluation_base + evaluation_count))
         self.evaluation_policy_seed = int(implementation["evaluation_policy_seed"])
         self.evaluation_mode = str(implementation["evaluation_mode"])
@@ -111,10 +114,14 @@ class MADSACTrainingRunner:
             "observation_dim": self.observation_dim, "action_dim": self.action_dim,
             "num_agents": self.num_agents, "hidden_dim": self.effective_hidden_dim,
             "attention_heads": self.trainer.critic1.attention_heads,
+            "attention_head_dim": self.trainer.critic1.head_dim,
+            "scaled_attention": True,
             "gamma": self.trainer.gamma, "alpha": self.trainer.alpha,
             "tau": self.trainer.tau, "policy_delay": self.trainer.policy_delay,
-            "learning_starts": self.learning_starts,
-            "gradient_steps_per_vector_step": self.gradient_steps,
+            "steps_per_update": self.steps_per_update,
+            "num_updates": self.num_updates,
+            "update_cycle_clock": schedule_contract(self.steps_per_update,self.num_updates,self.policy_delay)["update_cycle_clock"],
+            "target_update_schedule": "once_per_delayed_update_cycle",
             "replay_capacity": self.replay.capacity,
             "minibatch_size": self.minibatch_size,
             "evaluation_mode": self.evaluation_mode,
@@ -130,6 +137,8 @@ class MADSACTrainingRunner:
                 f"{s['num_agents']}v{s['num_agents']} | seed={s['seed']} | {s['device']} | "
                 f"envs={s['num_envs']} | steps={format_steps(s['total_sampled_steps'], total=True)} | "
                 f"hidden={s['hidden_dim']} | heads={s['attention_heads']} | "
+                f"scaled_attention=true | steps_per_update={s['steps_per_update']} | "
+                f"num_updates={s['num_updates']} | policy_delay={s['policy_delay']} | "
                 f"batch={s['minibatch_size']} | alpha={s['alpha']} | eval={s['evaluation_mode']}")
 
     def train_log_line(self):
@@ -173,7 +182,7 @@ class MADSACTrainingRunner:
             "red_loss": mean("red_losses"), "blue_loss": mean("blue_losses"),
             "red_boundary_exits": mean("red_boundary_exits"),
             "red_ground_losses": mean("red_ground_losses"),
-            "replay_size": len(self.replay), **self.last_metrics,
+            "replay_size": len(self.replay), **self.last_metrics, **self.trainer.counters(),
         }
         if rows:
             record.update(aggregate_combat_records(rows))
@@ -232,9 +241,14 @@ class MADSACTrainingRunner:
             "training_smoke": self.smoke, "gamma": self.trainer.gamma,
             "alpha": self.trainer.alpha, "tau": self.trainer.tau,
             "policy_delay": self.trainer.policy_delay,
-            "policy_delay_source": "project_implementation_choice_not_paper_reported",
-            "learning_starts": self.learning_starts,
-            "gradient_steps_per_vector_step": self.gradient_steps,
+            "policy_delay_source": "project_reconstruction_paper_unspecified",
+            "training_schedule": schedule_contract(self.steps_per_update,self.num_updates,self.policy_delay),
+            "implementation_version": MADSAC_IMPL_VERSION,
+            **self.trainer.counters(),
+            "steps_per_update": self.steps_per_update,
+            "num_updates": self.num_updates,
+            "update_cycle_clock": schedule_contract(self.steps_per_update,self.num_updates,self.policy_delay)["update_cycle_clock"],
+            "target_update_schedule": "once_per_delayed_update_cycle",
             "replay_capacity": self.replay.capacity,
             "minibatch_size": self.minibatch_size,
             "network_architecture": {
@@ -247,6 +261,7 @@ class MADSACTrainingRunner:
                 "action_dim": self.action_dim, "num_agents": self.num_agents,
                 "hidden_dim": self.effective_hidden_dim,
                 "attention_heads": self.trainer.critic1.attention_heads,
+                "attention_head_dim": self.trainer.critic1.head_dim,
             },
             "evaluation_mode": self.evaluation_mode,
             "evaluation_seed_base": self.evaluation_seeds[0],
@@ -262,6 +277,7 @@ class MADSACTrainingRunner:
             "replay_sampling_rng_state": deepcopy(self.replay.rng.bit_generator.state),
             "sampled_steps_unit": "environment_transitions_not_agent_transitions",
             "paper_reported": deepcopy(self.algorithm_config["metadata"]["paper_reported"]),
+            "paper_unspecified": deepcopy(self.algorithm_config["metadata"]["paper_unspecified"]),
             "project_implementation_choice": deepcopy(self.algorithm_config["metadata"]["project_implementation_choice"]),
             "formal_exact_resume_supported": False,
             "replay_buffer_in_checkpoint": False,
@@ -284,6 +300,33 @@ class MADSACTrainingRunner:
             "average_return": mean("team_episode_return"),
         }
 
+    def maybe_update(self):
+        """Algorithm 1: a critic loop, a delayed independent actor loop, then T=0."""
+        if (len(self.replay) < self.minibatch_size or
+                self.trainer.transitions_since_update < self.steps_per_update):
+            return False
+        if self.first_update_sampled_steps is None:
+            self.first_update_sampled_steps = self.trainer.sampled_steps
+        self.trainer.update_cycle_count += 1
+        for _ in range(self.num_updates):
+            batch_q = self.replay.sample(self.minibatch_size)
+            self.trainer.replay_sample_count_critic += 1
+            metrics = self.trainer.update_critics(batch_q)
+            self.last_metrics.update(metrics)
+            self._write_optimization(dict(metrics, optimization_phase='critic'))
+        if self.trainer.update_cycle_count % self.policy_delay == 0:
+            for _ in range(self.num_updates):
+                batch_pi = self.replay.sample(self.minibatch_size)
+                self.trainer.replay_sample_count_actor += 1
+                metrics = self.trainer.update_actor(batch_pi)
+                self.last_metrics.update(metrics)
+                self._write_optimization(dict(metrics, optimization_phase='actor'))
+            self.trainer.update_targets()
+        self.trainer.transitions_since_update = 0
+        self.last_metrics.update(self.trainer.counters())
+        self._write_optimization(dict(self.trainer.counters(), optimization_phase='cycle_complete'))
+        return True
+
     def run(self):
         print(self.start_log_line(), flush=True)
         try:
@@ -299,10 +342,8 @@ class MADSACTrainingRunner:
                     self.trainer.sampled_steps, self.num_envs
                 )
                 self.trainer.vector_steps += 1
-                if self.trainer.sampled_steps >= self.learning_starts and len(self.replay) >= self.minibatch_size:
-                    for _ in range(self.gradient_steps):
-                        self.last_metrics = self.trainer.update(self.replay.sample(self.minibatch_size))
-                        self._write_optimization(self.last_metrics)
+                self.trainer.transitions_since_update += self.num_envs
+                self.maybe_update()
                 self._write_training_metrics(result, rows)
                 if self.trainer.sampled_steps >= self.next_console:
                     print(self.train_log_line(), flush=True)
@@ -335,6 +376,8 @@ class MADSACTrainingRunner:
             "sampled_steps": self.trainer.sampled_steps,
             "vector_steps": self.trainer.vector_steps,
             "completed_episodes": len(self.completed_records),
+            **self.trainer.counters(),
+            "first_update_sampled_steps": self.first_update_sampled_steps,
             "critic_update_count": self.trainer.critic_update_count,
             "actor_update_count": self.trainer.actor_update_count,
             "replay_size": len(self.replay), "best_checkpoint_step": self.best_sampled_steps,
