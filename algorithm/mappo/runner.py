@@ -42,6 +42,17 @@ class MAPPOTrainingRunner:
         expected = environment_dimensions(env_config)
         if configured != expected:
             raise ValueError(f"network/environment dimension mismatch: configured obs/action/agents={configured}, environment={expected}")
+        if 'environment' in algorithm_config or str(env_config['environment_version']) == '3.38':
+            expected_identity = {
+                'environment_version': str(env_config['environment_version']),
+                'team_size': expected[2],
+            }
+            actual_identity = algorithm_config.get('environment')
+            if actual_identity != expected_identity:
+                raise RuntimeError(
+                    'MAPPO algorithm/environment identity mismatch: '
+                    f'expected={expected_identity!r}, actual={actual_identity!r}'
+                )
         self.observation_dim, self.action_dim, self.num_agents = configured
         self.num_envs = int(num_envs or training["num_train_envs"])
         self.total_sampled_steps = int(total_sampled_steps or training["total_sampled_steps"])

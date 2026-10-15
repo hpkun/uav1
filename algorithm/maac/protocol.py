@@ -11,7 +11,7 @@ def validate_config_pair(env_config,config):
     validate_config(env_config)
     expected_dims=DIMENSIONS.get(env_config.get('environment_version'))
     if expected_dims is None or environment_dimensions(env_config)!=expected_dims:
-        raise RuntimeError('MAAC requires exact environment_version 3.29/56/3/5 or 3.30/45/3/4 or 3.31/45/3/4 or 3.32/45/3/4')
+        raise RuntimeError('MAAC requires a registered supported environment identity (environment_version) with exact dimensions: v3.29 uses 56/3/5; current formal v3.30-v3.38 use 45/3/4')
     if config.get('algorithm')!='MAAC' or config.get('environment')!={'environment_version':env_config['environment_version'],'team_size':expected_dims[2]}:
         raise RuntimeError('MAAC algorithm/environment identity mismatch')
     n,t=config['network'],config['training']
