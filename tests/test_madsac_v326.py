@@ -18,7 +18,7 @@ def configs():
 
 
 def metadata(e,c,smoke=False):
-    return dict(implementation_version=4,training_schedule=schedule_contract(c['training']['steps_per_update'],c['training']['num_updates'],c['training']['policy_delay']),environment_version='3.26',environment_config_sha256=config_sha256(e),
+    return dict(implementation_version=5,training_schedule=schedule_contract(c['training']['steps_per_update'],c['training']['num_updates'],c['training']['policy_delay']),environment_version='3.26',environment_config_sha256=config_sha256(e),
         algorithm_config_sha256=config_sha256(c),training_seed=c['training']['seed'],
         observation_dim=56,action_dim=3,num_agents=5,training_smoke=smoke,
         formal_exact_resume_supported=False,replay_buffer_in_checkpoint=False,

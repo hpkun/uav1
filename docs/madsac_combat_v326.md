@@ -1,4 +1,4 @@
-> Historical document: implementation-v3 results are legacy. Current configs and production MADSAC use [implementation-v4](madsac_implementation_v4.md); v3 checkpoints are incompatible.
+> Historical document: implementation-v3 results are legacy. Current configs and production MADSAC use [implementation-v5](madsac_implementation_v4.md); v3/v4 checkpoints are incompatible.
 
 # MADSAC for Combat Environment v3.26
 

@@ -122,6 +122,8 @@ class MADSACTrainingRunner:
             "num_updates": self.num_updates,
             "update_cycle_clock": schedule_contract(self.steps_per_update,self.num_updates,self.policy_delay)["update_cycle_clock"],
             "target_update_schedule": "once_per_delayed_update_cycle",
+            "policy_delay_clock": "vector_steps",
+            "delayed_policy_condition": "vector_steps % policy_delay == 0",
             "replay_capacity": self.replay.capacity,
             "minibatch_size": self.minibatch_size,
             "evaluation_mode": self.evaluation_mode,
@@ -249,6 +251,8 @@ class MADSACTrainingRunner:
             "num_updates": self.num_updates,
             "update_cycle_clock": schedule_contract(self.steps_per_update,self.num_updates,self.policy_delay)["update_cycle_clock"],
             "target_update_schedule": "once_per_delayed_update_cycle",
+            "policy_delay_clock": "vector_steps",
+            "delayed_policy_condition": "vector_steps % policy_delay == 0",
             "replay_capacity": self.replay.capacity,
             "minibatch_size": self.minibatch_size,
             "network_architecture": {
@@ -314,7 +318,7 @@ class MADSACTrainingRunner:
             metrics = self.trainer.update_critics(batch_q)
             self.last_metrics.update(metrics)
             self._write_optimization(dict(metrics, optimization_phase='critic'))
-        if self.trainer.update_cycle_count % self.policy_delay == 0:
+        if self.trainer.vector_steps % self.policy_delay == 0:
             for _ in range(self.num_updates):
                 batch_pi = self.replay.sample(self.minibatch_size)
                 self.trainer.replay_sample_count_actor += 1

@@ -1,4 +1,4 @@
-"""Implementation-v4 successors of the legacy-v3 attention tests and combat console contracts."""
+"""Implementation-v5 successors of the legacy-v3 attention tests and combat console contracts."""
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -56,7 +56,7 @@ def test_scaled_dot_product_and_value_activation_context():
 
 @pytest.mark.parametrize('forged',[False,True])
 def test_old_checkpoint_implementation_or_self_shortcut_rejected(tmp_path,forged):
-    assert MADSAC_IMPL_VERSION==4
+    assert MADSAC_IMPL_VERSION==5
     e,c=configs();trainer=build_madsac_trainer(c,'cuda',hidden_dim=32)
     state=trainer.checkpoint_state(metadata(e,c,True))
     if forged:state['critic1']['q_network.0.weight']=torch.zeros(32,64)
@@ -112,7 +112,7 @@ def test_start_console_keeps_only_experiment_fields():
         total_sampled_steps=3000000,hidden_dim=256,attention_heads=2,minibatch_size=1024,
         alpha=.1,evaluation_mode='stochastic',steps_per_update=100,num_updates=4,policy_delay=2)
     with patch.object(r,'startup_summary',return_value=summary):line=r.start_log_line()
-    assert line=='[START] MADSAC-v4 | env=v3.26 | 5v5 | seed=1 | cuda | envs=24 | steps=3.0M | hidden=256 | heads=2 | scaled_attention=true | steps_per_update=100 | num_updates=4 | policy_delay=2 | batch=1024 | alpha=0.1 | eval=stochastic'
+    assert line=='[START] MADSAC-v5 | env=v3.26 | 5v5 | seed=1 | cuda | envs=24 | steps=3.0M | hidden=256 | heads=2 | scaled_attention=true | steps_per_update=100 | num_updates=4 | policy_delay=2 | batch=1024 | alpha=0.1 | eval=stochastic'
 
 
 def test_eval_same_metrics_and_best_only_on_improvement(tmp_path,capsys):

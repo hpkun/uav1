@@ -162,7 +162,7 @@ def test_old_checkpoints_rejected(name,previous):
     from algorithm.madsac.protocol import validate_madsac_checkpoint
     from algorithm.maac.protocol import validate_checkpoint
     checks={'mappo':(validate_checkpoint_for_evaluation,validate_checkpoint_for_resume),'madsac':(validate_madsac_checkpoint,),'maac':(validate_checkpoint,)}
-    state=dict(algorithm={'mappo':'MAPPO','madsac':'madsac','maac':'MAAC'}[name],implementation_version=4 if name == 'madsac' else 3,extra=dict(environment_version=previous,training_smoke=True))
+    state=dict(algorithm={'mappo':'MAPPO','madsac':'madsac','maac':'MAAC'}[name],implementation_version=5 if name == 'madsac' else 3,extra=dict(environment_version=previous,training_smoke=True))
     ac=yaml.safe_load(Path(f'configs/{name}_4v4_v337.yaml').read_text())
     for check in checks[name]:
         with pytest.raises(RuntimeError,match='environment_version'):check(state,env().config,ac)

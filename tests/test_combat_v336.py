@@ -228,7 +228,7 @@ def test_algorithm_formal_hyperparameters_frozen(name):
 @pytest.mark.parametrize('previous',['3.30','3.31','3.32','3.33','3.34','3.35'])
 def test_historical_checkpoint_strictly_rejected(name,previous):
     ec = env().config; ac = yaml.safe_load(Path(f'configs/{name}_4v4_v336.yaml').read_text())
-    state = dict(algorithm={'mappo':'MAPPO','madsac':'madsac','maac':'MAAC'}[name],implementation_version=4 if name == 'madsac' else 3,
+    state = dict(algorithm={'mappo':'MAPPO','madsac':'madsac','maac':'MAAC'}[name],implementation_version=5 if name == 'madsac' else 3,
                  extra=dict(environment_version=previous,training_smoke=True))
     if name == 'mappo':
         from algorithm.common.checkpoint import validate_checkpoint_for_evaluation,validate_checkpoint_for_resume

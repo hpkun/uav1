@@ -2,7 +2,7 @@
 from algorithm.common.protocol import config_sha256
 from env.config import ENVIRONMENT_VERSION, validate_config, environment_dimensions
 from .trainer import MADSAC_IMPL_VERSION
-from .critic_contract import CRITIC_ARCHITECTURE, validate_v4_contract, schedule_contract
+from .critic_contract import CRITIC_ARCHITECTURE, validate_checkpoint_contract, schedule_contract
 
 
 def validate_madsac_config(env_config: dict, algorithm_config: dict) -> None:
@@ -30,11 +30,11 @@ def validate_madsac_config(env_config: dict, algorithm_config: dict) -> None:
     if i['evaluation_mode'] not in ('stochastic', 'deterministic'):
         raise RuntimeError('MADSAC evaluation mode must be stochastic or deterministic')
     if algorithm_config.get('implementation_version') != MADSAC_IMPL_VERSION:
-        raise RuntimeError('MADSAC implementation-v4 config required; legacy v3 config is incompatible')
+        raise RuntimeError('MADSAC implementation-v5 config required; legacy v3/v4 configs are incompatible')
     if 'gradient_steps_per_vector_step' in t:
-        raise RuntimeError('gradient_steps_per_vector_step is a legacy v3 field; v4 requires update cycles')
+        raise RuntimeError('gradient_steps_per_vector_step is a legacy v3 field; v5 requires update cycles')
     if 'learning_starts' in t and t['learning_starts'] != t['minibatch_size']:
-        raise RuntimeError('learning_starts is deprecated; v4 uses replay minibatch readiness only')
+        raise RuntimeError('learning_starts is deprecated; v5 uses replay minibatch readiness only')
     for key in ('num_train_envs', 'total_sampled_steps', 'replay_capacity', 'minibatch_size',
                 'steps_per_update', 'num_updates', 'policy_delay', 'evaluation_interval_sampled_steps'):
         if type(t.get(key)) is not int or t[key] <= 0:
@@ -42,7 +42,7 @@ def validate_madsac_config(env_config: dict, algorithm_config: dict) -> None:
     if t['replay_capacity'] < t['minibatch_size']:
         raise RuntimeError('replay_capacity must support minibatch_size')
     if float(t['alpha']) != .1:
-        raise RuntimeError('MADSAC v4 uses fixed alpha=.1')
+        raise RuntimeError('MADSAC v5 uses fixed alpha=.1')
     for key in ('steps_per_update','num_updates','policy_delay'):
         if key in algorithm_config['metadata']['paper_reported']:
             raise RuntimeError(f'{key} is paper-unspecified, not paper-reported')
@@ -54,7 +54,7 @@ def validate_madsac_config(env_config: dict, algorithm_config: dict) -> None:
 def validate_madsac_checkpoint(state: dict, env_config: dict, algorithm_config: dict,
                                *, expected_training_seed: int | None = None) -> None:
     if state.get('algorithm') != 'madsac' or state.get('implementation_version') != MADSAC_IMPL_VERSION:
-        raise RuntimeError('MADSAC implementation-v4 required; legacy v3 checkpoint rejected; no weight migration')
+        raise RuntimeError('MADSAC implementation-v5 required; legacy v3/v4 checkpoint rejected; no weight migration')
     validate_madsac_config(env_config, algorithm_config)
     extra = state.get('extra', {})
     expected = {
@@ -88,7 +88,7 @@ def validate_madsac_checkpoint(state: dict, env_config: dict, algorithm_config: 
     expected_head_dim = expected_hidden // int(n['attention_heads'])
     if architecture.get('attention_head_dim') != expected_head_dim:
         raise RuntimeError('MADSAC checkpoint attention_head_dim mismatch')
-    validate_v4_contract(state, expected_hidden, n['attention_heads'])
+    validate_checkpoint_contract(state, expected_hidden, n['attention_heads'])
     expected_schedule = schedule_contract(*(algorithm_config['training'][key]
         for key in ('steps_per_update','num_updates','policy_delay')))
     if state.get('training_schedule') != expected_schedule or extra.get('training_schedule') != expected_schedule:

@@ -1,4 +1,4 @@
-"""Short CUDA validation with unchanged formal v4 schedule and checkpoint protocol."""
+"""Short CUDA validation with formal v5 vector-step delay schedule (legacy filename) and checkpoint protocol."""
 from pathlib import Path
 import sys
 ROOT=Path(__file__).resolve().parents[1]
@@ -20,7 +20,7 @@ def expected_counts(total, num_envs=24, batch=1024, steps_per_update=100, num_up
     stride=math.ceil(steps_per_update/num_envs)
     vectors=total//num_envs
     cycles=max(0,1+(vectors-first)//stride)
-    delayed=cycles//policy_delay
+    delayed=sum(step % policy_delay == 0 for step in range(first,vectors+1,stride))
     rounds=cycles*num_updates
     return dict(sampled_steps=total,vector_steps=vectors,update_cycle_count=cycles,
         critic_update_count=rounds,actor_update_count=delayed*num_updates,
@@ -75,21 +75,27 @@ def run(output,total=4800):
     for name in ('actor','critic1','critic2','target_actor','target_critic1','target_critic2'):
         for a,b in zip(getattr(runner.trainer,name).state_dict().values(),getattr(restored,name).state_dict().values()):
             torch.testing.assert_close(a,b,rtol=0,atol=0)
-    legacy=ROOT/'outputs/madsac_v3_v326_seed1_3m/best_eval.pt'
-    legacy_rejected=False
-    if legacy.exists():
-        try: restored.load_for_evaluation(legacy)
-        except RuntimeError as exc:
-            assert 'v3' in str(exc) and 'v4' in str(exc)
-            legacy_rejected=True
-        else: raise AssertionError('legacy v3 checkpoint accepted')
+    rejected={}
+    for version,legacy in (
+        (3,ROOT/'outputs/madsac_v3_v326_seed1_3m/best_eval.pt'),
+        (4,ROOT/'outputs/madsac_v4_validation/cuda_smoke/final.pt')):
+        if not legacy.exists():
+            raise FileNotFoundError(f'legacy v{version} fixture missing: {legacy}')
+        for name,check in (
+            ('load',lambda:restored.load_for_evaluation(legacy)),
+            ('protocol',lambda:validate_madsac_checkpoint(torch.load(legacy,map_location='cuda',weights_only=False),e,c))):
+            try: check()
+            except RuntimeError as exc:
+                assert 'v5' in str(exc) and 'v3/v4' in str(exc)
+                rejected[f'v{version}_{name}']=str(exc)
+            else: raise AssertionError(f'legacy v{version} checkpoint accepted by {name}')
     # Keep the configured 20 evaluation seeds and unchanged combat environment.
     evaluation=runner.evaluate()
     result=dict(expected=expected,actual_optimizer_hooks=actual,checks=checks,summary=summary,
-        checkpoint_save_load='PASS',old_v3_checkpoint_rejection=legacy_rejected,
+        checkpoint_save_load='PASS',legacy_checkpoint_rejections=rejected,
         evaluation=evaluation,gpu=torch.cuda.get_device_name(0),python=sys.executable,
         long_training_started=False,only_total_steps_shortened=True)
-    before=ROOT/'outputs/madsac_v4_validation/protected_hashes_before.json'
+    before=ROOT/'outputs/madsac_v5_validation/protected_hashes_before.json'
     if before.exists():
         hashes=json.loads(before.read_text(encoding='utf-8'))
         changed=[p for p,h in hashes.items() if hashlib.sha256((ROOT/p).read_bytes()).hexdigest()!=h]
@@ -102,6 +108,6 @@ def run(output,total=4800):
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--output-dir',default='outputs/madsac_v4_validation/cuda_smoke')
+    p.add_argument('--output-dir',default='outputs/madsac_v5_validation/cuda_smoke')
     p.add_argument('--total-sampled-steps',type=int,default=4800)
     a=p.parse_args();run(a.output_dir,a.total_sampled_steps)

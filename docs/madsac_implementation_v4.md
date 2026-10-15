@@ -1,6 +1,7 @@
-# MADSAC implementation-v4
+# MADSAC implementation-v5 (delayed-policy clock correction)
 
-V4 aligns the production MADSAC critic and explicit training cycle with Li et al.
+V5 retains the v4 algorithm structure and corrects the delayed-policy clock.
+The production implementation aligns the MADSAC critic and explicit training cycle with Li et al.
 (2023), *Multi-UAV Cooperative Air Combat Decision-Making Based on Multi-Agent
 Double-Soft Actor-Critic*, [DOI](https://doi.org/10.3390/aerospace10070574).
 No combat environment, reward, weapon, observation, Blue policy, MAPPO, or MAAC
@@ -55,7 +56,7 @@ for each vector step:
         repeat num_updates:
             batch_q = replay.sample(minibatch_size)
             trainer.update_critics(batch_q)  # Q1 and Q2 each optimize once
-        if update_cycle_count % policy_delay == 0:
+        if vector_steps % policy_delay == 0:
             repeat num_updates:
                 batch_pi = replay.sample(minibatch_size)  # a new sample each time
                 trainer.update_actor(batch_pi)
@@ -66,9 +67,15 @@ for each vector step:
 There is no extra 10,000-transition warmup. Readiness means replay can supply a
 full minibatch and the cycle threshold is satisfied. T accumulates during replay
 warmup, then resets to zero after each cycle; overshoot is discarded, not carried.
-Delay is explicitly defined on update cycles, including the current cycle, and
-does not depend on the number of critic minibatches or reset at episode boundaries.
-This clock is an explicit reconstruction of the paper's under-specified `t mod d`.
+Algorithm 1 writes the delayed-policy condition in terms of the environment-step
+index t. In the parallel implementation, one synchronized vector environment step
+is used as the implementation counterpart of t: each vector.step_batch increments
+vector_steps by one, while sampled_steps increases by M. The condition is exactly
+`vector_steps % policy_delay == 0`, evaluated only inside a ready update cycle.
+update_cycle_count remains accounting only. It does not determine policy delay;
+sampled_steps is not used as the delay clock. The runner retains its global vector
+step counter across independently resetting environments; no per-agent clock is
+introduced. The numerical d=2 itself is still paper-unspecified/project reconstruction.
 
 Each critic and actor iteration calls replay.sample separately. Independent draws
 can contain overlapping transitions because sampling is with replacement; the
@@ -90,7 +97,7 @@ four actor optimizer steps but only one Polyak update of each target.
 | 24 parallel training environments, 20 evaluation seeds | Paper, Sec.3.3.1 / Sec.4.1 |
 | Experimental sampling >8M | Paper, Sec.4.1 |
 | steps_per_update=100, num_updates=4 | **PAPER-UNSPECIFIED; MAAC-reference reconstruction** |
-| policy_delay=2; clock=update_cycle_count | **PAPER-UNSPECIFIED; project reconstruction** |
+| policy_delay=2; clock=vector_steps | **PAPER-UNSPECIFIED; project reconstruction** |
 | Formal budget 8,400,000 | Project choice exceeding the paper's >8M; not an exact paper value |
 | Evaluation interval 100,000 transitions | Project mapping; paper says every two training cycles without unique step conversion |
 | Exact tanh Gaussian, log_std clamp [-5,2], ReLU | Paper-unspecified continuous-SAC reconstruction |
@@ -100,14 +107,16 @@ The [original MAAC training defaults](https://github.com/shariqiqbal2810/MAAC/bl
 are steps_per_update=100 and num_updates=4. **Li et al. do not report those numerical
 MADSAC values, nor policy_delay=2.** Only the defaults are referenced: MAAC's exact
 modulo trigger, actor-batch reuse, target frequency, and regularizers are not copied.
-V4 follows the requested Algorithm-1 loops, separate actor samples, T=0, and delayed
+V5 follows the requested Algorithm-1 loops, separate actor samples, T=0, and delayed
 target placement. Config metadata separates `paper_reported`, `paper_unspecified`
 with reconstruction sources, and `project_implementation_choice`.
 
-All checked-in `configs/madsac*.yaml` now describe v4 for their respective existing
+All checked-in `configs/madsac*.yaml` now describe v5 for their respective existing
 environments. Their saved historical counterparts in `outputs/` are unchanged.
-Historical v3 logs and the earlier read-only audit remain **legacy implementation-v3**
-evidence, not measurements of v4. No existing weights are migrated or reinterpreted.
+Historical v3 logs/audits remain legacy-v3 evidence, and v4 checkpoints/logs
+remain legacy-v4 evidence using cycle-count delay. Neither is reinterpreted as v5.
+Old v3/v4 checkpoints are incompatible; no weights are migrated. This document
+retains its existing filename to preserve links.
 
 ## Accounting at 24 environments
 
@@ -129,11 +138,13 @@ The final cycle_complete log captures the target event and reset T.
 
 ## Checkpoints and validation
 
-MADSAC_IMPL_VERSION=4. Metadata records `attention_logit_scaling=sqrt_head_dim`,
+MADSAC_IMPL_VERSION=5. Metadata records `attention_logit_scaling=sqrt_head_dim`,
 `attention_head_dim`, self inclusion, unchanged value activation/shortcut contract,
-all three cycle parameters, explicit delay clock, and
+all three cycle parameters, `update_cycle_clock=vector_environment_steps_mod_policy_delay`,
+`policy_delay_clock=vector_steps`,
+`delayed_policy_condition=vector_steps % policy_delay == 0`, and
 `target_update_schedule=once_per_delayed_update_cycle`. Both protocol validation
-and direct `load_for_evaluation` reject v3 and forged unscaled metadata. Save/load
+and direct `load_for_evaluation` reject v3/v4 and forged scaling/clock metadata. Save/load
 restores all six network states for evaluation; exact training resume remains
 unsupported because replay is not checkpointed.
 
@@ -144,7 +155,7 @@ only overrides total_sampled_steps=4800; all other hyperparameters remain intact
 
 ```powershell
 conda activate uav
-python -u tools/validate_madsac_v4.py --output-dir outputs/madsac_v4_validation/new_run
+python -u tools/validate_madsac_v4.py --output-dir outputs/madsac_v5_validation/new_run
 python -m pytest -q tests/test_madsac_v4.py tests/test_madsac.py tests/test_madsac_v326.py tests/test_madsac_v3.py tests/test_madsac_algorithm_audit.py
 ```
 
@@ -152,6 +163,20 @@ The 4,800-transition run must produce 200 vector steps, 32 update cycles, 128
 paired-Q rounds / 256 Q optimizer steps, 64 actor optimizer steps, 16 grouped
 target updates (48 individual network Polyak calls), 128 critic and 64 actor
 replay samples, and final T=48. Validation compares counters to actual optimizer
-hooks, replay calls, target calls, checkpoint roundtrip, actual legacy-v3 rejection,
+hooks, replay calls, target calls, checkpoint roundtrip, actual legacy-v3/v4 rejection,
 20-seed evaluation, and the protected environment/MAPPO/MAAC file hash manifest.
 This is schedule/correctness validation, not a trained-policy performance claim.
+
+
+## Clock-specific regression
+
+The formal update steps 43,48,53,58,... happen to give identical actor triggers
+under cycle parity and vector-step parity for d=2. The smoke counts alone cannot
+prove the new clock. CUDA unit tests therefore hold vector_steps fixed at 100
+or 101 and vary the pre-cycle update_cycle_count between 0 and 1. Even vector100
+always triggers four actor updates and one target event; odd vector101 never
+triggers either, regardless of cycle parity. sampled_steps=24*vector_steps is
+even in all cases, also ruling out an accidental sampled-step condition.
+A separate count-reference test uses update spacing4 and odd vector steps
+43,47,51, where three critic cycles must result in zero actor/target updates.
+These are unit-test counterexamples only; formal 100/4/2 values are unchanged.

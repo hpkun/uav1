@@ -58,7 +58,7 @@ metadata:
     formal_total_sampled_steps: 8400000
     formal_budget_source: project choice satisfying paper >8M, not its exact reported
       budget
-    policy_delay_clock: update_cycle_count
+    policy_delay_clock: vector_steps
     evaluation_interval_sampled_steps: 100000
     evaluation_interval_source: paper-unspecified mapping from two training cycles
     policy_distribution: tanh diagonal Gaussian; exact form and log_std clamp not
@@ -80,4 +80,4 @@ metadata:
 environment:
   environment_version: '3.28'
   team_size: 5
-implementation_version: 4
+implementation_version: 5

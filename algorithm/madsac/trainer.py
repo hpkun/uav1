@@ -1,4 +1,4 @@
-"""MADSAC-v4 fixed-alpha objectives; the runner owns Algorithm-1 scheduling."""
+"""MADSAC-v5 fixed-alpha objectives; the runner owns Algorithm-1 scheduling."""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -10,10 +10,10 @@ import torch
 
 from .networks import CentralizedAttentionQCritic, SharedMADSACActor
 from .replay_buffer import ReplayBatch
-from .critic_contract import CRITIC_ARCHITECTURE, schedule_contract, validate_v4_contract
+from .critic_contract import CRITIC_ARCHITECTURE, schedule_contract, validate_checkpoint_contract
 
 
-MADSAC_IMPL_VERSION = 4
+MADSAC_IMPL_VERSION = 5
 
 
 def masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -281,9 +281,9 @@ class MADSACTrainer:
 
     def load_for_evaluation(self, path):
         state = torch.load(path, map_location=self.device, weights_only=False)
-        validate_v4_contract(state,self.critic1.hidden_dim,self.critic1.attention_heads)
+        validate_checkpoint_contract(state,self.critic1.hidden_dim,self.critic1.attention_heads)
         if state['training_schedule'] != schedule_contract(self.steps_per_update,self.num_updates,self.policy_delay):
-            raise RuntimeError('MADSAC v4 checkpoint configured schedule mismatch')
+            raise RuntimeError('MADSAC v5 checkpoint configured schedule mismatch')
         for name in ('actor','target_actor','critic1','critic2','target_critic1','target_critic2'):
             getattr(self,name).load_state_dict(state[name], strict=True)
             getattr(self,name).eval()
