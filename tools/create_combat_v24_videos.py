@@ -1,4 +1,5 @@
-"""Twenty shared diagnostic seeds, symmetric representative selection, actual MP4s.
+"""LEGACY v2.4/8v8 only; not the current combat replay entry.
+Twenty shared diagnostic seeds, symmetric representative selection, actual MP4s.
 
 This tool writes only its output directory. It never trains or selects checkpoints.
 """
@@ -78,6 +79,8 @@ def inspect_final(algorithm, run_dir, device):
 
 def analyze_episode(trace, metadata, env_config):
     """Describe observed geometry and events, without inferring actor intentions."""
+    if env_config.get('environment_version') != '2.4':
+        raise ValueError('Legacy v2.4 weapon analysis cannot audit current environments')
     dt, events = float(metadata['dt']), metadata['events']
     result = {key: value for key, value in metadata.items() if key not in ('events', 'trace_shapes', 'feature_names')}
     per_agent, illegal = {}, []

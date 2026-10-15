@@ -1,4 +1,5 @@
-"""Render existing representative traces at simulation speed without reevaluation."""
+"""LEGACY v2.4/8v8 only; not the current combat replay entry.
+Render existing representative traces at simulation speed without reevaluation."""
 import argparse
 import json
 from pathlib import Path

@@ -1,4 +1,4 @@
-"""Record deterministic combat using each algorithm's official checkpoint contract."""
+"""Internal deterministic recorder. User CLI: tools/replay_combat.py."""
 import argparse
 from pathlib import Path
 from typing import Any
@@ -18,7 +18,7 @@ from algorithm.mappo.factory import build_mappo_trainer
 from algorithm.madsac.factory import build_madsac_trainer
 from algorithm.madsac.protocol import validate_madsac_checkpoint
 from tools.combat_visualization import (FEATURE_NAMES, FRAME_FIELDS, TRANSITION_FIELDS,
-    TRACE_SCHEMA_VERSION, RecordingCombatEnv, append_frame, checkpoint_sha256,
+    TRACE_SCHEMA_VERSION, COOLDOWN_FIELDS, RecordingCombatEnv, append_frame, checkpoint_sha256,
     dump_metadata, ensure_fresh_output, write_trace)
 
 
@@ -36,6 +36,12 @@ def record(trainer: Any, env_config: dict[str, Any], seed: int, output_dir: str 
     frames = {key: [] for key in FRAME_FIELDS}
     transitions = {key: [] for key in TRANSITION_FIELDS}
     append_frame(frames, env)
+    initial_ammo = {side: getattr(env,side+'_ammo',None) for side in ('red','blue')}
+    initial_ammo = {k:None if v is None else np.asarray(v).tolist() for k,v in initial_ammo.items()}
+    has_cooldown = all(hasattr(env,side+'_fire_cooldown_steps') for side in ('red','blue'))
+    if has_cooldown:
+        transitions.update({name:[] for name in COOLDOWN_FIELDS})
+    targets_available = None
     start = time.monotonic()
     recurrent = hasattr(getattr(trainer, 'actor', None), 'gru_hidden_dim')
     if recurrent:
@@ -52,7 +58,17 @@ def record(trainer: Any, env_config: dict[str, Any], seed: int, output_dir: str 
             hidden *= env.red_alive_mask[:, None]
             episode_start = np.array(0., dtype=np.float32)
         transitions['red_actions'].append(info['executed_red_actions'])
-        transitions['local_rewards'].append(reward)
+        transitions['blue_actions'].append(np.asarray(info.get('executed_blue_actions',env.observed_actions.get('blue'))).copy())
+        available = 'blue_pursuit_target_indices' in info
+        if targets_available is not None and available != targets_available:
+            raise RuntimeError('Blue target availability changed during recording')
+        targets_available = available
+        transitions['blue_pursuit_target_indices'].append(np.asarray(info['blue_pursuit_target_indices'],dtype=np.int64).copy() if available else np.full(env.team_size,-1,dtype=np.int64))
+        for side in ('red','blue'):
+            ammo = info.get(side+'_ammo',getattr(env,side+'_ammo',None))
+            transitions[side+'_ammo'].append(np.full(env.team_size,-1,dtype=np.int64) if ammo is None else np.asarray(ammo,dtype=np.int64).copy())
+            if has_cooldown:transitions[side+'_cooldown'].append(getattr(env,side+'_fire_cooldown_steps').copy())
+        transitions['local_rewards'].append(np.asarray(reward).copy())
         transitions['reward_components'].append(np.stack([info[f'{name}_rewards'] for name in ('r1', 'r2', 'r3', 'r4')]))
         transitions['terminated'].append(terminated)
         transitions['truncated'].append(truncated)
@@ -63,9 +79,16 @@ def record(trainer: Any, env_config: dict[str, Any], seed: int, output_dir: str 
             break
         if wall_timeout_s > 0 and time.monotonic() - start > wall_timeout_s:
             raise RuntimeError('recording exceeded wall timeout')
-    shapes = write_trace(output_dir / 'episode_trace.npz', frames, transitions)
+    shapes = write_trace(output_dir / 'episode_trace.npz', frames, transitions, dt=env.dt)
     result = dict(metadata or {})
     result.update({'trace_schema_version': TRACE_SCHEMA_VERSION, 'feature_names': FEATURE_NAMES,
+         'reward_component_names': ['R1','R2','R3','R4'], 'reward_component_axis': 1, 'agent_axis': 2,
+        'transition_state_alignment': 'transition[t]: frame[t] -> frame[t+1]; ammo/cooldown are post-transition',
+        'blue_target_source': 'info.blue_pursuit_target_indices' if targets_available else 'unavailable_in_this_environment',
+        'blue_target_available': bool(targets_available), 'initial_ammo': initial_ammo,
+        'cooldown_units': 'simulation_steps', 'cooldown_available': has_cooldown,
+        'weapon_config': env.config['weapon'], 'arena_config': env.config['arena'],
+        'weapon_class': type(env.weapon).__name__,
         'episode_seed': int(seed), 'dt': env.dt, 'max_steps': env.max_steps,
         'arena_radius': env.arena_radius, 'environment_version': env.environment_version,
         'environment_config_sha256': config_sha256(env_config),
@@ -79,6 +102,12 @@ def record(trainer: Any, env_config: dict[str, Any], seed: int, output_dir: str 
            for event in ('fire_attempts', 'weapon_hits', 'attack_kills', 'boundary_exits', 'ground_losses')},
         **{f'episode_{name}_total': info[f'episode_{name}_total'] for name in ('r1', 'r2', 'r3', 'r4')},
     })
+    result['combat_counts'] = {side:dict(env.combat_counts[side]) for side in ('red','blue')}
+    for side in ('red','blue'):
+        for field in ('ammo_used','ceiling_losses'):
+            result[side+'_'+field] = env.combat_counts[side].get(field)
+    from tools.combat_trace import read_trace
+    read_trace(output_dir / 'episode_trace.npz',result)
     dump_metadata(output_dir / 'metadata.json', result)
     return result
 
@@ -121,40 +150,20 @@ def load_recording_policy(checkpoint, env_config, config, device='cuda'):
         trainer = getattr(factory, f'build_{name}_trainer')(config, device,
             seed=extra['training_seed'], smoke=bool(extra['training_smoke']))
         trainer.load(checkpoint)
+    if 'environment_config_sha256' in extra and extra['environment_config_sha256'] != config_sha256(env_config):
+        raise RuntimeError('checkpoint environment config fingerprint mismatch')
+    if extra.get('algorithm_config_sha256') != config_sha256(config):
+        raise RuntimeError('checkpoint algorithm config fingerprint mismatch')
     return trainer, state, {'algorithm': state['algorithm'], 'checkpoint_path': str(checkpoint),
         'checkpoint_sha256': checkpoint_sha256(checkpoint),
+        'environment_config_sha256': config_sha256(env_config),
         'checkpoint_sampled_steps': int(state['sampled_steps']),
-        'training_seed': extra.get('training_seed'),
+        'training_seed': extra.get('training_seed',state.get('training_seed')),
         'observation_dim': extra.get('observation_dim'), 'action_dim': extra.get('action_dim'),
         'num_agents': extra.get('num_agents'),
         'algorithm_config_sha256': config_sha256(config)}
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--checkpoint', required=True)
-    parser.add_argument('--env-config', default='configs/combat_environment.yaml')
-    parser.add_argument('--algorithm-config')
-    parser.add_argument('--episode-seed', required=True, type=int)
-    parser.add_argument('--device', choices=('cuda', 'cpu'), default='cuda')
-    parser.add_argument('--output-dir', required=True)
-    parser.add_argument('--wall-timeout-s', type=float, default=0.0)
-    args = parser.parse_args()
-    if args.device != 'cuda' or not torch.cuda.is_available():
-        raise RuntimeError('CUDA is required for checkpoint recording')
-    checkpoint = resolved(args.checkpoint)
-    state = torch.load(checkpoint, map_location='cpu', weights_only=False)
-    extra = state.get('extra', {})
-    algorithm = str(state['algorithm']).lower()
-    snapshot = checkpoint.parent / 'algorithm_config.yaml'
-    config_path = args.algorithm_config or (snapshot if snapshot.exists() else f'configs/{algorithm}.yaml')
-    config = yaml.safe_load(resolved(config_path).read_text(encoding='utf-8'))
-    env_config = yaml.safe_load(resolved(args.env_config).read_text(encoding='utf-8'))
-    trainer, state, provenance = load_recording_policy(checkpoint, env_config, config, args.device)
-    result = record(trainer, env_config, args.episode_seed, resolved(args.output_dir),
-        provenance, args.wall_timeout_s)
-    print({key: value for key, value in result.items() if key != 'events'})
-
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit('Internal module. Use the official entry: python -u tools/replay_combat.py --help')

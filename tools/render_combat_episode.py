@@ -1,4 +1,4 @@
-"""Render a combat trace as a trajectory image or animated GIF/MP4."""
+"""Internal trace-only PNG/MP4 renderer; official CLI: replay_combat.py."""
 import argparse
 import json
 from pathlib import Path
@@ -86,15 +86,19 @@ class CombatScene:
 
 
 def render(trace_path: str | Path, metadata_path: str | Path, output: str | Path,
-           stride: int = 4, fps: int = 20) -> Path:
+           stride: int = 1, fps: float | None = None) -> Path:
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
     from matplotlib.animation import FuncAnimation
-    if stride <= 0 or fps <= 0:
+    if stride <= 0 or (fps is not None and fps <= 0):
         raise ValueError('stride and fps must be positive')
-    trace = read_trace(trace_path)
     metadata = json.loads(Path(metadata_path).read_text(encoding='utf-8'))
+    trace = read_trace(trace_path,metadata)
+    fps = 1/float(metadata['dt']) if fps is None else fps
+    if Path(output).suffix.lower() == '.mp4':
+        from tools.combat_video import configure_ffmpeg
+        configure_ffmpeg()
     if Path(output).suffix.lower() in ('.mp4', '.gif'):
         metadata['playback_label'] = f" | ~{fps*stride*metadata['dt']:g}x playback"
     output = Path(output)
@@ -116,16 +120,6 @@ def render(trace_path: str | Path, metadata_path: str | Path, output: str | Path
     return output
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--trace', required=True, type=Path)
-    parser.add_argument('--metadata', required=True, type=Path)
-    parser.add_argument('--output', required=True, type=Path)
-    parser.add_argument('--stride', type=int, default=4)
-    parser.add_argument('--fps', type=int, default=20)
-    args = parser.parse_args()
-    print(render(args.trace, args.metadata, args.output, args.stride, args.fps))
-
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit('Internal module. Use the official entry: python -u tools/replay_combat.py --help')
