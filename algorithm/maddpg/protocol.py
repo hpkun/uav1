@@ -1,7 +1,29 @@
 """Strict independent identity, dimensions, architecture and config fingerprints."""
 from algorithm.common.protocol import config_sha256
 from env.config import validate_config as validate_environment, environment_dimensions
-from .trainer import MADDPG_IMPL_VERSION
+import math
+
+MADDPG_IMPL_VERSION = 2
+SAMPLED_STEPS_UNIT = 'environment_transitions_not_agent_transitions'
+SUPPORTED_DIMENSIONS = {'2.5': (65, 3, 5), '2.4': (104, 3, 8),
+    **{f'3.{v}': (66, 3, 5) for v in range(3, 12)},
+    **{f'3.{v}': (56, 3, 5) for v in range(12, 19)}, '3.38': (45, 3, 4)}
+
+
+def validate_dimensions(observation_dim, action_dim, num_agents):
+    dimensions = (observation_dim, action_dim, num_agents)
+    if any(type(v) is not int for v in dimensions) or dimensions not in SUPPORTED_DIMENSIONS.values():
+        raise ValueError('MADDPG dimensions are not registered in protocol.SUPPORTED_DIMENSIONS')
+
+
+def schedule_contract(config):
+    t = config['training']
+    if 'gradient_steps_per_vector_step' in t or 'sampled_steps_per_update' not in t:
+        raise RuntimeError('MADDPG-v2 requires explicit sampled_steps_per_update; legacy vector-step schedule is not reinterpreted')
+    return {'sampled_steps_unit': SAMPLED_STEPS_UNIT,
+        **{k: t[k] for k in ('sampled_steps_per_update', 'learning_starts', 'replay_capacity', 'minibatch_size')},
+        'exploration_type': 'OU', 'evaluation_mode': 'deterministic',
+        'formal_exact_resume_supported': False, 'replay_buffer_in_checkpoint': False}
 
 
 def require_cuda(device):
@@ -16,23 +38,39 @@ def validate_config(env, config):
         raise RuntimeError('algorithm config is not maddpg')
     n, t, i = (config[key] for key in ('network', 'training', 'implementation'))
     dimensions = tuple(n[key] for key in ('observation_dim', 'action_dim', 'num_agents'))
-    if dimensions != environment_dimensions(env) or (str(env['environment_version']), dimensions) not in (
-            ('2.5', (65, 3, 5)), ('2.4', (104, 3, 8)), ('3.3', (66, 3, 5)), ('3.4', (66, 3, 5)), ('3.5', (66, 3, 5)), ('3.6', (66, 3, 5)), ('3.7', (66, 3, 5)), ('3.8', (66, 3, 5)), ('3.9', (66, 3, 5)), ('3.10', (66, 3, 5)), ('3.11', (66, 3, 5)), ('3.12', (56, 3, 5)), ('3.13', (56, 3, 5)), ('3.14', (56, 3, 5)), ('3.15', (56, 3, 5)), ('3.16', (56, 3, 5)), ('3.17', (56, 3, 5)), ('3.18', (56, 3, 5))):
-        raise RuntimeError('MADDPG requires v2.5 65/3/5, v2.4 104/3/8 or v3.3/v3.4/v3.5/v3.6/v3.7/v3.8/v3.9/v3.10/v3.11 66/3/5 or v3.12/v3.13/v3.14/v3.15/v3.16/v3.17/v3.18 56/3/5')
+    if dimensions != environment_dimensions(env) or SUPPORTED_DIMENSIONS.get(str(env['environment_version'])) != dimensions:
+        raise RuntimeError('MADDPG requires a registered environment version/dimensions pair; v3.38 requires 45/3/4')
+    identity = config.get('environment')
+    expected_identity = {'environment_version': env['environment_version'], 'team_size': dimensions[2]}
+    if (identity is not None and identity != expected_identity) or (env['environment_version'] == '3.38' and identity is None):
+        raise RuntimeError('MADDPG algorithm/environment identity mismatch (environment_version/team_size)')
     if n['actor_hidden_layers'] != [256, 256] or n['critic_hidden_layers'] != [256, 256]:
         raise RuntimeError('MADDPG requires independent 256/256 MLPs')
     forbidden = {'attention_heads', 'actor_type', 'gru_hidden_dim', 'policy_delay', 'alpha',
-                 'target_policy_noise', 'log_std_min', 'policy_std_mode', 'entropy_coefficient'}
-    if any(forbidden.intersection(section) for section in (n, t, i)):
+                 'target_policy_noise', 'log_std_min', 'log_std_max', 'log_std', 'policy_std_mode', 'entropy_coefficient',
+                 'shared_actor', 'shared_critic', 'attention', 'twin_critic', 'maximum_entropy', 'target_policy_smoothing', 'transformer'}
+    def forbidden_key(section):
+        return any(key in forbidden or any(token in key.lower() for token in ('attention', 'log_std', 'transformer', 'gru'))
+                   or isinstance(value, dict) and forbidden_key(value) for key, value in section.items())
+    if any(forbidden_key(section) for section in (n, t, i)):
         raise RuntimeError('unsupported mechanism in classic MADDPG config')
     if t['optimizer'] != 'Adam' or i['noise_type'] != 'ou' or i['evaluation_mode'] != 'deterministic':
         raise RuntimeError('MADDPG requires Adam, OU exploration and deterministic evaluation')
-    for key in ('replay_capacity', 'minibatch_size', 'learning_starts', 'gradient_steps_per_vector_step',
+    schedule_key = 'sampled_steps_per_update' if 'sampled_steps_per_update' in t else 'gradient_steps_per_vector_step'
+    if env['environment_version'] == '3.38' or schedule_key == 'sampled_steps_per_update':
+        schedule_contract(config)
+    for key in ('replay_capacity', 'minibatch_size', 'learning_starts', schedule_key,
                 'num_train_envs', 'total_sampled_steps', 'evaluation_episodes', 'evaluation_interval_sampled_steps'):
         if isinstance(t[key], bool) or not isinstance(t[key], int) or t[key] <= 0:
             raise ValueError(f'{key} must be a positive integer')
     if t['minibatch_size'] > t['replay_capacity']:
         raise ValueError('minibatch exceeds replay capacity')
+    if schedule_key == 'sampled_steps_per_update' and t['learning_starts'] < t['minibatch_size']:
+        raise ValueError('learning_starts must cover minibatch_size so eligible update credit is unambiguous')
+    numeric = [t[k] for k in ('actor_learning_rate', 'critic_learning_rate', 'gamma', 'tau')]
+    numeric += [i[k] for k in ('ou_theta', 'ou_sigma', 'ou_mu', 'exploration_scale_start', 'exploration_scale_end')]
+    if not all(math.isfinite(v) for v in numeric):
+        raise ValueError('non-finite MADDPG hyperparameter')
     if min(t['actor_learning_rate'], t['critic_learning_rate']) <= 0 or not 0 <= t['gamma'] <= 1 or not 0 < t['tau'] <= 1:
         raise ValueError('invalid MADDPG optimization hyperparameters')
     if min(i['ou_theta'], i['ou_sigma'], i['exploration_scale_start'], i['exploration_scale_end']) < 0:
@@ -41,6 +79,9 @@ def validate_config(env, config):
         raise ValueError('invalid schedule interval')
     if not 10_000_000 <= i['evaluation_seed_base'] < 70_000_000:
         raise ValueError('evaluation must use the development seed block')
+    for key in ('console_interval_sampled_steps', 'recent_episode_window'):
+        if type(config['runtime_logging'][key]) is not int or config['runtime_logging'][key] <= 0:
+            raise ValueError(f'{key} must be a positive integer')
 
 
 def validate_checkpoint(state, env, config):
@@ -56,6 +97,13 @@ def validate_checkpoint(state, env, config):
     for key, value in expected.items():
         if extra.get(key) != value:
             raise RuntimeError(f'MADDPG checkpoint {key} mismatch')
+    contract = schedule_contract(config)
+    for key, value in contract.items():
+        if extra.get(key) != value or state.get(key) != value:
+            raise RuntimeError(f'MADDPG checkpoint schedule metadata {key} mismatch')
+    remainder = extra.get('transitions_since_update')
+    if type(remainder) is not int or not 0 <= remainder < contract['sampled_steps_per_update'] or state.get('transitions_since_update') != remainder:
+        raise RuntimeError('MADDPG checkpoint transitions_since_update mismatch')
     required = ('training_seed', 'training_num_envs', 'training_total_sampled_steps', 'training_smoke',
                 'network_architecture', 'parameter_counts', 'ou_noise_state')
     if any(key not in extra for key in required):
@@ -84,4 +132,11 @@ def validate_checkpoint(state, env, config):
         raise RuntimeError('MADDPG updates must not use policy delay')
     if state.get('sampled_steps') != state.get('vector_steps', -1)*extra['training_num_envs']:
         raise RuntimeError('MADDPG sampled-step unit mismatch')
+    events, credit = divmod(max(0, state['sampled_steps']-t['learning_starts']), t['sampled_steps_per_update'])
+    if state['actor_update_count'] != events or remainder != credit:
+        raise RuntimeError('MADDPG checkpoint update schedule counts/remainder mismatch')
+    for key in ('actor_updates_per_agent', 'critic_updates_per_agent'):
+        values = state.get(key)
+        if not isinstance(values, list) or len(values) != n['num_agents'] or any(type(v) is not int or not 0 <= v <= events for v in values):
+            raise RuntimeError(f'MADDPG checkpoint {key} mismatch')
     return extra

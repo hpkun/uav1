@@ -12,8 +12,8 @@ from algorithm.maddpg.runner import MADDPGTrainingRunner
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--env-config', default='configs/combat_environment_v24.yaml')
-    parser.add_argument('--algorithm-config', default='configs/maddpg_8v8.yaml')
+    parser.add_argument('--env-config', default='configs/combat_environment_v338.yaml')
+    parser.add_argument('--algorithm-config', default='configs/maddpg_4v4_v338.yaml')
     parser.add_argument('--output-dir', required=True)
     parser.add_argument('--device', default='cuda', choices=('cuda',))
     parser.add_argument('--seed', type=int)

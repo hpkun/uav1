@@ -165,6 +165,8 @@ def test_offpolicy_v33_cuda_dimensions_checkpoint_and_eval(tmp_path,algorithm):
     e=cfg()
     c=yaml.safe_load((ROOT/f'configs/{"madsac" if algorithm=="madsac" else "maddpg_5v5"}.yaml').read_text())
     c['network'].update(observation_dim=66,action_dim=3,num_agents=5)
+    if algorithm=='maddpg':
+        c['training'].pop('gradient_steps_per_vector_step');c['training']['sampled_steps_per_update']=100
     n,t=c['network'],c['training'];extra=dict(environment_version='3.3',
         environment_config_sha256=config_sha256(e),algorithm_config_sha256=config_sha256(c),
         observation_dim=66,action_dim=3,num_agents=5,training_seed=t['seed'])
@@ -190,6 +192,8 @@ def test_offpolicy_v33_cuda_dimensions_checkpoint_and_eval(tmp_path,algorithm):
         extra.update(gamma=t['gamma'],tau=t['tau'],training_num_envs=t['num_train_envs'],
             training_total_sampled_steps=t['total_sampled_steps'],training_smoke=False,
             network_architecture=trainer.network_architecture,parameter_counts=trainer.parameter_counts(),ou_noise_state=None)
+        from algorithm.maddpg.protocol import schedule_contract
+        extra.update(algorithm_config=c,transitions_since_update=0,**schedule_contract(c))
         trainer.save(path,extra);saved=torch.load(path,map_location='cpu',weights_only=False)
         validate_checkpoint(saved,e,c);trainer.load(path,e,c)
         record=evaluate(trainer,e,[38001000]);assert 'average_episode_team_casualty_total' in record

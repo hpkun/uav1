@@ -22,32 +22,44 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def configs(n=8):
+    if n == 4:
+        return tuple(yaml.safe_load((ROOT/'configs'/name).read_text()) for name in ('combat_environment_v338.yaml','maddpg_4v4_v338.yaml'))
     env = yaml.safe_load((ROOT/f'configs/combat_environment_v{24 if n == 8 else 25}.yaml').read_text())
     config = yaml.safe_load((ROOT/f'configs/maddpg_{n}v{n}.yaml').read_text())
+    # Explicit v2 test fixture, not a reinterpretation or edit of historical YAML.
+    config['training'].pop('gradient_steps_per_vector_step')
+    config['training']['sampled_steps_per_update'] = 100
     return env, config
 
 
 def trainer(n=5, device='cpu'):
-    return MADDPGTrainer(n*13, 3, n, device=device, seed=2)
+    return MADDPGTrainer(45 if n == 4 else n*13, 3, n, device=device, seed=2)
 
 
 def batch(n=5, size=4):
     rng = np.random.default_rng(8)
-    return ReplayBatch(rng.normal(size=(size, n, n*13)).astype(np.float32),
+    dim = 45 if n == 4 else n*13
+    return ReplayBatch(rng.normal(size=(size, n, dim)).astype(np.float32),
         rng.uniform(-1, 1, (size, n, 3)).astype(np.float32), rng.normal(size=(size, n)).astype(np.float32),
-        rng.normal(size=(size, n, n*13)).astype(np.float32), np.zeros(size, bool),
+        rng.normal(size=(size, n, dim)).astype(np.float32), np.zeros(size, bool),
         np.ones((size, n), np.float32), np.ones((size, n), np.float32))
 
 
 def checkpoint_extra(t, env, config):
+    from algorithm.maddpg.protocol import schedule_contract
+    if t.actor_update_count:
+        steps = config['training']['learning_starts']+t.actor_update_count*config['training']['sampled_steps_per_update']
+        t.sampled_steps = ((steps+15)//16)*16; t.vector_steps = t.sampled_steps//16
     return {'environment_version': env['environment_version'], 'environment_config_sha256': config_sha256(env),
+        'algorithm_config': deepcopy(config), **schedule_contract(config),
+        'transitions_since_update': max(0,t.sampled_steps-config['training']['learning_starts'])%config['training']['sampled_steps_per_update'],
         'algorithm_config_sha256': config_sha256(config), **{k: getattr(t, k) for k in ('observation_dim', 'action_dim', 'num_agents', 'gamma', 'tau')},
         'training_seed': t.seed, 'training_num_envs': 16, 'training_total_sampled_steps': 3000000, 'training_smoke': False,
         'network_architecture': t.network_architecture, 'parameter_counts': t.parameter_counts(),
         'ou_noise_state': OUNoise(16, t.num_agents, 3, 4).state_dict()}
 
 
-@pytest.mark.parametrize('n,actor_count,critic_count', [(5, 83459, 153345), (8, 93443, 285441)])
+@pytest.mark.parametrize('n,actor_count,critic_count', [(4, 78339, 115457), (5, 83459, 153345), (8, 93443, 285441)])
 def test_independent_networks_exact_structures_parameter_counts_and_no_forbidden_modules(n, actor_count, critic_count):
     t = trainer(n)
     for name in ('actors', 'critics', 'target_actors', 'target_critics'):
@@ -62,9 +74,10 @@ def test_independent_networks_exact_structures_parameter_counts_and_no_forbidden
     assert len({id(o) for o in t.actor_optimizers+t.critic_optimizers}) == 2*n
     for i, optimizer in enumerate(t.actor_optimizers):
         assert {id(p) for group in optimizer.param_groups for p in group['params']} == {id(p) for p in t.actors[i].parameters()}
-    assert [m.in_features for m in t.actors[0].network if isinstance(m, nn.Linear)] == [13*n, 256, 256]
+    dim = 45 if n == 4 else n*13
+    assert [m.in_features for m in t.actors[0].network if isinstance(m, nn.Linear)] == [dim, 256, 256]
     assert [m.out_features for m in t.critics[0].network if isinstance(m, nn.Linear)] == [256, 256, 1]
-    assert t.critics[0].joint_input_dim == n*(13*n+3)
+    assert t.critics[0].joint_input_dim == n*(dim+3)
     assert type(t.actors[0].network[-1]) is nn.Tanh
     assert t.parameter_counts()['actor_per_agent'] == actor_count
     assert t.parameter_counts()['critic_per_agent'] == critic_count
@@ -154,7 +167,7 @@ def test_death_transition_learns_reward_post_death_is_excluded():
     assert any(not torch.equal(p, before) for p, before in zip(t.critics[0].parameters(), initial))
 
 
-@pytest.mark.parametrize('n', [5, 8])
+@pytest.mark.parametrize('n', [4, 5, 8])
 def test_all_actors_critics_update_synchronously_every_gradient_step(n):
     t = trainer(n, 'cuda'); data = batch(n)
     old_a, old_c, old_target = ([p.detach().clone() for p in modules.parameters()] for modules in (t.actors, t.critics, t.target_critics))
@@ -238,7 +251,7 @@ def test_ou_action_bounds_dead_zero_and_linear_decay():
     assert exploration_scale(9000000) == pytest.approx(.1)
 
 
-@pytest.mark.parametrize('n', [5, 8])
+@pytest.mark.parametrize('n', [4, 5, 8])
 def test_config_formal_values_and_smoke_does_not_change_source(n):
     env, cfg = configs(n); validate_config(env, cfg)
     assert cfg['training']['replay_capacity'] == 1000000
@@ -255,12 +268,12 @@ def test_config_formal_values_and_smoke_does_not_change_source(n):
         validate_seeds(range(70000000, 70000002))
 
 
-@pytest.mark.parametrize('n', [5, 8])
+@pytest.mark.parametrize('n', [4, 5, 8])
 def test_checkpoint_roundtrip_and_strict_identity_config_architecture(tmp_path, n):
     env, cfg = configs(n); t = build_maddpg_trainer(cfg, 'cuda', seed=2)
     t.update(batch(n)); extra = checkpoint_extra(t, env, cfg)
     path = tmp_path/'maddpg.pt'; t.save(path, extra)
-    state = torch.load(path, map_location='cpu', weights_only=False); validate_checkpoint(state, env, cfg)
+    state = torch.load(path, map_location='cuda', weights_only=False); validate_checkpoint(state, env, cfg)
     loaded = build_maddpg_trainer(cfg, 'cuda', seed=2); loaded.load(path, env, cfg)
     b = batch(n)
     np.testing.assert_array_equal(t.act(b.observations, b.alive_masks), loaded.act(b.observations, b.alive_masks))
@@ -273,7 +286,7 @@ def test_checkpoint_roundtrip_and_strict_identity_config_architecture(tmp_path, 
         bad = dict(state, algorithm=identity)
         with pytest.raises(RuntimeError, match='identity'):
             validate_checkpoint(bad, env, cfg)
-    for key, value in (('environment_version', '2.3'), ('observation_dim', 52), ('action_dim', 4), ('num_agents', 4),
+    for key, value in (('environment_version', '2.3'), ('observation_dim', 52), ('action_dim', 4), ('num_agents', n+1),
                        ('algorithm_config_sha256', 'wrong'), ('environment_config_sha256', 'wrong')):
         bad = dict(state, extra={**state['extra'], key: value})
         with pytest.raises(RuntimeError, match=key):
@@ -313,3 +326,160 @@ def test_evaluation_is_reproducible_and_does_not_advance_ou(tmp_path):
     assert before['rng_states'] == noise.state_dict()['rng_states']
     with pytest.raises(RuntimeError, match='CUDA'):
         require_cuda('cpu')
+
+
+def test_v338_shapes_joint_192_and_own_actor_parameter_isolation():
+    t=trainer(4);b=batch(4);data=t.tensors(b)
+    assert t.actors[0](data['observations'][:,0]).shape==(4,3)
+    assert t.critics[0].joint_input_dim==192
+    assert t.critics[0](data['observations'],data['actions'],data['alive_masks']).shape==(4,)
+    before=[deepcopy(a.state_dict()) for a in t.actors]
+    critic_before=deepcopy(t.critics.state_dict())
+    t.update_actor(1,data)
+    for i,a in enumerate(t.actors):
+        changed=any(not torch.equal(v,a.state_dict()[k]) for k,v in before[i].items())
+        assert changed==(i==1)
+    assert all(torch.equal(v,t.critics.state_dict()[k]) for k,v in critic_before.items())
+
+
+def test_v338_each_critic_step_changes_only_its_own_parameters(monkeypatch):
+    t=trainer(4)
+    for i,opt in enumerate(t.critic_optimizers):
+        original=opt.step
+        def isolated_step(*args,_i=i,_step=original,**kwargs):
+            before=[deepcopy(c.state_dict()) for c in t.critics]
+            _step(*args,**kwargs)
+            for j,c in enumerate(t.critics):
+                changed=any(not torch.equal(v,c.state_dict()[k]) for k,v in before[j].items())
+                assert changed==(j==_i)
+        monkeypatch.setattr(opt,'step',isolated_step)
+    t.update(batch(4))
+
+
+def test_targets_use_all_target_actors_and_individual_target_critics():
+    t=trainer(4);data=t.tensors(batch(4))
+    class ConstantActor(nn.Module):
+        def __init__(self,value):super().__init__();self.value=value
+        def forward(self,x):return x.new_full((*x.shape[:-1],3),self.value)
+    class CheckCritic(nn.Module):
+        def __init__(self,value):super().__init__();self.value=value
+        def forward(self,obs,actions,alive):
+            assert torch.allclose(actions[:, :, 0],torch.tensor([.1,.2,.3,.4]).expand(4,4))
+            return obs.new_full((len(obs),),self.value)
+    t.target_actors=nn.ModuleList([ConstantActor(v) for v in [.1,.2,.3,.4]])
+    t.target_critics=nn.ModuleList([CheckCritic(v) for v in [1.,2.,3.,4.]])
+    target=t.targets(data)
+    assert torch.allclose(target,data['rewards']+.99*torch.arange(1,5))
+
+
+def test_v338_dead_slot_and_death_done_targets():
+    t=trainer(4);d=t.tensors(batch(4));d['alive_masks'][:,2]=0
+    baseline=t.critics[0](d['observations'],d['actions'],d['alive_masks'])
+    d['observations'][:,2]=float('nan');d['actions'][:,2]=float('inf')
+    assert torch.equal(baseline,t.critics[0](d['observations'],d['actions'],d['alive_masks']))
+    d['next_alive_masks'][:,2]=0;d['dones'][0]=1
+    target=t.targets(d)
+    assert torch.equal(target[:,2],d['rewards'][:,2])
+    assert torch.equal(target[0],d['rewards'][0])
+
+
+def test_schedule_remainder_warmup_crossing_and_long_term():
+    from algorithm.maddpg.schedule import SampledTransitionSchedule
+    s=SampledTransitionSchedule(10000,100);events=0
+    for previous in range(0,10000,16):s.add(previous,previous+16)
+    assert s.credit==0
+    for previous in range(10000,10096,16):s.add(previous,previous+16)
+    assert s.credit==96
+    s.add(10096,10112);s.consume();events+=1
+    assert s.credit==12
+    for previous in range(10112,10208,16):s.add(previous,previous+16)
+    s.consume();events+=1;assert s.credit==8
+    for previous in range(10208,3000000,16):
+        s.add(previous,previous+16)
+        while s.credit>=100:s.consume();events+=1
+    assert events==29900 and s.credit==0
+    s=SampledTransitionSchedule(10000,100);s.add(9992,10008);assert s.credit==8
+    s=SampledTransitionSchedule(10000,100);s.add(0,10352)
+    for _ in range(3):s.consume()
+    assert s.credit==52
+
+
+def test_runner_schedule_fresh_batch_per_event_no_warmup_updates(tmp_path):
+    from algorithm.maddpg.schedule import SampledTransitionSchedule
+    from types import SimpleNamespace
+    r=object.__new__(MADDPGTrainingRunner);_,r.algorithm_config=configs(4);r.output_dir=tmp_path
+    r.schedule=SampledTransitionSchedule(10000,100);r.last_metrics={}
+    class Replay:
+        def __len__(self):return 1024
+        def sample(self,n):assert n==1024;return object()
+    samples=[]
+    def update(b):
+        samples.append(b);r.trainer.actor_updates_per_agent=[len(samples)]*4;r.trainer.critic_updates_per_agent=[len(samples)]*4
+        return dict(actor_update_count=len(samples),critic_update_count=len(samples))
+    r.replay=Replay();r.trainer=SimpleNamespace(sampled_steps=9992,vector_steps=624,update=update)
+    r.schedule.add(0,9992);r.update_from_credit();assert not samples
+    r.schedule.add(9992,10008);r.update_from_credit();assert not samples and r.schedule.credit==8
+    r.trainer.sampled_steps=10352;r.trainer.vector_steps=647;r.schedule.add(10008,10352);r.update_from_credit()
+    assert len(samples)==len({id(b) for b in samples})==3 and r.schedule.credit==52
+    records=[__import__('json').loads(line) for line in (tmp_path/'optimization_metrics.jsonl').read_text().splitlines()]
+    assert len(records)==3 and [x['transitions_since_update'] for x in records]==[252,152,52]
+
+
+@pytest.mark.parametrize('section,key,value',[
+    ('network','observation_dim',46),('network','num_agents',5),('network','action_dim',4),
+    ('network','actor_hidden_layers',[128,128]),('network','critic_hidden_layers',[128,128]),
+    ('network','attention_heads',4),('training','alpha',.1),('training','policy_delay',2),
+    ('implementation','log_std',0),('implementation','evaluation_mode','stochastic'),
+    ('training','gradient_steps_per_vector_step',1)])
+def test_v338_protocol_rejects_incompatible_config(section,key,value):
+    e,c=configs(4);c[section][key]=value
+    with pytest.raises((RuntimeError,ValueError)):validate_config(e,c)
+
+
+def test_v338_identity_is_not_just_dimensions_and_legacy_schedule_is_explicit():
+    e,c=configs(4);validate_config(e,c)
+    e337=yaml.safe_load((ROOT/'configs/combat_environment_v337.yaml').read_text())
+    with pytest.raises(RuntimeError):validate_config(e337,c)
+    for identity in [None,{'environment_version':'3.37','team_size':4},{'environment_version':'3.38','team_size':5}]:
+        bad=deepcopy(c)
+        if identity is None:bad.pop('environment')
+        else:bad['environment']=identity
+        with pytest.raises(RuntimeError,match='identity'):validate_config(e,bad)
+    from algorithm.maddpg.protocol import schedule_contract
+    old=yaml.safe_load((ROOT/'configs/maddpg_5v5.yaml').read_text())
+    with pytest.raises(RuntimeError,match='legacy'):schedule_contract(old)
+
+
+@pytest.mark.parametrize('key,value',[
+    ('sampled_steps_per_update',112),('learning_starts',9999),('sampled_steps_unit','vector_steps'),
+    ('transitions_since_update',-1),('evaluation_mode','stochastic'),('replay_buffer_in_checkpoint',True)])
+def test_v2_checkpoint_rejects_wrong_schedule_metadata(key,value):
+    e,c=configs(4);t=trainer(4);state=t.checkpoint_state(checkpoint_extra(t,e,c))
+    state['extra'][key]=value
+    with pytest.raises(RuntimeError):validate_checkpoint(state,e,c)
+
+
+def test_v1_checkpoint_explicitly_rejected_before_loading(tmp_path):
+    e,c=configs(4);t=trainer(4,'cuda');state=t.checkpoint_state(checkpoint_extra(t,e,c));state['implementation_version']=1
+    path=tmp_path/'v1.pt';torch.save(state,path)
+    with pytest.raises(RuntimeError,match='implementation version'):t.load(path,e,c)
+    for name in ['actors','critics','target_actors','target_critics']:
+        bad=t.checkpoint_state(checkpoint_extra(t,e,c));bad[name]=bad[name][:-1]
+        with pytest.raises(RuntimeError,match='independent'):validate_checkpoint(bad,e,c)
+
+
+def test_compact_v2_console_formats_include_required_fields_and_no_missing_literals():
+    from types import SimpleNamespace
+    r=object.__new__(MADDPGTrainingRunner);r.env_config,r.algorithm_config=configs(4)
+    r.seed=1;r.device='cuda';r.num_envs=16;r.total_sampled_steps=3000000
+    r.trainer=SimpleNamespace(sampled_steps=1200000);r.completed_records=[];r.last_metrics={}
+    start=r.startup_log_line();line=r.training_log_line()
+    for token in ['MADDPG-v2','env=v3.38','4v4','seed=1','cuda','envs=16','3.0M','update_every=100','deterministic']:assert token in start
+    for token in ['40.0%','ep=','win=','Rloss=','Bloss=','fire=','kill=','timeout=','len=','R=','Qloss=','Aloss=','OU=']:assert token in line
+    assert 'N/A' in line and 'None' not in line and 'nan' not in line
+    ev=dict(sampled_steps=1200000,win_rate=.55,average_red_loss=2.2,average_blue_loss=3.1,
+        red_attempt_episode_rate=.95,red_kill_episode_rate=.9,timeout_rate=0,episode_length=398,average_return=12.44)
+    for best in [True,False]:
+        log=r.evaluation_log_line(ev,best);assert log.startswith('[EVAL*]' if best else '[EVAL]')
+        for token in ['deterministic','win=','Rloss=','Bloss=','fire=','kill=','timeout=','len=','R=']:assert token in log
+        assert 'None' not in log and 'nan' not in log

@@ -52,7 +52,7 @@ def test_factory_and_public_api_are_combat_only():
         'ea_mappo_5v5_v38.yaml', 'ea_mappo_5v5_v39.yaml', 'ea_mappo_8v8.yaml', 'maac_4v4_v330.yaml',
         'maac_4v4_v331.yaml', 'maac_4v4_v332.yaml', 'maac_4v4_v333.yaml', 'maac_4v4_v334.yaml',
         'maac_4v4_v335.yaml', 'maac_4v4_v336.yaml', 'maac_4v4_v337.yaml', 'maac_4v4_v338.yaml',
-        'maac_5v5_v329.yaml', 'maddpg_5v5.yaml', 'maddpg_8v8.yaml', 'madsac.yaml',
+        'maac_5v5_v329.yaml', 'maddpg_4v4_v338.yaml', 'maddpg_5v5.yaml', 'maddpg_8v8.yaml', 'madsac.yaml',
         'madsac_4v4_v330.yaml', 'madsac_4v4_v331.yaml', 'madsac_4v4_v332.yaml', 'madsac_4v4_v333.yaml',
         'madsac_4v4_v334.yaml', 'madsac_4v4_v335.yaml', 'madsac_4v4_v336.yaml', 'madsac_4v4_v337.yaml',
         'madsac_4v4_v338.yaml', 'madsac_5v5_v326.yaml', 'madsac_5v5_v327.yaml', 'madsac_5v5_v328.yaml',

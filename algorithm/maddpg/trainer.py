@@ -5,8 +5,7 @@ import numpy as np
 import torch
 from torch import nn
 from .networks import DeterministicActor, CentralizedQCritic
-
-MADDPG_IMPL_VERSION = 1
+from .protocol import MADDPG_IMPL_VERSION, validate_dimensions
 
 
 def masked_mean(values, mask):
@@ -39,8 +38,7 @@ def finite_grad_norm(module):
 class MADDPGTrainer:
     def __init__(self, observation_dim, action_dim, num_agents, actor_learning_rate=1e-4,
                  critic_learning_rate=1e-4, gamma=.99, tau=.001, device='cuda', seed=0):
-        if (observation_dim, action_dim, num_agents) not in ((65, 3, 5), (104, 3, 8), (66, 3, 5), (56, 3, 5)):
-            raise ValueError('MADDPG requires 65/3/5, 104/3/8 or 66/3/5 or 56/3/5')
+        validate_dimensions(observation_dim, action_dim, num_agents)
         if not 0 <= gamma <= 1 or not 0 < tau <= 1:
             raise ValueError('invalid gamma/tau')
         self.device = torch.device(device)
@@ -154,7 +152,10 @@ class MADDPGTrainer:
                 'trainable_total': (a+q)*self.num_agents, 'target_total_nontrainable': (a+q)*self.num_agents}
 
     def checkpoint_state(self, extra):
+        from .protocol import schedule_contract
+        contract = schedule_contract(extra['algorithm_config'])
         return {'algorithm': 'maddpg', 'implementation_version': MADDPG_IMPL_VERSION,
+            **contract, 'transitions_since_update': extra['transitions_since_update'],
             'sampled_steps': self.sampled_steps, 'vector_steps': self.vector_steps,
             'training_seed': self.seed, 'gamma': self.gamma, 'tau': self.tau,
             'network_architecture': self.network_architecture,
