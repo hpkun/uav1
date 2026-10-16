@@ -58,6 +58,7 @@ class MADDPGTrainingRunner:
             self.observations = self.vector.reset()
             self.alive = self.vector.current_alive_masks.copy()
             self.write_json('run_config.json', self.startup_summary())
+            self.write_json('initial_diagnostics.json', self.trainer.parameter_diagnostics())
             import yaml
             for name, config in (('env_config.yaml', self.env_config), ('algorithm_config.yaml', self.algorithm_config),
                                  ('requested_algorithm_config.yaml', self.requested_algorithm_config)):
@@ -100,6 +101,8 @@ class MADDPGTrainingRunner:
             f"critic={n['num_agents']*(n['observation_dim']+3)}-256-256-1x{n['num_agents']} | "
             f"batch={t['minibatch_size']} | replay={format_steps(t['replay_capacity'])} | "
             f"warmup={format_steps(t['learning_starts'])} | update_every={t['sampled_steps_per_update']} | "
+            f"gradients_per_event={t['gradient_updates_per_event']} | clip={t['gradient_clip_norm']:g} | "
+            f"actor_UTD={t['gradient_updates_per_event']/t['sampled_steps_per_update']:.4f} | critic_UTD={t['gradient_updates_per_event']/t['sampled_steps_per_update']:.4f} | "
             f"OU={i['ou_theta']:.2f}/{i['ou_sigma']:.2f} | eval=deterministic")
 
     def training_log_line(self):
@@ -123,22 +126,38 @@ class MADDPGTrainingRunner:
         while self.schedule.credit >= t['sampled_steps_per_update']:
             if len(self.replay) < t['minibatch_size']:
                 raise RuntimeError('eligible update credit without sufficient replay')
-            self.last_metrics = self.trainer.update(self.replay.sample(t['minibatch_size']))
             self.schedule.consume()
-            self.write_metrics('optimization_metrics.jsonl', {
-                'sampled_steps': self.trainer.sampled_steps, 'vector_steps': self.trainer.vector_steps,
-                'replay_size': len(self.replay), **self.last_metrics,
-                'exploration_scale': self.current_exploration_scale(),
-                'transitions_since_update': self.transitions_since_update,
-                'actor_updates_per_agent': list(self.trainer.actor_updates_per_agent),
-                'critic_updates_per_agent': list(self.trainer.critic_updates_per_agent)})
+            for gradient_index in range(t['gradient_updates_per_event']):
+                self.last_metrics = self.trainer.update(self.replay.sample(t['minibatch_size']))
+                self.write_metrics('optimization_metrics.jsonl', {
+                    'sampled_steps': self.trainer.sampled_steps, 'vector_steps': self.trainer.vector_steps,
+                    'replay_size': len(self.replay), **self.last_metrics,
+                    'update_event_count':self.schedule.event_count, 'gradient_index_in_event':gradient_index+1,
+                    'gradient_updates_per_event':t['gradient_updates_per_event'],
+                    'actor_utd':self.last_metrics['actor_update_count']/max(1,self.trainer.sampled_steps),
+                    'critic_utd':self.last_metrics['critic_update_count']/max(1,self.trainer.sampled_steps),
+                    'exploration_scale': self.current_exploration_scale(),
+                    'transitions_since_update': self.transitions_since_update,
+                    'actor_updates_per_agent': list(self.trainer.actor_updates_per_agent),
+                    'critic_updates_per_agent': list(self.trainer.critic_updates_per_agent)})
 
     def behavior_actions(self, observations, alive):
         i = self.algorithm_config['implementation']
         scale = exploration_scale(self.trainer.sampled_steps, i['exploration_scale_start'],
                                   i['exploration_scale_end'], i['exploration_decay_sampled_steps'])
         mean = self.trainer.act(observations, alive, deterministic=True)
-        return (np.clip(mean+scale*self.noise.sample(), -1, 1)*alive[..., None]).astype(np.float32)
+        noise = self.noise.sample()
+        added = scale*noise
+        unbounded = mean+added
+        live = np.broadcast_to(alive[...,None].astype(bool),mean.shape)
+        def diagnostic_mean(value):return float(np.mean(value[live])) if live.any() else None
+        self.behavior_diagnostics = {
+            'ou_rms':None if not live.any() else float(np.sqrt(np.mean(noise[live]**2))),
+            'ou_absolute_mean':diagnostic_mean(np.abs(noise)),
+            'effective_added_noise_rms':None if not live.any() else float(np.sqrt(np.mean(added[live]**2))),
+            'post_clip_action_ratio':diagnostic_mean(np.abs(unbounded)>=1),
+            'exploration_diagnostic_alive_coordinates':int(live.sum())}
+        return (np.clip(unbounded, -1, 1)*alive[..., None]).astype(np.float32)
 
     def store_vector_step(self, observations, actions, result):
         executed = np.stack([info.get('executed_red_actions', actions[e]) for e, info in enumerate(result.infos)]).astype(np.float32)
@@ -162,6 +181,7 @@ class MADDPGTrainingRunner:
             'best_evaluation': deepcopy(self.best_evaluation), 'learning_starts': t['learning_starts'],
             'replay_capacity': self.replay.capacity, 'minibatch_size': t['minibatch_size'],
             'transitions_since_update': self.transitions_since_update,
+            'update_event_count':self.schedule.event_count,
             **schedule_contract(self.algorithm_config)}
 
     def save_checkpoint(self, path):
@@ -185,6 +205,7 @@ class MADDPGTrainingRunner:
         next_eval, next_checkpoint = t['evaluation_interval_sampled_steps'], i['checkpoint_interval_sampled_steps']
         print(self.startup_log_line(), flush=True)
         try:
+            if t.get('evaluate_before_training',False):self.evaluate()
             while self.trainer.sampled_steps < self.total_sampled_steps:
                 obs, alive = self.observations.copy(), self.alive.copy()
                 actions = self.behavior_actions(obs, alive)
@@ -219,6 +240,10 @@ class MADDPGTrainingRunner:
                     'hit_rate': combat.get('red_hit_episode_rate'), 'kill_rate': combat.get('red_kill_episode_rate'),
                     'exploration_scale': self.current_exploration_scale(), 'transitions_since_update': self.transitions_since_update,
                     'actor_update_count': self.trainer.actor_update_count, 'critic_update_count': self.trainer.critic_update_count}
+                row.update(self.behavior_diagnostics)
+                row['update_event_count'] = self.schedule.event_count
+                row['actor_utd'] = self.trainer.actor_update_count/max(1,self.trainer.sampled_steps)
+                row['critic_utd'] = self.trainer.critic_update_count/max(1,self.trainer.sampled_steps)
                 for name in ('r1','r2','r3','r4'):
                     if all(f'{name}_rewards' in info for info in result.infos):
                         row[f'mean_{name}_reward'] = float(np.stack([info[f'{name}_rewards'] for info in result.infos]).mean())
@@ -247,6 +272,10 @@ class MADDPGTrainingRunner:
                 'actor_updates_per_agent': self.trainer.actor_updates_per_agent, 'critic_updates_per_agent': self.trainer.critic_updates_per_agent,
                 'final_optimization_metrics': self.last_metrics, 'latest_evaluation': self.evaluation_history[-1],
                 'transitions_since_update': self.transitions_since_update,
+                'update_event_count':self.schedule.event_count,
+                'effective_utd':{'actor':self.trainer.actor_update_count/self.trainer.sampled_steps,
+                                 'critic':self.trainer.critic_update_count/self.trainer.sampled_steps},
+                'final_parameter_diagnostics':self.trainer.parameter_diagnostics(),
                 'best_sampled_steps': self.best_evaluation['sampled_steps'], 'best_evaluation': self.best_evaluation,
                 'formal_exact_resume_supported': False, 'replay_buffer_in_checkpoint': False, 'protocol': self.startup_summary()}
             self.write_json('run_summary.json', summary)

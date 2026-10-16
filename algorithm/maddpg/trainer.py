@@ -6,6 +6,7 @@ import torch
 from torch import nn
 from .networks import DeterministicActor, CentralizedQCritic
 from .protocol import MADDPG_IMPL_VERSION, validate_dimensions
+from .diagnostics import finite_grad_norm, clip_gradients, scalar_statistics, action_statistics, parameter_distances
 
 
 def masked_mean(values, mask):
@@ -28,27 +29,28 @@ def polyak_update(online, target, tau):
         destination.mul_(1-tau).add_(source, alpha=tau)
 
 
-def finite_grad_norm(module):
-    grads = [p.grad for p in module.parameters() if p.grad is not None]
-    if any(not torch.isfinite(g).all() for g in grads):
-        raise FloatingPointError('non-finite MADDPG gradient')
-    return float(torch.sqrt(sum(g.square().sum() for g in grads))) if grads else 0.
-
-
 class MADDPGTrainer:
     def __init__(self, observation_dim, action_dim, num_agents, actor_learning_rate=1e-4,
-                 critic_learning_rate=1e-4, gamma=.99, tau=.001, device='cuda', seed=0):
+                 critic_learning_rate=1e-4, gamma=.99, tau=.001, device='cuda', seed=0,
+                 gradient_clip_norm=.5, diagnostics_interval_updates=100):
         validate_dimensions(observation_dim, action_dim, num_agents)
         if not 0 <= gamma <= 1 or not 0 < tau <= 1:
             raise ValueError('invalid gamma/tau')
         self.device = torch.device(device)
         self.observation_dim, self.action_dim, self.num_agents = observation_dim, action_dim, num_agents
         self.gamma, self.tau, self.seed = float(gamma), float(tau), int(seed)
+        if not np.isfinite(gradient_clip_norm) or gradient_clip_norm <= 0 or type(diagnostics_interval_updates) is not int or diagnostics_interval_updates <= 0:
+            raise ValueError('positive gradient clipping norm and diagnostics interval required')
+        self.gradient_clip_norm = float(gradient_clip_norm)
+        self.diagnostics_interval_updates = diagnostics_interval_updates
         torch.manual_seed(seed)
         self.actors = nn.ModuleList([DeterministicActor(observation_dim, action_dim) for _ in range(num_agents)]).to(self.device)
         self.critics = nn.ModuleList([CentralizedQCritic(observation_dim, action_dim, num_agents) for _ in range(num_agents)]).to(self.device)
         self.target_actors = deepcopy(self.actors).requires_grad_(False)
         self.target_critics = deepcopy(self.critics).requires_grad_(False)
+        self.initial_actor_parameters = tuple(torch.nn.utils.parameters_to_vector(a.parameters()).detach().clone() for a in self.actors)
+        self.initial_critic_parameters = tuple(torch.nn.utils.parameters_to_vector(q.parameters()).detach().clone() for q in self.critics)
+        self._actor_diagnostics = [{} for _ in range(num_agents)]
         self.actor_optimizers = [torch.optim.Adam(actor.parameters(), lr=actor_learning_rate) for actor in self.actors]
         self.critic_optimizers = [torch.optim.Adam(critic.parameters(), lr=critic_learning_rate) for critic in self.critics]
         self.sampled_steps = self.vector_steps = self.actor_update_count = self.critic_update_count = 0
@@ -92,8 +94,11 @@ class MADDPGTrainer:
             optimizer.zero_grad(set_to_none=True)
         alive = batch['alive_masks'][:, agent]
         if not alive.bool().any():
+            self._actor_diagnostics[agent] = {'pre':0., 'post':0., 'clipped':False,
+                'actions': torch.zeros_like(batch['actions'][:,agent])}
             return 0., 0.
         critic = self.critics[agent]
+        original_requires_grad = [p.requires_grad for p in critic.parameters()]
         critic.requires_grad_(False)
         try:
             own_obs = torch.where(alive[:, None].bool(), batch['observations'][:, agent],
@@ -104,12 +109,29 @@ class MADDPGTrainer:
             if not torch.isfinite(loss):
                 raise FloatingPointError('non-finite actor loss')
             loss.backward()
-            norm = finite_grad_norm(self.actors[agent])
+            norm, post, clipped = clip_gradients(self.actors[agent], self.gradient_clip_norm)
+            self._actor_diagnostics[agent] = {'pre':norm,'post':post,'clipped':clipped,'actions':own.detach()}
             self.actor_optimizers[agent].step()
             self.actor_updates_per_agent[agent] += 1
             return float(loss.detach()), norm
         finally:
-            critic.requires_grad_(True)
+            for parameter, flag in zip(critic.parameters(),original_requires_grad):parameter.requires_grad_(flag)
+
+    def update_critic(self, agent, batch, targets):
+        critic, optimizer = self.critics[agent], self.critic_optimizers[agent]
+        optimizer.zero_grad(set_to_none=True)
+        alive = batch['alive_masks'][:,agent]
+        q = critic(batch['observations'],batch['actions'],batch['alive_masks'])
+        if not torch.isfinite(q).all() or not torch.isfinite(targets[:,agent]).all():
+            raise FloatingPointError('non-finite Q or critic target')
+        loss = masked_mean((q-targets[:,agent].detach()).square(),alive)
+        if not torch.isfinite(loss):raise FloatingPointError('non-finite critic loss')
+        pre, post, clipped = 0., 0., False
+        if alive.bool().any():
+            loss.backward()
+            pre,post,clipped = clip_gradients(critic,self.gradient_clip_norm)
+            optimizer.step();self.critic_updates_per_agent[agent]+=1
+        return {'loss':float(loss.detach()),'pre':pre,'post':post,'clipped':clipped,'q':q.detach()}
 
     def update(self, replay_batch):
         batch = self.tensors(replay_batch)
@@ -117,20 +139,16 @@ class MADDPGTrainer:
         if not torch.isfinite(targets).all():
             raise FloatingPointError('non-finite critic target')
         critic_losses, actor_losses, critic_grads, actor_grads, q_means = [], [], [], [], []
-        for i, (critic, optimizer) in enumerate(zip(self.critics, self.critic_optimizers)):
-            optimizer.zero_grad(set_to_none=True)
+        critic_post, critic_clipped, q_stats, target_stats, td_stats = [], [], [], [], []
+        for i in range(self.num_agents):
             alive = batch['alive_masks'][:, i]
-            q = critic(batch['observations'], batch['actions'], batch['alive_masks'])
-            if not torch.isfinite(q).all():
-                raise FloatingPointError('non-finite Q')
-            loss = masked_mean((q-targets[:, i]).square(), alive)
-            if not torch.isfinite(loss):
-                raise FloatingPointError('non-finite critic loss')
-            norm = 0.
-            if alive.bool().any():
-                loss.backward(); norm = finite_grad_norm(critic); optimizer.step()
-                self.critic_updates_per_agent[i] += 1
-            critic_losses.append(float(loss.detach())); critic_grads.append(norm); q_means.append(float(q.detach().mean()))
+            result = self.update_critic(i,batch,targets)
+            q = result['q']
+            critic_losses.append(result['loss']); critic_grads.append(result['pre'])
+            critic_post.append(result['post']); critic_clipped.append(result['clipped'])
+            q_stats.append(scalar_statistics(q,alive));target_stats.append(scalar_statistics(targets[:,i],alive))
+            td_stats.append(scalar_statistics(q.detach()-targets[:,i],alive))
+            q_means.append(q_stats[-1]['mean'])
         for i in range(self.num_agents):
             loss, norm = self.update_actor(i, batch)
             actor_losses.append(loss); actor_grads.append(norm)
@@ -138,11 +156,44 @@ class MADDPGTrainer:
             polyak_update(online, target, self.tau)
         self.actor_update_count += 1
         self.critic_update_count += 1
-        return {'actor_loss': float(np.mean(actor_losses)), 'critic_loss': float(np.mean(critic_losses)),
+        alive = batch['alive_masks']; active = alive.bool().any(0).cpu().numpy()
+        metrics = {'actor_loss': float(np.mean(actor_losses)), 'critic_loss': float(np.mean(critic_losses)),
             'actor_losses': actor_losses, 'critic_losses': critic_losses, 'actor_grad_norms': actor_grads,
             'critic_grad_norms': critic_grads, 'q_means': q_means, 'target_mean': float(targets.mean()),
             'target_abs_max': float(targets.abs().max()), 'actor_update_count': self.actor_update_count,
-            'critic_update_count': self.critic_update_count}
+            'critic_update_count': self.critic_update_count,
+            'actor_grad_norm_preclip': actor_grads, 'critic_grad_norm_preclip': critic_grads,
+            'actor_grad_norm_postclip': [d['post'] for d in self._actor_diagnostics],
+            'critic_grad_norm_postclip': critic_post,
+            'actor_grad_clipped': [d['clipped'] for d in self._actor_diagnostics],
+            'critic_grad_clipped': critic_clipped,
+            'actor_grad_clip_fraction': float(np.mean([self._actor_diagnostics[i]['clipped'] for i in range(self.num_agents) if active[i]])) if active.any() else 0.,
+            'critic_grad_clip_fraction': float(np.mean(np.asarray(critic_clipped)[active])) if active.any() else 0.,
+            'alive_samples': alive.sum(0).int().cpu().tolist(), 'alive_fraction': alive.mean(0).cpu().tolist()}
+        for prefix, rows in (('q',q_stats),('target',target_stats)):
+            for stat in ('mean','std','min','max'):
+                metrics[f'{prefix}_{stat}_per_agent'] = [row[stat] for row in rows]
+        for name, stat in [('td_error_mean','mean'),('td_error_abs_mean','abs_mean'),('td_error_abs_max','abs_max')]:
+            metrics[name] = [row[stat] for row in td_stats]
+        actor_actions = torch.stack([row['actions'] for row in self._actor_diagnostics],dim=1)
+        metrics.update(action_statistics(actor_actions,alive))
+        metrics['actor_action_statistics_per_agent'] = [action_statistics(actor_actions[:,i],alive[:,i]) for i in range(self.num_agents)]
+        for i in range(self.num_agents):metrics[f'agent{i}_alive_fraction'] = metrics['alive_fraction'][i]
+        if self.actor_update_count == 1 or self.actor_update_count % self.diagnostics_interval_updates == 0:
+            metrics.update(self.parameter_diagnostics())
+        return metrics
+
+    @torch.no_grad()
+    def parameter_diagnostics(self):
+        actors, actor_lag = parameter_distances(self.actors,self.initial_actor_parameters,self.target_actors)
+        critics, critic_lag = parameter_distances(self.critics,self.initial_critic_parameters,self.target_critics)
+        result = {'actor_parameter_drift_l2':actors, 'critic_parameter_drift_l2':critics,
+            'actor_online_target_distance':actor_lag, 'critic_online_target_distance':critic_lag,
+            'parameter_diagnostics_update': self.actor_update_count}
+        for i in range(self.num_agents):
+            result[f'actor_parameter_drift_l2_{i}'] = actors[i]
+            result[f'critic_parameter_drift_l2_{i}'] = critics[i]
+        return result
 
     def parameter_counts(self):
         a = sum(p.numel() for p in self.actors[0].parameters())
@@ -156,6 +207,9 @@ class MADDPGTrainer:
         contract = schedule_contract(extra['algorithm_config'])
         return {'algorithm': 'maddpg', 'implementation_version': MADDPG_IMPL_VERSION,
             **contract, 'transitions_since_update': extra['transitions_since_update'],
+            'update_event_count': extra['update_event_count'],
+            'effective_utd': {'actor':self.actor_update_count/max(1,self.sampled_steps),'critic':self.critic_update_count/max(1,self.sampled_steps)},
+            'initial_parameter_references': {'actors':list(self.initial_actor_parameters),'critics':list(self.initial_critic_parameters)},
             'sampled_steps': self.sampled_steps, 'vector_steps': self.vector_steps,
             'training_seed': self.seed, 'gamma': self.gamma, 'tau': self.tau,
             'network_architecture': self.network_architecture,
@@ -176,7 +230,7 @@ class MADDPGTrainer:
         require_cuda(self.device)
         state = torch.load(path, map_location=self.device, weights_only=False)
         validate_checkpoint(state, env_config, algorithm_config)
-        if state['network_architecture'] != self.network_architecture or (state['gamma'], state['tau'], state['training_seed']) != (self.gamma, self.tau, self.seed):
+        if state['network_architecture'] != self.network_architecture or (state['gamma'], state['tau'], state['training_seed'],state['gradient_clip_norm']) != (self.gamma, self.tau, self.seed,self.gradient_clip_norm):
             raise RuntimeError('MADDPG trainer/checkpoint architecture or hyperparameter mismatch')
         for name in ('actors', 'critics', 'target_actors', 'target_critics'):
             for module, saved in zip(getattr(self, name), state[name]):
@@ -187,6 +241,9 @@ class MADDPGTrainer:
         for name in ('sampled_steps', 'vector_steps', 'actor_update_count', 'critic_update_count',
                      'actor_updates_per_agent', 'critic_updates_per_agent'):
             setattr(self, name, deepcopy(state[name]))
+        references = state['initial_parameter_references']
+        self.initial_actor_parameters = tuple(v.detach().clone().to(self.device) for v in references['actors'])
+        self.initial_critic_parameters = tuple(v.detach().clone().to(self.device) for v in references['critics'])
         return state['extra']
 
     def resume(self, *args, **kwargs):

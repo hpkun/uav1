@@ -1,4 +1,4 @@
-"""Audit an existing MADDPG-v2 CUDA smoke; never starts training."""
+"""Audit an existing MADDPG-v3 reference (g=1) CUDA smoke; never starts training."""
 import argparse
 import hashlib
 import json

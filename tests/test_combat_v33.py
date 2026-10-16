@@ -167,6 +167,7 @@ def test_offpolicy_v33_cuda_dimensions_checkpoint_and_eval(tmp_path,algorithm):
     c['network'].update(observation_dim=66,action_dim=3,num_agents=5)
     if algorithm=='maddpg':
         c['training'].pop('gradient_steps_per_vector_step');c['training']['sampled_steps_per_update']=100
+        c['training'].update(gradient_updates_per_event=1,gradient_clip_norm=.5)
     n,t=c['network'],c['training'];extra=dict(environment_version='3.3',
         environment_config_sha256=config_sha256(e),algorithm_config_sha256=config_sha256(c),
         observation_dim=66,action_dim=3,num_agents=5,training_seed=t['seed'])
@@ -193,7 +194,7 @@ def test_offpolicy_v33_cuda_dimensions_checkpoint_and_eval(tmp_path,algorithm):
             training_total_sampled_steps=t['total_sampled_steps'],training_smoke=False,
             network_architecture=trainer.network_architecture,parameter_counts=trainer.parameter_counts(),ou_noise_state=None)
         from algorithm.maddpg.protocol import schedule_contract
-        extra.update(algorithm_config=c,transitions_since_update=0,**schedule_contract(c))
+        extra.update(algorithm_config=c,transitions_since_update=0,update_event_count=0,**schedule_contract(c))
         trainer.save(path,extra);saved=torch.load(path,map_location='cpu',weights_only=False)
         validate_checkpoint(saved,e,c);trainer.load(path,e,c)
         record=evaluate(trainer,e,[38001000]);assert 'average_episode_team_casualty_total' in record

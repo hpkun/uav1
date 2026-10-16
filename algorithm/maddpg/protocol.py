@@ -3,7 +3,7 @@ from algorithm.common.protocol import config_sha256
 from env.config import validate_config as validate_environment, environment_dimensions
 import math
 
-MADDPG_IMPL_VERSION = 2
+MADDPG_IMPL_VERSION = 3
 SAMPLED_STEPS_UNIT = 'environment_transitions_not_agent_transitions'
 SUPPORTED_DIMENSIONS = {'2.5': (65, 3, 5), '2.4': (104, 3, 8),
     **{f'3.{v}': (66, 3, 5) for v in range(3, 12)},
@@ -19,9 +19,12 @@ def validate_dimensions(observation_dim, action_dim, num_agents):
 def schedule_contract(config):
     t = config['training']
     if 'gradient_steps_per_vector_step' in t or 'sampled_steps_per_update' not in t:
-        raise RuntimeError('MADDPG-v2 requires explicit sampled_steps_per_update; legacy vector-step schedule is not reinterpreted')
+        raise RuntimeError('MADDPG-v3 requires explicit sampled_steps_per_update; legacy vector-step schedule is not reinterpreted')
     return {'sampled_steps_unit': SAMPLED_STEPS_UNIT,
         **{k: t[k] for k in ('sampled_steps_per_update', 'learning_starts', 'replay_capacity', 'minibatch_size')},
+        'gradient_updates_per_event':t['gradient_updates_per_event'], 'gradient_clip_norm':t['gradient_clip_norm'],
+        'gradient_clipping_scope':'per_agent_global_l2',
+        'nominal_utd':t['gradient_updates_per_event']/t['sampled_steps_per_update'],
         'exploration_type': 'OU', 'evaluation_mode': 'deterministic',
         'formal_exact_resume_supported': False, 'replay_buffer_in_checkpoint': False}
 
@@ -63,6 +66,13 @@ def validate_config(env, config):
                 'num_train_envs', 'total_sampled_steps', 'evaluation_episodes', 'evaluation_interval_sampled_steps'):
         if isinstance(t[key], bool) or not isinstance(t[key], int) or t[key] <= 0:
             raise ValueError(f'{key} must be a positive integer')
+    if schedule_key == 'sampled_steps_per_update':
+        if type(t['gradient_updates_per_event']) is not int or t['gradient_updates_per_event'] <= 0:
+            raise ValueError('gradient_updates_per_event must be a positive integer')
+        if not math.isfinite(t['gradient_clip_norm']) or t['gradient_clip_norm'] <= 0:
+            raise ValueError('gradient_clip_norm must be finite and positive')
+        if type(t.get('diagnostics_interval_updates',100)) is not int or t.get('diagnostics_interval_updates',100) <= 0:
+            raise ValueError('diagnostics_interval_updates must be a positive integer')
     if t['minibatch_size'] > t['replay_capacity']:
         raise ValueError('minibatch exceeds replay capacity')
     if schedule_key == 'sampled_steps_per_update' and t['learning_starts'] < t['minibatch_size']:
@@ -133,10 +143,17 @@ def validate_checkpoint(state, env, config):
     if state.get('sampled_steps') != state.get('vector_steps', -1)*extra['training_num_envs']:
         raise RuntimeError('MADDPG sampled-step unit mismatch')
     events, credit = divmod(max(0, state['sampled_steps']-t['learning_starts']), t['sampled_steps_per_update'])
-    if state['actor_update_count'] != events or remainder != credit:
+    if state['actor_update_count'] != events*t['gradient_updates_per_event'] or remainder != credit or state.get('update_event_count') != events or extra.get('update_event_count') != events:
         raise RuntimeError('MADDPG checkpoint update schedule counts/remainder mismatch')
+    expected_utd = {name:state[name+'_update_count']/max(1,state['sampled_steps']) for name in ('actor','critic')}
+    if state.get('effective_utd') != expected_utd:
+        raise RuntimeError('MADDPG checkpoint effective UTD mismatch')
+    for name,width in [('actors',counts['actor_per_agent']),('critics',counts['critic_per_agent'])]:
+        values=state.get('initial_parameter_references',{}).get(name,[])
+        if len(values)!=n['num_agents'] or any(v.numel()!=width or v.requires_grad for v in values):
+            raise RuntimeError('MADDPG initial parameter reference mismatch')
     for key in ('actor_updates_per_agent', 'critic_updates_per_agent'):
         values = state.get(key)
-        if not isinstance(values, list) or len(values) != n['num_agents'] or any(type(v) is not int or not 0 <= v <= events for v in values):
+        if not isinstance(values, list) or len(values) != n['num_agents'] or any(type(v) is not int or not 0 <= v <= events*t['gradient_updates_per_event'] for v in values):
             raise RuntimeError(f'MADDPG checkpoint {key} mismatch')
     return extra

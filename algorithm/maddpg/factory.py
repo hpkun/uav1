@@ -10,4 +10,5 @@ def build_maddpg_trainer(config, device='cuda', seed=None):
         raise RuntimeError('MADDPG factory requires 256/256 MLPs')
     return MADDPGTrainer(**{key: n[key] for key in ('observation_dim', 'action_dim', 'num_agents')},
         **{key: t[key] for key in ('actor_learning_rate', 'critic_learning_rate', 'gamma', 'tau')},
-        device=device, seed=t['seed'] if seed is None else seed)
+        device=device, seed=t['seed'] if seed is None else seed,
+        gradient_clip_norm=t['gradient_clip_norm'], diagnostics_interval_updates=t.get('diagnostics_interval_updates',100))

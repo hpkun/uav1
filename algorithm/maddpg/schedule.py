@@ -8,6 +8,7 @@ class SampledTransitionSchedule:
         self.learning_starts = learning_starts
         self.interval = sampled_steps_per_update
         self.credit = 0
+        self.event_count = 0
 
     def add(self, previous_steps, sampled_steps):
         if sampled_steps < previous_steps:
@@ -18,3 +19,4 @@ class SampledTransitionSchedule:
         if self.credit < self.interval:
             raise RuntimeError('insufficient sampled transition update credit')
         self.credit -= self.interval
+        self.event_count += 1

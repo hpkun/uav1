@@ -29,6 +29,7 @@ def configs(n=8):
     # Explicit v2 test fixture, not a reinterpretation or edit of historical YAML.
     config['training'].pop('gradient_steps_per_vector_step')
     config['training']['sampled_steps_per_update'] = 100
+    config['training'].update(gradient_updates_per_event=1,gradient_clip_norm=.5)
     return env, config
 
 
@@ -52,6 +53,7 @@ def checkpoint_extra(t, env, config):
         t.sampled_steps = ((steps+15)//16)*16; t.vector_steps = t.sampled_steps//16
     return {'environment_version': env['environment_version'], 'environment_config_sha256': config_sha256(env),
         'algorithm_config': deepcopy(config), **schedule_contract(config),
+        'update_event_count': t.actor_update_count//config['training']['gradient_updates_per_event'],
         'transitions_since_update': max(0,t.sampled_steps-config['training']['learning_starts'])%config['training']['sampled_steps_per_update'],
         'algorithm_config_sha256': config_sha256(config), **{k: getattr(t, k) for k in ('observation_dim', 'action_dim', 'num_agents', 'gamma', 'tau')},
         'training_seed': t.seed, 'training_num_envs': 16, 'training_total_sampled_steps': 3000000, 'training_smoke': False,
@@ -460,9 +462,10 @@ def test_v2_checkpoint_rejects_wrong_schedule_metadata(key,value):
 
 
 def test_v1_checkpoint_explicitly_rejected_before_loading(tmp_path):
-    e,c=configs(4);t=trainer(4,'cuda');state=t.checkpoint_state(checkpoint_extra(t,e,c));state['implementation_version']=1
-    path=tmp_path/'v1.pt';torch.save(state,path)
-    with pytest.raises(RuntimeError,match='implementation version'):t.load(path,e,c)
+    e,c=configs(4);t=trainer(4,'cuda');state=t.checkpoint_state(checkpoint_extra(t,e,c))
+    for version in [1,2]:
+        state['implementation_version']=version;path=tmp_path/f'v{version}.pt';torch.save(state,path)
+        with pytest.raises(RuntimeError,match='implementation version'):t.load(path,e,c)
     for name in ['actors','critics','target_actors','target_critics']:
         bad=t.checkpoint_state(checkpoint_extra(t,e,c));bad[name]=bad[name][:-1]
         with pytest.raises(RuntimeError,match='independent'):validate_checkpoint(bad,e,c)
@@ -474,7 +477,7 @@ def test_compact_v2_console_formats_include_required_fields_and_no_missing_liter
     r.seed=1;r.device='cuda';r.num_envs=16;r.total_sampled_steps=3000000
     r.trainer=SimpleNamespace(sampled_steps=1200000);r.completed_records=[];r.last_metrics={}
     start=r.startup_log_line();line=r.training_log_line()
-    for token in ['MADDPG-v2','env=v3.38','4v4','seed=1','cuda','envs=16','3.0M','update_every=100','deterministic']:assert token in start
+    for token in ['MADDPG-v3','env=v3.38','4v4','seed=1','cuda','envs=16','3.0M','update_every=100','deterministic']:assert token in start
     for token in ['40.0%','ep=','win=','Rloss=','Bloss=','fire=','kill=','timeout=','len=','R=','Qloss=','Aloss=','OU=']:assert token in line
     assert 'N/A' in line and 'None' not in line and 'nan' not in line
     ev=dict(sampled_steps=1200000,win_rate=.55,average_red_loss=2.2,average_blue_loss=3.1,
@@ -483,3 +486,116 @@ def test_compact_v2_console_formats_include_required_fields_and_no_missing_liter
         log=r.evaluation_log_line(ev,best);assert log.startswith('[EVAL*]' if best else '[EVAL]')
         for token in ['deterministic','win=','Rloss=','Bloss=','fire=','kill=','timeout=','len=','R=']:assert token in log
         assert 'None' not in log and 'nan' not in log
+
+
+def test_actual_critic_parameter_step_uses_clipped_gradient():
+    require_cuda('cuda');t=trainer(4,'cuda');data=t.tensors(batch(4,16))
+    t.critic_optimizers[0]=torch.optim.SGD(t.critics[0].parameters(),lr=.1)
+    before=torch.nn.utils.parameters_to_vector(t.critics[0].parameters()).detach().clone()
+    targets=torch.full((16,4),1e6,device='cuda')
+    result=t.update_critic(0,data,targets)
+    after=torch.nn.utils.parameters_to_vector(t.critics[0].parameters()).detach()
+    grad=torch.nn.utils.parameters_to_vector([p.grad for p in t.critics[0].parameters()])
+    assert result['pre']>1000 and result['clipped'] and result['post']<=.500001
+    assert torch.allclose(after-before,-.1*grad,rtol=1e-3,atol=2e-7)
+    assert float(torch.linalg.vector_norm(after-before))==pytest.approx(.05,rel=2e-4)
+
+
+def test_actual_actor_parameter_step_uses_clipped_gradient_and_keeps_frozen_critic():
+    require_cuda('cuda');t=trainer(4,'cuda');data=t.tensors(batch(4,16))
+    class LargeQ(nn.Module):
+        def __init__(self):super().__init__();self.scale=nn.Parameter(torch.tensor(1e6),requires_grad=False)
+        def forward(self,obs,actions,alive):return actions[:,1,0]*self.scale
+    t.critics[1]=LargeQ().cuda();t.actor_optimizers[1]=torch.optim.SGD(t.actors[1].parameters(),lr=.1)
+    others=[deepcopy(a.state_dict()) for a in t.actors]
+    before=torch.nn.utils.parameters_to_vector(t.actors[1].parameters()).detach().clone()
+    _,pre=t.update_actor(1,data);diag=t._actor_diagnostics[1]
+    after=torch.nn.utils.parameters_to_vector(t.actors[1].parameters()).detach()
+    grad=torch.nn.utils.parameters_to_vector([p.grad for p in t.actors[1].parameters()])
+    assert pre>1000 and diag['post']<=.500001 and diag['clipped']
+    assert torch.allclose(after-before,-.1*grad,rtol=1e-3,atol=2e-7)
+    assert float(torch.linalg.vector_norm(after-before))==pytest.approx(.05,rel=2e-4)
+    assert not t.critics[1].scale.requires_grad and t.critics[1].scale.item()==1e6
+    for i in [0,2,3]:assert all(torch.equal(v,t.actors[i].state_dict()[k]) for k,v in others[i].items())
+
+
+def test_formal_adam_moments_receive_postclip_gradient():
+    require_cuda('cuda');t=trainer(4,'cuda');data=t.tensors(batch(4,16));target=torch.full((16,4),1e6,device='cuda')
+    before=[p.detach().clone() for p in t.critics[0].parameters()]
+    result=t.update_critic(0,data,target);assert result['pre']>.5 and result['post']<=.500001
+    optimizer=t.critic_optimizers[0]
+    for parameter,old in zip(t.critics[0].parameters(),before):
+        state=optimizer.state[parameter];g=parameter.grad
+        assert torch.allclose(state['exp_avg'],.1*g,atol=1e-7)
+        expected=old-1e-4*g/(g.abs()+optimizer.defaults['eps'])
+        assert torch.allclose(parameter,expected,atol=2e-7,rtol=1e-4)
+
+
+def test_critic_fixed_batch_overfits_with_frozen_actors():
+    require_cuda('cuda');t=trainer(4,'cuda');b=batch(4,64);b.dones.fill(True)
+    b.rewards[:]=.2*b.observations[:,:,0]+.1*b.actions[:,:,0]
+    data=t.tensors(b);t.actors.requires_grad_(False);actors=deepcopy(t.actors.state_dict())
+    targets=t.targets(data);assert not targets.requires_grad
+    def mse():return float(((t.critics[0](data['observations'],data['actions'],data['alive_masks'])-targets[:,0])**2).mean().detach())
+    first=mse()
+    for _ in range(200):t.update_critic(0,data,targets)
+    last=mse();assert last<first*.1
+    assert all(torch.equal(v,t.actors.state_dict()[k]) for k,v in actors.items())
+    print(f'LEARNING_TEST critic_overfit before={first:.9g} after={last:.9g} steps=200')
+
+
+def test_actor_frozen_critic_improves_q_without_changing_other_actors():
+    require_cuda('cuda');t=trainer(4,'cuda');data=t.tensors(batch(4,64));agent=1
+    class KnownQ(nn.Module):
+        def __init__(self):super().__init__();self.scale=nn.Parameter(torch.tensor(1.),requires_grad=False)
+        def forward(self,obs,actions,alive):return self.scale*actions[:,agent,0]
+    t.critics[agent]=KnownQ().cuda();before=[deepcopy(a.state_dict()) for a in t.actors]
+    def q():
+        with torch.no_grad():
+            actions=actor_joint_actions(data['actions'],t.actors[agent](data['observations'][:,agent]),agent)
+            return float(t.critics[agent](data['observations'],actions,data['alive_masks']).mean())
+    first=q()
+    for _ in range(100):t.update_actor(agent,data)
+    last=q();assert last>first+.25
+    assert not t.critics[agent].scale.requires_grad and t.critics[agent].scale.item()==1
+    for i in [0,2,3]:assert all(torch.equal(v,t.actors[i].state_dict()[k]) for k,v in before[i].items())
+    print(f'LEARNING_TEST actor_improvement before={first:.9g} after={last:.9g} steps=100')
+
+
+def test_v3_diagnostics_active_samples_initial_drift_and_target_lag():
+    require_cuda('cuda');t=trainer(4,'cuda');initial=t.parameter_diagnostics()
+    assert initial['actor_parameter_drift_l2']==initial['actor_online_target_distance']==[0.]*4
+    references=[v.clone() for v in t.initial_actor_parameters]
+    b=batch(4,8);b.alive_masks[4:,2]=0
+    metrics=t.update(b)
+    assert metrics['alive_samples']==[8,8,4,8] and metrics['agent2_alive_fraction']==.5
+    for key in ['q_mean_per_agent','q_std_per_agent','target_mean_per_agent','td_error_abs_mean','actor_grad_norm_postclip','critic_grad_norm_postclip']:
+        assert len(metrics[key])==4 and np.isfinite(metrics[key]).all()
+    assert max(metrics['critic_grad_norm_postclip'])<=.500001 and max(metrics['actor_grad_norm_postclip'])<=.500001
+    assert all(x>0 for x in metrics['actor_parameter_drift_l2'])
+    assert all(torch.equal(v,w) and not v.requires_grad for v,w in zip(references,t.initial_actor_parameters))
+    for name in ['heading','pitch','speed']:
+        assert 0<=metrics[f'saturation_95_ratio_{name}']<=1
+        assert 0<=metrics[f'saturation_99_ratio_{name}']<=1
+
+
+def test_four_gradient_updates_per_event_resample_and_match_checkpoint(tmp_path):
+    from algorithm.maddpg.schedule import SampledTransitionSchedule
+    require_cuda('cuda');r=object.__new__(MADDPGTrainingRunner);e,c=configs(4)
+    c['training']['gradient_updates_per_event']=4;r.algorithm_config=c;r.output_dir=tmp_path
+    r.trainer=build_maddpg_trainer(c,'cuda',2);r.schedule=SampledTransitionSchedule(10000,100)
+    r.trainer.sampled_steps=10112;r.trainer.vector_steps=632;r.schedule.add(0,10112)
+    class Replay:
+        def __init__(self):self.samples=[]
+        def __len__(self):return 1024
+        def sample(self,n):
+            b=batch(4,8);self.samples.append(b);return b
+    r.replay=Replay();r.update_from_credit()
+    assert len(r.replay.samples)==len({id(b) for b in r.replay.samples})==4
+    assert r.schedule.event_count==1 and r.schedule.credit==12
+    assert r.trainer.actor_update_count==r.trainer.critic_update_count==4
+    extra=checkpoint_extra(r.trainer,e,c);extra['transitions_since_update']=12;extra['update_event_count']=1
+    # checkpoint_extra's helper step assignment is replaced by the actual event schedule.
+    r.trainer.sampled_steps=10112;r.trainer.vector_steps=632
+    state=r.trainer.checkpoint_state(extra);validate_checkpoint(state,e,c)
+    assert state['gradient_updates_per_event']==4 and state['nominal_utd']==.04
