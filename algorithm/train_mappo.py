@@ -363,6 +363,10 @@ def main() -> None:
     env_config = yaml.safe_load(env_path.read_text(encoding="utf-8"))
     algorithm_path = resolved(args.algorithm_config)
     algorithm_config = yaml.safe_load(algorithm_path.read_text(encoding="utf-8"))
+    if algorithm_config.get("algorithm") == "MAPPO-CA":
+        from algorithm.eaa_mappo.entry import run_variant
+        run_variant(args)
+        return
     configured_seed = int(algorithm_config["training"]["seed"])
     path_seed = configured_seed if args.seed is None else args.seed
     output_dir, resume_checkpoint = resolve_run_paths(

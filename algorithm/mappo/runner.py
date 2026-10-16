@@ -32,7 +32,7 @@ class MAPPOTrainingRunner:
                  total_sampled_steps: int | None = None,
                  device: str | None = None, seed: int | None = None,
                  output_dir: str | Path | None = None,
-                 smoke: bool = False) -> None:
+                 smoke: bool = False, trainer_factory=None) -> None:
         self.env_config, self.algorithm_config = env_config, algorithm_config
         self.smoke = bool(smoke)
         training, network = algorithm_config["training"], algorithm_config["network"]
@@ -67,7 +67,9 @@ class MAPPOTrainingRunner:
         critic_width = layer_width(network, "critic_hidden_layers")
         hidden_dim = 64 if smoke else actor_width
         self.effective_hidden_dim = hidden_dim
-        self.trainer = MAPPOTrainer(
+        # Opt-in construction seam; the baseline constructor and arguments stay identical.
+        constructor = MAPPOTrainer if trainer_factory is None else trainer_factory
+        self.trainer = constructor(
             self.observation_dim, self.action_dim, self.num_agents, hidden_dim,
             int(network["attention_heads"]), float(training["actor_learning_rate"]),
             float(training["critic_learning_rate"]), float(training["gamma"]),
@@ -150,6 +152,7 @@ class MAPPOTrainingRunner:
                 f"| total={s['total_sampled_steps']} | rollout={s['rollout_steps']} "
                 f"| epochs={s['ppo_epochs']} | minibatch={s['minibatch_size']} "
                 f"| gamma={s['gamma']} | lambda={s['gae_lambda']} | clip={s['clip_ratio']} "
+                f"| actor_params={s['actor_parameter_count']} | critic_params={s['critic_parameter_count']} | total_params={s['total_parameter_count']} "
                 f"| max_steps={s['max_steps']}" +
                 (f" | environment_version={s['environment_version']}" if s['environment_version'] in ('3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36','3.37','3.38') else ""))
 
