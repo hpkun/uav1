@@ -129,7 +129,7 @@ def validate_checkpoint_for_resume(
         ("algorithm_config_sha256", config_sha256(algorithm_config)),
     ):
         recorded = extra.get(label)
-        if recorded is not None and recorded != expected:
+        if (recorded is not None or env_config['environment_version'] == '3.39') and recorded != expected:
             raise RuntimeError(
                 f"checkpoint {label} mismatch: expected {expected!r}, "
                 f"got {recorded!r}"
@@ -141,6 +141,11 @@ def validate_checkpoint_for_evaluation(
 ) -> None:
     """Validate the combat and network contract for evaluation."""
     _validate_common_checkpoint_contract(state, env_config, algorithm_config)
+    if env_config['environment_version'] == '3.39':
+        for key, expected in (('environment_config_sha256', config_sha256(env_config)),
+                              ('algorithm_config_sha256', config_sha256(algorithm_config))):
+            if _checkpoint_extra(state).get(key) != expected:
+                raise RuntimeError(f'checkpoint {key} mismatch')
     recorded = _checkpoint_extra(state).get("environment_config_sha256")
     if recorded is not None and recorded != config_sha256(env_config):
         raise RuntimeError("checkpoint environment_config_sha256 mismatch")

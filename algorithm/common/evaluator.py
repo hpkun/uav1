@@ -56,7 +56,7 @@ def aggregate_combat_records(records: list[dict[str, Any]]) -> dict[str, float]:
         result[event] = result[f"red_{event}"] + result[f"blue_{event}"]
     for name in ("r1", "r2", "r3", "r4"):
         result[f"average_episode_{name}_total"] = mean(f"episode_{name}_total")
-    if all(row.get('environment_version') in ('3.0', '3.1', '3.2', '3.3', '3.4', '3.5', '3.6', '3.7', '3.8','3.9','3.10','3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36','3.37','3.38') for row in records):
+    if all(row.get('environment_version') in ('3.0', '3.1', '3.2', '3.3', '3.4', '3.5', '3.6', '3.7', '3.8','3.9','3.10','3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36','3.37','3.38','3.39') for row in records):
         for name in ('event','outcome','adv','safe'):
             result[f'average_episode_{name}_total'] = mean(f'episode_{name}_total')
         for side in ('red','blue'):
@@ -66,14 +66,14 @@ def aggregate_combat_records(records: list[dict[str, Any]]) -> dict[str, float]:
                 row[f'{side}_boundary_exits']+row[f'{side}_ground_losses']>0 for row in records]))
             result[f'average_{side}_noncombat_losses'] = float(np.mean([
                 noncombat_losses(row, side) for row in records]))
-    if all(row.get('environment_version') in ('3.3','3.4','3.5','3.6','3.7','3.8','3.9','3.10','3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36','3.37','3.38') for row in records):
+    if all(row.get('environment_version') in ('3.3','3.4','3.5','3.6','3.7','3.8','3.9','3.10','3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36','3.37','3.38','3.39') for row in records):
         for name in ('individual_event','team_casualty'):
             result[f'average_episode_{name}_total'] = mean(f'episode_{name}_total')
     if all(row.get('environment_version') == '3.4' and 'blue_evade_episode' in row for row in records):
         for mode in ('search','pursuit','evade','guard'):
             result[f'average_blue_{mode}_agent_steps'] = mean(f'blue_{mode}_agent_steps')
         result['blue_evade_episode_rate'] = mean('blue_evade_episode')
-    if all(row.get('environment_version') in ('3.5','3.6','3.7','3.8','3.9','3.10','3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36','3.37','3.38') for row in records):
+    if all(row.get('environment_version') in ('3.5','3.6','3.7','3.8','3.9','3.10','3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36','3.37','3.38','3.39') for row in records):
         for name in ('boundary','horizontal','ground','ceiling'):
             result[f'average_blue_{name}_returns'] = mean(f'blue_{name}_returns')
         result['blue_boundary_return_episode_rate'] = mean('blue_boundary_return_episode')
@@ -82,17 +82,17 @@ def aggregate_combat_records(records: list[dict[str, Any]]) -> dict[str, float]:
                 result[f'average_blue_{name}_agent_steps'] = mean(f'blue_{name}_agent_steps')
             for name in ('escape','guerrilla','centripetal'):
                 result[f'blue_{name}_episode_rate'] = mean(f'blue_{name}_episode')
-    if all(row.get('environment_version') in ('3.6','3.7','3.8','3.9','3.10','3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36','3.37','3.38') for row in records):
+    if all(row.get('environment_version') in ('3.6','3.7','3.8','3.9','3.10','3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36','3.37','3.38','3.39') for row in records):
         for name in ('guide','tactical_offense','tactical_defense','tactical'):
             result[f'average_episode_{name}_total'] = mean(f'episode_{name}_total')
-    if all(row.get('environment_version') in ('3.7','3.8','3.9','3.10','3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36','3.37','3.38') for row in records):
+    if all(row.get('environment_version') in ('3.7','3.8','3.9','3.10','3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36','3.37','3.38','3.39') for row in records):
         for name in ('boundary','safety'):
             result[f'average_episode_{name}_total'] = mean(f'episode_{name}_total')
         for i in range(1,5):result[f'average_madsac_r{i}_total'] = mean(f'madsac_r{i}_total')
-    if all(row.get('environment_version') in ('3.9', '3.10','3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36','3.37','3.38') for row in records):
+    if all(row.get('environment_version') in ('3.9', '3.10','3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36','3.37','3.38','3.39') for row in records):
         for name in ('paper_reward', 'safety', 'extended_reward'):
             result[f'average_episode_{name}_total'] = mean(f'episode_{name}_total')
-    if all(row.get('environment_version') in ('3.10', '3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36','3.37','3.38') and 'blue_target_switches' in row for row in records):
+    if all(row.get('environment_version') in ('3.10', '3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36','3.37','3.38','3.39') and 'blue_target_switches' in row for row in records):
         for name in ('paper_nearest_agent_steps', 'target_switches'):
             result[f'average_blue_{name}'] = mean(f'blue_{name}')
     return result

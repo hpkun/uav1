@@ -7,7 +7,7 @@ MADDPG_IMPL_VERSION = 3
 SAMPLED_STEPS_UNIT = 'environment_transitions_not_agent_transitions'
 SUPPORTED_DIMENSIONS = {'2.5': (65, 3, 5), '2.4': (104, 3, 8),
     **{f'3.{v}': (66, 3, 5) for v in range(3, 12)},
-    **{f'3.{v}': (56, 3, 5) for v in range(12, 19)}, '3.38': (45, 3, 4)}
+    **{f'3.{v}': (56, 3, 5) for v in range(12, 19)}, '3.38': (45, 3, 4), '3.39': (45, 3, 4)}
 
 
 def validate_dimensions(observation_dim, action_dim, num_agents):
@@ -42,10 +42,10 @@ def validate_config(env, config):
     n, t, i = (config[key] for key in ('network', 'training', 'implementation'))
     dimensions = tuple(n[key] for key in ('observation_dim', 'action_dim', 'num_agents'))
     if dimensions != environment_dimensions(env) or SUPPORTED_DIMENSIONS.get(str(env['environment_version'])) != dimensions:
-        raise RuntimeError('MADDPG requires a registered environment version/dimensions pair; v3.38 requires 45/3/4')
+        raise RuntimeError('MADDPG requires a registered environment version/dimensions pair; v3.38/v3.39 require 45/3/4')
     identity = config.get('environment')
     expected_identity = {'environment_version': env['environment_version'], 'team_size': dimensions[2]}
-    if (identity is not None and identity != expected_identity) or (env['environment_version'] == '3.38' and identity is None):
+    if (identity is not None and identity != expected_identity) or (env['environment_version'] in ('3.38', '3.39') and identity is None):
         raise RuntimeError('MADDPG algorithm/environment identity mismatch (environment_version/team_size)')
     if n['actor_hidden_layers'] != [256, 256] or n['critic_hidden_layers'] != [256, 256]:
         raise RuntimeError('MADDPG requires independent 256/256 MLPs')
@@ -60,7 +60,7 @@ def validate_config(env, config):
     if t['optimizer'] != 'Adam' or i['noise_type'] != 'ou' or i['evaluation_mode'] != 'deterministic':
         raise RuntimeError('MADDPG requires Adam, OU exploration and deterministic evaluation')
     schedule_key = 'sampled_steps_per_update' if 'sampled_steps_per_update' in t else 'gradient_steps_per_vector_step'
-    if env['environment_version'] == '3.38' or schedule_key == 'sampled_steps_per_update':
+    if env['environment_version'] in ('3.38', '3.39') or schedule_key == 'sampled_steps_per_update':
         schedule_contract(config)
     for key in ('replay_capacity', 'minibatch_size', 'learning_starts', schedule_key,
                 'num_train_envs', 'total_sampled_steps', 'evaluation_episodes', 'evaluation_interval_sampled_steps'):

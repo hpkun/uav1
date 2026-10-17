@@ -1,0 +1,83 @@
+algorithm: madsac
+network:
+  observation_dim: 45
+  action_dim: 3
+  num_agents: 4
+  actor_hidden_layers:
+  - 256
+  - 256
+  critic_hidden_layers:
+  - 256
+  - 256
+  attention_heads: 2
+training:
+  optimizer: Adam
+  actor_learning_rate: 0.0001
+  critic_learning_rate: 0.0001
+  gamma: 0.99
+  alpha: 0.1
+  tau: 0.001
+  replay_capacity: 1000000
+  minibatch_size: 1024
+  policy_delay: 2
+  num_train_envs: 24
+  total_sampled_steps: 8400000
+  evaluation_episodes: 20
+  evaluation_interval_sampled_steps: 100000
+  device: cuda
+  seed: 0
+  steps_per_update: 100
+  num_updates: 4
+runtime_logging:
+  console_interval_sampled_steps: 20000
+  recent_episode_window: 100
+implementation:
+  actor_activation: relu
+  critic_activation: relu
+  log_std_min: -5.0
+  log_std_max: 2.0
+  evaluation_seed_base: 10000000
+  evaluation_policy_seed: 770001
+  evaluation_mode: stochastic
+  checkpoint_interval_sampled_steps: 300000
+metadata:
+  paper_reported:
+    actor_learning_rate: 0.0001
+    critic_learning_rate: 0.0001
+    gamma: 0.99
+    alpha: 0.1
+    tau: 0.001
+    replay_capacity: 1000000
+    minibatch_size: 1024
+    hidden_dim: 256
+    attention_heads: 2
+    num_train_envs: 24
+    evaluation_episodes: 20
+    experimental_sampled_steps: '>8000000'
+  project_implementation_choice:
+    formal_total_sampled_steps: 8400000
+    formal_budget_source: project choice satisfying paper >8M, not its exact reported
+      budget
+    policy_delay_clock: vector_steps
+    evaluation_interval_sampled_steps: 100000
+    evaluation_interval_source: paper-unspecified mapping from two training cycles
+    policy_distribution: tanh diagonal Gaussian; exact form and log_std clamp not
+      disclosed
+    attention_projection_bias: true
+    value_leaky_relu_slope: 0.01
+    alive_mask: combat environment adaptation; paper unspecified
+  paper_unspecified:
+    steps_per_update:
+      value: 100
+      source: MAAC-reference reconstruction; NOT paper-reported MADSAC hyperparameter
+    num_updates:
+      value: 4
+      source: MAAC-reference reconstruction; NOT paper-reported MADSAC hyperparameter
+    policy_delay:
+      value: 2
+      source: project reconstruction; paper specifies delay but does not disclose
+        d
+environment:
+  environment_version: '3.39'
+  team_size: 4
+implementation_version: 5

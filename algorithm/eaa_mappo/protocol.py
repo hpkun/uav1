@@ -21,9 +21,12 @@ def require_cuda(device):
 
 def validate_config(env, config):
     validate_environment(env)
-    baseline = yaml.safe_load((ROOT/'configs/mappo_4v4_v338.yaml').read_text(encoding='utf-8'))
-    if str(env['environment_version']) != '3.38' or config.get('environment') != baseline['environment']:
-        raise ValueError('attention v1 requires v3.38 / team_size=4')
+    version = str(env['environment_version'])
+    if version not in ('3.38', '3.39'):
+        raise ValueError('attention v1 requires v3.38 or v3.39 / team_size=4')
+    baseline = yaml.safe_load((ROOT/f'configs/mappo_4v4_v{version.replace(".", "")}.yaml').read_text(encoding='utf-8'))
+    if config.get('environment') != baseline['environment']:
+        raise ValueError('attention v1 requires matching environment identity / team_size=4')
     variant = config.get('algorithm')
     if variant not in VARIANTS:
         raise ValueError('unknown EAA family variant')
@@ -53,7 +56,7 @@ def architecture(config):
 
 def contract(env, config):
     return dict(algorithm_variant=config['algorithm'], implementation_version=IMPLEMENTATION_VERSION,
-        environment_version='3.38', environment_config_sha256=config_sha256(env),
+        environment_version=env['environment_version'], environment_config_sha256=config_sha256(env),
         algorithm_config_sha256=config_sha256(config), network_architecture=architecture(config),
         ppo_hyperparameters=deepcopy(config['training']), policy_protocol=configured_policy_protocol(config))
 
@@ -61,7 +64,7 @@ def contract(env, config):
 def validate_checkpoint(state, env, config):
     validate_config(env, config)
     expected = contract(env, config)
-    if state.get('algorithm') != config['algorithm'] or state.get('checkpoint_family') != 'eaa_mappo_v338':
+    if state.get('algorithm') != config['algorithm'] or state.get('checkpoint_family') != checkpoint_family(env):
         raise RuntimeError('checkpoint variant/family mismatch; baseline and legacy EA are not interchangeable')
     for key, value in expected.items():
         if state.get(key) != value or state.get('extra', {}).get(key) != value:
@@ -71,3 +74,7 @@ def validate_checkpoint(state, env, config):
     if state.get('parameter_counts') != dict(actor=actual['actor'], critic=actual['critic'], total=sum(actual.values())):
         raise RuntimeError('checkpoint parameter counts mismatch')
     return state['extra']
+
+
+def checkpoint_family(env):
+    return {'3.38': 'eaa_mappo_v338', '3.39': 'eaa_mappo_v339'}[env['environment_version']]

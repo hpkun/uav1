@@ -121,7 +121,17 @@ def load_recording_policy(checkpoint, env_config, config, device='cuda'):
     state = torch.load(checkpoint, map_location='cpu', weights_only=False)
     extra = state.get('extra', {})
     algorithm = str(state['algorithm']).lower()
-    if algorithm == 'mappo':
+    if state.get('checkpoint_family') in ('eaa_mappo_v338', 'eaa_mappo_v339'):
+        from algorithm.eaa_mappo.evaluation import load_checkpoint
+        trainer = load_checkpoint(checkpoint, config, env_config, device)
+    elif algorithm == 'maddpg':
+        from algorithm.maddpg.protocol import validate_checkpoint, require_cuda
+        from algorithm.maddpg.factory import build_maddpg_trainer
+        require_cuda(device)
+        validate_checkpoint(state, env_config, config)
+        trainer = build_maddpg_trainer(config, device, extra['training_seed'])
+        trainer.load(checkpoint, env_config, config)
+    elif algorithm == 'mappo':
         validate_checkpoint_for_evaluation(state, env_config, config)
         if extra.get('algorithm_config_sha256') != config_sha256(config):
             raise RuntimeError('checkpoint algorithm config fingerprint mismatch')

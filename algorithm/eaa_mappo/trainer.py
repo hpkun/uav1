@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from algorithm.mappo.trainer import MAPPOTrainer
 from .networks import EntityAttentionMAPPOActor
-from .protocol import contract, validate_checkpoint, require_cuda
+from .protocol import contract, validate_checkpoint, require_cuda, checkpoint_family
 
 
 class EAAMAPPOTrainer(MAPPOTrainer):
@@ -60,7 +60,7 @@ class EAAMAPPOTrainer(MAPPOTrainer):
         state.pop('mappo_impl_version')
         state['extra'].pop('mappo_impl_version',None)
         identity = contract(self.env_config, self.algorithm_config)
-        state.update(algorithm=self.variant, checkpoint_family='eaa_mappo_v338',
+        state.update(algorithm=self.variant, checkpoint_family=checkpoint_family(self.env_config),
                      parameter_counts=self.parameter_counts(), **identity)
         state['extra'].update(identity)
         return state
