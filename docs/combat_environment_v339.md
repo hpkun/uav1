@@ -28,7 +28,8 @@ elevation 做 pure pursuit；没有目标或自身死亡时返回零动作。新
 这是 **PROJECT DESIGN / CALIBRATION**，不是 MADSAC 论文公开参数。
 设计目的是去掉全程 225 m/s 的机械恒速，以简单规则提供远距离温和追赶、
 中距离正常接敌和近距离较低 closure / overshoot；不复制 Red 长期贴
-150 m/s 的简化运动学 exploit。这些是设计意图，尚未经训练对照实验证实。
+150 m/s 的简化运动学 exploit。这些是设计意图；现有 frozen Red A/B
+实测结果见[训练 readiness 文档](combat_v339_training_readiness.md)。
 
 配置相对 v3.38 仅 `environment_version`、`blue_policy` 不同。
 五个 Blue policy 字段全部显式提供；严格拒绝缺失、额外字段（含旧
@@ -45,27 +46,18 @@ Reward、非版本身份 info、ammo、cooldown、weapon outcomes 和 RNG 一致
 可选速度诊断状态；现有 canonical recorder 已记录实际 Blue actions、
 逐帧速度与 pursuit target indices，不额外调用策略。
 
-算法及 checkpoint validator 均未修改，没有新增算法配置、加载历史模型做
-跨环境实验或启动训练。v3.38 checkpoint 的身份仍是 3.38，不能冒充 3.39；
-配置 SHA 也不同。当前任务只注册并验证环境，不扩展算法各自的版本支持范围。
+v3.39 已完成正式训练接入。MAPPO、MAPPO-CA、EA-MAPPO、EAA-MAPPO、
+MAAC、MADDPG、MADSAC 均有独立的 v3.39 正式配置。
+v3.38/v3.39 checkpoint 按环境版本、配置 hash 及适用的 checkpoint family
+严格隔离，不能互相冒充或用于跨版本正式 resume/evaluation。
+详细配置、训练 readiness、CUDA smoke 和 frozen Red A/B 结果统一见
+[训练 readiness 文档](combat_v339_training_readiness.md)。当前未启动 3M 正式训练。
 
 验证入口：`tests/test_combat_v339.py`。覆盖精确边界、3D 距离、MRO 调用、
 目标切换、渐进收敛、自动动作、reset 等同、完整对局同动作等同、
 canonical observer 单次调用及 RNG 等同、实际 trace 读写、元数据隔离和配置拒绝。
 历史测试不修改 expected results。
 
-2026-10-17 验证结果（WSL 访问被拒，按仓库规则使用 Windows `uav`）：
-
-- v3.39 专项：49 passed。
-- 所选历史回归：782 passed、6 failed、1 skipped。包括完整 v3.38、v3.37、
-  v3.36、v3.35、v3.34、v3.32，以及 combat environment、canonical replay、
-  policy modes、MAPPO environment identity 测试。
-- 6 个失败位于 v3.34（4 个）和 v3.32（2 个）的历史 MADSAC checkpoint
-  测试：期望 `environment_version` 异常，但当前 MADSAC v5 提前拒绝 v3/v4
-  implementation。已用隔离临时包中的 HEAD 原版 `env/config.py` 和
-  `env/combat_env.py` 复跑这 6 项，全部复现相同失败；未修改算法或旧测试。
-- 1 个跳过项因 FFmpeg/ffprobe 不可用。v3.39 正式 trace 读写、完整对局
-  observer 等同及单次策略调用均通过；未声称视频编码测试通过。
-- 合计所选测试：831 passed、6 existing failures、1 skipped；新增失败 0。
-  未执行全仓库 pytest。CUDA checkpoint/runner 相关回归使用 RTX 5060 Laptop GPU。
-- `git diff --check` 通过；未启动训练。
+环境专项验证已通过。当前训练 readiness 的最终验证结果（包括测试通过、
+历史失败和跳过项的说明）以[训练 readiness 文档](combat_v339_training_readiness.md)
+为准，本环境文档不重复维护测试计数或完整 A/B 统计表。
