@@ -16,6 +16,7 @@ from algorithm.common.evaluator import (
     episode_return_metrics,
     evaluate,
     aggregate_combat_records,
+    noncombat_losses,
 )
 from algorithm.common.vector_env import ParallelVectorEnv
 from algorithm.common.checkpoint import (
@@ -402,6 +403,7 @@ class MAPPOTrainingRunner:
             "num_agents": self.num_agents,
             "training_seed": self.seed,
             "training_gamma": self.trainer.gamma,
+            "training_gae_lambda": self.trainer.gae_lambda,
             "training_num_envs": self.num_envs,
             "training_total_sampled_steps": self.total_sampled_steps,
             "training_smoke": self.smoke,
@@ -460,6 +462,12 @@ class MAPPOTrainingRunner:
             "total_blue_attack_kills": int(sum(r["blue_attack_kills"] for r in self.completed_records)),
             "average_red_boundary_exits": mean("red_boundary_exits"), "average_blue_boundary_exits": mean("blue_boundary_exits"),
             "average_red_ground_losses": mean("red_ground_losses"), "average_blue_ground_losses": mean("blue_ground_losses"),
+            **{f"average_{side}_ceiling_losses": mean(f"{side}_ceiling_losses")
+               for side in ("red", "blue")
+               if all(f"{side}_ceiling_losses" in r for r in self.completed_records)},
+            **{f"average_{side}_noncombat_losses": float(np.mean([
+                noncombat_losses(r, side) for r in self.completed_records])) if self.completed_records else 0.0
+               for side in ("red", "blue")},
             "average_episode_length": mean("episode_length"),
             **{f"{side}_{event}_episode_rate": float(np.mean([r[f"{side}_first_{event}_step"] is not None for r in self.completed_records])) if self.completed_records else 0.0
                for side in ("red", "blue") for event in ("fire_window", "attempt", "hit", "kill")},

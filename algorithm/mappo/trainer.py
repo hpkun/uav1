@@ -19,6 +19,29 @@ def masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     return (values * mask).sum() / mask.sum().clamp_min(1.0)
 
 
+@torch.no_grad()
+def raw_gae_diagnostics(advantages, returns, old_values, alive_masks) -> dict[str, float]:
+    """Detached, population statistics of the fixed rollout before normalization."""
+    live = alive_masks > 0.5
+    advantage, target, value = (tensor[live] for tensor in (advantages, returns, old_values))
+    if not advantage.numel():
+        return {key: 0.0 for key in (
+            'raw_advantage_mean', 'raw_advantage_std', 'raw_advantage_abs_mean',
+            'raw_advantage_abs_p50', 'raw_advantage_abs_p90', 'raw_advantage_abs_p99',
+            'raw_advantage_min', 'raw_advantage_max', 'return_target_mean',
+            'return_target_std', 'old_value_mean', 'old_value_std')}
+    absolute = advantage.abs()
+    quantiles = torch.quantile(absolute, absolute.new_tensor([.5, .9, .99]))
+    return dict(raw_advantage_mean=float(advantage.mean()),
+        raw_advantage_std=float(advantage.std(unbiased=False)),
+        raw_advantage_abs_mean=float(absolute.mean()),
+        raw_advantage_abs_p50=float(quantiles[0]), raw_advantage_abs_p90=float(quantiles[1]),
+        raw_advantage_abs_p99=float(quantiles[2]), raw_advantage_min=float(advantage.min()),
+        raw_advantage_max=float(advantage.max()), return_target_mean=float(target.mean()),
+        return_target_std=float(target.std(unbiased=False)), old_value_mean=float(value.mean()),
+        old_value_std=float(value.std(unbiased=False)))
+
+
 def compute_gae(
     rewards: torch.Tensor,
     values: torch.Tensor,
@@ -238,6 +261,7 @@ class MAPPOTrainer:
                 rewards, values, next_values, dones, alive_masks,
                 next_alive_masks, self.gamma, self.gae_lambda,
             )
+            gae_metrics = raw_gae_diagnostics(advantages, returns, values, alive_masks)
             if self.normalize_advantages:
                 live_advantages = advantages[alive_masks > 0.5]
                 advantages = (
@@ -402,6 +426,7 @@ class MAPPOTrainer:
                         row[key] for row in rows
                     ]))
         metrics.update(self._stability_metrics(epoch_rows))
+        metrics.update(gae_metrics)
         if not np.all(np.isfinite(list(metrics.values()))):
             raise FloatingPointError(f"non-finite MAPPO update: {metrics}")
         return metrics
@@ -420,7 +445,10 @@ class MAPPOTrainer:
             "critic_updates": self.critic_update_count,
             "sampled_steps": self.sampled_steps,
             "vector_steps": self.vector_steps,
-            "extra": {**(extra or {}), **self.policy_protocol()},
+            "extra": {**(extra or {}), **self.policy_protocol(),
+                      **({"algorithm_config_sha256": self.algorithm_config_sha256}
+                         if hasattr(self, "algorithm_config_sha256") else {}),
+                      "training_gamma": self.gamma, "training_gae_lambda": self.gae_lambda},
         }
 
     def save(self, path: str | Path, extra: dict[str, Any] | None = None) -> None:
@@ -443,6 +471,12 @@ class MAPPOTrainer:
                 "read-only diagnostics and cannot resume formal training"
             )
         validate_trainer_policy_protocol(state, self.policy_protocol())
+        for key, expected in (("training_gamma", self.gamma), ("training_gae_lambda", self.gae_lambda)):
+            if key in state.get("extra", {}) and state["extra"][key] != expected:
+                raise RuntimeError(f"checkpoint {key} mismatch: expected {expected}, got {state['extra'][key]}")
+        recorded_hash = state.get("extra", {}).get("algorithm_config_sha256")
+        if hasattr(self, "algorithm_config_sha256") and recorded_hash is not None and recorded_hash != self.algorithm_config_sha256:
+            raise RuntimeError("checkpoint algorithm_config_sha256 mismatch")
         self.actor.load_state_dict(state["actor"])
         self.critic.load_state_dict(state["critic"])
         if legacy:

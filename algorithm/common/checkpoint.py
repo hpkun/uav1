@@ -80,6 +80,10 @@ def _validate_common_checkpoint_contract(
         raise RuntimeError(f"checkpoint critic_type mismatch: expected {configured_critic_type!r}, got {checkpoint_critic_type!r}")
     validate_policy_protocol(state, algorithm_config)
     validate_mappo_architecture(state, algorithm_config)
+    for key, expected in (("training_gamma", algorithm_config["training"]["gamma"]),
+                          ("training_gae_lambda", algorithm_config["training"]["gae_lambda"])):
+        if key in extra and extra[key] != expected:
+            raise RuntimeError(f"checkpoint {key} mismatch: expected {expected}, got {extra[key]}")
     configured = _configured_dimensions(algorithm_config)
     environment = environment_dimensions(env_config)
     if configured != environment:

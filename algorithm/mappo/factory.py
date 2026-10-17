@@ -5,6 +5,7 @@ from typing import Any
 
 from .trainer import MAPPOTrainer
 from algorithm.common.critic_protocol import layer_width
+from algorithm.common.protocol import config_sha256
 
 
 def build_mappo_trainer(
@@ -37,7 +38,7 @@ def build_mappo_trainer(
         "mean_head_init_gain": float(implementation.get("mean_head_init_gain", .01)),
         "target_kl": training.get("target_kl"),
     }
-    return MAPPOTrainer(
+    trainer = MAPPOTrainer(
         **common,
         actor_learning_rate=float(training["actor_learning_rate"]),
         critic_learning_rate=float(training["critic_learning_rate"]),
@@ -52,6 +53,8 @@ def build_mappo_trainer(
         normalize_advantages=bool(implementation["normalize_advantages"]),
         clip_value_loss=bool(implementation["clip_value_loss"]),
     )
+    trainer.algorithm_config_sha256 = config_sha256(config)
+    return trainer
 
 
 __all__ = ["build_mappo_trainer"]

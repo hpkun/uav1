@@ -450,6 +450,7 @@ def main() -> None:
             None if resume_checkpoint is None else str(resume_checkpoint)
         ),
         "training_gamma": startup["gamma"],
+        "training_gae_lambda": startup["gae_lambda"],
         "environment_config_sha256": config_sha256(env_config),
         "algorithm_config_sha256": config_sha256(algorithm_config),
     }

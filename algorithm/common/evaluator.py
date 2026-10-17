@@ -20,6 +20,11 @@ def episode_return_metrics(agent_returns: np.ndarray) -> tuple[float, float]:
     return float(values.sum()), float(values.mean())
 
 
+def noncombat_losses(record: dict[str, Any], side: str) -> float:
+    """Ceiling is already a boundary subtype; never add it a second time."""
+    return float(record[f"{side}_boundary_exits"] + record[f"{side}_ground_losses"])
+
+
 def aggregate_combat_records(records: list[dict[str, Any]]) -> dict[str, float]:
     """Aggregate completed episodes with equal weight per episode."""
     if not records:
@@ -59,6 +64,8 @@ def aggregate_combat_records(records: list[dict[str, Any]]) -> dict[str, float]:
                 result[f'{side}_{event}'] = mean(f'{side}_{event}')
             result[f'{side}_noncombat_loss_episode_rate'] = float(np.mean([
                 row[f'{side}_boundary_exits']+row[f'{side}_ground_losses']>0 for row in records]))
+            result[f'average_{side}_noncombat_losses'] = float(np.mean([
+                noncombat_losses(row, side) for row in records]))
     if all(row.get('environment_version') in ('3.3','3.4','3.5','3.6','3.7','3.8','3.9','3.10','3.11','3.12','3.13','3.14','3.15','3.16','3.17','3.18','3.19','3.20','3.21','3.22','3.23','3.24','3.25','3.26','3.27','3.28','3.29','3.30','3.31','3.32','3.33','3.34','3.35','3.36','3.37','3.38') for row in records):
         for name in ('individual_event','team_casualty'):
             result[f'average_episode_{name}_total'] = mean(f'episode_{name}_total')
