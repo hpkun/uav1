@@ -22,8 +22,8 @@ def require_cuda(device):
 def validate_config(env, config):
     validate_environment(env)
     version = str(env['environment_version'])
-    if version not in ('3.38', '3.39'):
-        raise ValueError('attention v1 requires v3.38 or v3.39 / team_size=4')
+    if version not in ('3.38', '3.39', '3.41'):
+        raise ValueError('attention v1 requires v3.38, v3.39 or v3.41 / team_size=4')
     baseline = yaml.safe_load((ROOT/f'configs/mappo_4v4_v{version.replace(".", "")}.yaml').read_text(encoding='utf-8'))
     if config.get('environment') != baseline['environment']:
         raise ValueError('attention v1 requires matching environment identity / team_size=4')
@@ -77,4 +77,4 @@ def validate_checkpoint(state, env, config):
 
 
 def checkpoint_family(env):
-    return {'3.38': 'eaa_mappo_v338', '3.39': 'eaa_mappo_v339'}[env['environment_version']]
+    return {'3.38': 'eaa_mappo_v338', '3.39': 'eaa_mappo_v339', '3.41': 'eaa_mappo_v341'}[env['environment_version']]

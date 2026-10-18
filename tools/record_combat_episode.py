@@ -121,7 +121,7 @@ def load_recording_policy(checkpoint, env_config, config, device='cuda'):
     state = torch.load(checkpoint, map_location='cpu', weights_only=False)
     extra = state.get('extra', {})
     algorithm = str(state['algorithm']).lower()
-    if state.get('checkpoint_family') in ('eaa_mappo_v338', 'eaa_mappo_v339'):
+    if state.get('checkpoint_family') in ('eaa_mappo_v338', 'eaa_mappo_v339', 'eaa_mappo_v341'):
         from algorithm.eaa_mappo.evaluation import load_checkpoint
         trainer = load_checkpoint(checkpoint, config, env_config, device)
     elif algorithm == 'maddpg':
