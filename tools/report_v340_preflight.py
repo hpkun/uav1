@@ -1,0 +1,192 @@
+"""Validate all saved preflight traces and build the requested version document."""
+from pathlib import Path
+import csv
+import hashlib
+import json
+import sys
+import numpy as np
+
+ROOT=Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:sys.path.insert(0,str(ROOT))
+from env.config import load_config
+from tools.audit_v339_attack_geometry import vector_geometry, write_csv
+
+
+def main():
+    out=ROOT/'outputs/v340_preflight'
+    summary=json.loads((out/'summary.json').read_text())
+    assert summary['episodes']==160 and summary['seeds']==list(range(20)), 'This document requires the full 20-seed protocol'
+    rows=list(csv.DictReader((out/'episodes.csv').open(encoding='utf-8-sig')))
+    extra=[];max_error=0.;traces=0
+    for row in rows:
+        path=ROOT/row['trace']
+        assert hashlib.sha256(path.read_bytes()).hexdigest()==row['trace_sha256']
+        cfg=load_config(ROOT/f'configs/combat_environment_v{row["version"].replace(".","")}.yaml')
+        dw=cfg['weapon']['range_max'];dt=cfg['reward']['tactical_distance_max']
+        with np.load(path) as data:
+            np.testing.assert_array_equal(data['start'][1:],data['post'][:-1])
+            np.testing.assert_array_equal(data['ammo_pre'][1:],data['ammo_post'][:-1])
+            assert np.isfinite(data['post']).all()
+            gs=[vector_geometry(data['pre'],s) for s in (0,1)]
+            pair_rewards=[]
+            for side,g in enumerate(gs):
+                angles=(abs(g['ata'])<=np.pi/6+1e-12)&(abs(g['ha'])<=np.pi/6+1e-12)
+                w3=np.clip((g['distance']-dw)/(dt-dw),0,1)
+                w4=np.clip((dt-g['distance'])/(dt-dw),0,1)
+                tail=g['live']&(g['distance']<=dt)&(abs(g['aa'])<=np.pi/6+1e-12)
+                coefficient=np.zeros_like(w4)
+                for degrees,value in ((30,.01),(15,.02),(5,.1)) if side==0 else ((30,-.015),(15,-.025),(5,-.15)):
+                    coefficient=np.where((abs(g['ata'])<=np.deg2rad(degrees)+1e-12)&(abs(g['ha'])<=np.deg2rad(degrees)+1e-12),value,coefficient)
+                pair_rewards.append(np.where(tail,coefficient*w4,0))
+                if side==0:
+                    guide=np.where(g['live']&angles,.001*w3,0).max(2)
+                    max_error=max(max_error,float(abs(guide-data['dense'][:,0]).max()))
+                    np.testing.assert_allclose(guide,data['dense'][:,0],atol=1e-14,rtol=0)
+                fire=data['attempt_targets'][:,side]>=0
+                assert (data['hit'][:,side]<=fire).all()
+                np.testing.assert_array_equal(data['ammo_pre'][:,side]-data['ammo_post'][:,side],fire.astype(int))
+                exhausted=(data['ammo_post'][:,side]==0)
+                pre1km=(g['live']&(g['distance']<=1000)).any(2)
+                entered=np.maximum.accumulate(pre1km,axis=0)
+                extra.append(dict(episode_id=row['episode_id'],version=row['version'],policy=row['policy'],side=('red','blue')[side],
+                    exhausted_aircraft=int(exhausted.any(0).sum()),
+                    exhausted_while_alive_aircraft=int((exhausted&(data['post'][:,side,:,6]>0)).any(0).sum()),
+                    exhausted_before_first_1km_entry_aircraft=int((exhausted&~entered).any(0).sum()),
+                    never_entered_1km_aircraft=int((~entered[-1]).sum()),
+                    ammo_on_survivors=int((data['ammo_post'][-1,side]*(data['post'][-1,side,:,6]>0)).sum())))
+                for t,i in zip(*np.where(fire)):
+                    j=data['attempt_targets'][t,side,i]
+                    assert g['live'][t,i,j] and angles[t,i,j] and g['distance'][t,i,j]<=dw
+                    assert data['ammo_pre'][t,side,i]>0 and data['cooldown_pre'][t,side,i]<=1
+            for k,expected in ((1,pair_rewards[0].max(2)),(2,pair_rewards[1].min(1))):
+                max_error=max(max_error,float(abs(expected-data['dense'][:,k]).max()))
+                np.testing.assert_allclose(expected,data['dense'][:,k],atol=1e-14,rtol=0)
+        traces+=1
+    write_csv(out/'ammo_diagnostics.csv',extra)
+    checks=dict(traces_validated=traces,sha256_validated=traces,reward_reconstruction_max_error=max_error,
+                checks=['trajectory continuity','ammo conservation','legal shot angles/range/living status/ammo/cooldown',
+                        'hit implies shot','independent vector R3/R4 reconstruction','terminal and finite rollout assertions'])
+    (out/'trace_validation.json').write_text(json.dumps(checks,indent=2),encoding='utf-8')
+
+    def f(value,digits=3):return '未出现' if value is None else f'{value:.{digits}f}'
+    def table(headers,lines):
+        return '| '+' | '.join(headers)+' |\n| '+' | '.join(['---']*len(headers))+' |\n'+''.join('| '+' | '.join(map(str,r))+' |\n' for r in lines)
+    ss=summary['summaries']
+    tables={}
+    tables['outcome']=table(['版本','策略','局数','时长均值/s','红胜/蓝胜/平','首发中位/s','首命中/首击毁中位/s'],[
+        [r['version'],r['policy'],r['episodes'],f(r['duration_s_mean']),f"{r['red_win_count']}/{r['blue_win_count']}/{r['draw_count']}",f(r['first_fire_s_median']),f(r['first_kill_s_median'])] for r in ss])
+    tables['ammo']=table(['版本','策略','红/蓝总发射','红/蓝命中率','红/蓝远射占比','红/蓝局末弹药均值'],[
+        [r['version'],r['policy'],f"{r['red_shots_total']}/{r['blue_shots_total']}",f"{r['red_hit_rate']:.2%}/{r['blue_hit_rate']:.2%}",f"{r['red_long_shot_fraction']:.2%}/{r['blue_long_shot_fraction']:.2%}",f"{r['red_ammo_left_mean']:.2f}/{r['blue_ammo_left_mean']:.2f}"] for r in ss])
+    tables['reward']=table(['版本','策略','R3局总和均值','R3非零agent-step占比','正R4局数','负R4局数','有弹正R4局数'],[
+        [r['version'],r['policy'],f(r['r3_sum_mean'],6),f"{r['r3_agent_step_fraction']:.2%}",r['r4_offense_episode_count'],r['r4_defense_episode_count'],r['armed_positive_r4_episode_count']] for r in ss])
+    additional=[]
+    for r in ss:
+        group=[e for e in extra if e['version']==r['version'] and e['policy']==r['policy']]
+        def sums(k,side):return sum(e[k] for e in group if e['side']==side)
+        additional.append(dict(version=r['version'],policy=r['policy'],**{
+            side+'_'+k:sums(k,side) for side in ('red','blue') for k in ('exhausted_aircraft','exhausted_before_first_1km_entry_aircraft','never_entered_1km_aircraft','ammo_on_survivors')}))
+    write_csv(out/'ammo_comparison.csv',additional)
+    tables['early']=table(['版本','策略','红/蓝首次进入1km前发射占比','红/蓝耗尽架数','红/蓝1km前耗尽架数'],[
+        [r['version'],r['policy'],f"{r['red_pre_1km_shot_fraction']:.2%}/{r['blue_pre_1km_shot_fraction']:.2%}",f"{a['red_exhausted_aircraft']}/{a['blue_exhausted_aircraft']}",f"{a['red_exhausted_before_first_1km_entry_aircraft']}/{a['blue_exhausted_before_first_1km_entry_aircraft']}"] for r,a in zip(ss,additional)])
+    readiness=json.loads((out/'readiness/readiness.json').read_text())
+    doc='''# Combat Environment v3.40：2 km 武器与 4 km 战术距离受控实验
+
+## 研究目的与有效参数差异
+
+v3.40 为独立环境版本，检验扩大开火范围与连续战术权重区间对交战机会及后续 MAPPO 学习的影响。本次只实现环境并预检，没有启动训练，也没有加载旧 checkpoint。
+
+| 字段 | v3.39 | v3.40 |
+| --- | --- | --- |
+| environment_version（身份） | 3.39 | 3.40 |
+| weapon.range_max | 1000 m | 2000 m |
+| reward.tactical_distance_max | 3000 m | 4000 m |
+
+除环境身份外，只有上述两个有效参数改变。MAPPO 配置逐字段比较，仅 environment.environment_version 改变。
+
+保留 dt=.1、1000步；动作增量 pi/40、pi/60、2.5；速度150–300 m/s、俯仰±60°；半径5000 m、高度0–6000 m；默认4v4初始化、编队与225 m/s初速；45维观测/3维动作/4智能体。保留武器range_min=0、ATA/HA±30°、每机6发、冷却1秒、自动选择目标及双方同时致命结算。
+
+蓝方直接复用 v339_policy：目标距离≤1000 m期望200 m/s，1000–3000 m期望220 m/s，>3000 m期望240 m/s。武器扩大不改变这两个速度门限。
+
+## R3/R4与命中模型
+
+直接复用 env/v322_reward.py 的 distance_weights：
+
+`w3(d) = clip((d-2000)/2000, 0, 1)`
+
+`w4(d) = clip((4000-d)/2000, 0, 1)`
+
+1000/1500/2000/2500/3000/3500/4000/4500 m处，w3依次0/0/0/.25/.5/.75/1/1，w4依次1/1/1/.75/.5/.25/0/0。这是权重，不是最终奖励。R3仍有ATA/HA角门限；R4仍要求AA±30°，并保留ATA/HA 30°/15°/5°档位、进攻.01/.02/.1、防御-.015/-.025/-.15及多目标max/min聚合。
+
+guide_distance_min=3000原样保留；它不进入当前连续R3/R4的权重函数，不能解释为R3硬门限。R4也不检查弹药、冷却或武器射程，有弹曝光仅是诊断子集。
+
+命中函数完全复用 PaperATAHAWeapon。effective_hit_distance=558.1106265512473，两噪声尺度均=.9984711359155588。每次射击使用同一标量高斯epsilon驱动ATA/HA；阈值pi*exp(-d/effective_hit_distance)，不重新标定。相同距离/角度的理论概率、采样结果与RNG状态均与v3.39一致；旧版1km以外的理论值不意味着旧版允许射击。
+
+## 代码与协议接入
+
+新增 combat_v340.py，仅继承CombatEnvironmentV339并设置版本字符串，不覆盖运动、reset、step、奖励、武器或结算方法。新增v340_config.py：检查新身份和2000/4000，深拷贝，将副本的身份/两个距离映射回3.39/1000/3000，调用原validate_v339，原入参不被修改。额外冻结v3.39正式蓝方五个参数，避免沿用旧校验器允许的策略实验范围造成第三个有效变化。
+
+必要修改仅限 env/config.py 的版本识别、校验和维度；env/combat_env.py的工厂分发；algorithm/mappo/runner.py的版本身份和日志/指标名单；algorithm/common/evaluator.py的版本指标名单；algorithm/common/checkpoint.py的严格配置指纹版本名单。MAPPO训练及评估命令入口沿用现有通用实现，无需重写。checkpoint选择仍按红胜率、回报、较少红损失排序。新旧checkpoint环境身份不匹配时拒绝，3.40续训/评估均要求配置指纹，不能当作3.39续训。
+
+## 测试与运行环境
+
+WSL Ubuntu启动访问被拒绝，依仓库规则在Windows PowerShell的uav Conda环境执行。固定策略预检为CPU，模型初始化预检为CUDA，没有CPU回退。
+
+新增专项测试102项全部通过。第一批相关历史与新增联合回归509通过、2失败；第二批291通过、7失败（102项专项测试在两批重复）。去重后共698项通过、9项失败。9项均为test_combat_v332/v333/v334中旧MADSAC错误消息匹配：测试期望environment_version，而实现先拒绝implementation-v5。使用本次改动之前的HEAD源文件在隔离临时目录逐项复现相同9项失败，未修改历史测试或MADSAC实现。详见tests.log、additional_tests.log与baseline_known_failures.log；这不是全仓库测试结果。
+
+专项覆盖：配置深拷贝/严格拒绝/历史版本隔离；武器1000/1500/2000与边界值、角度和弹药；相同命中概率及相同高斯采样；全部距离权重与AA/ATA/HA档位/聚合；正常step三维运动、自动开火、每10步冷却、6发耗尽、双方同时击毁、死亡冻结、出界/地面/高度上界/超时；MAPPO身份、旧checkpoint拒绝与新指纹要求；日志和评估指标。
+
+## 固定策略配对预检
+
+每版本四策略各20局，reset seeds=0–19，共160局，全部为原生致命step，非致命干预未使用。两个版本的同seed初始状态逐项一致；开火后不要求RNG、死亡或后续轨迹一致。
+
+zero为全零动作；pursuit为最近三维目标LOS追击、红方期望225 m/s；lateral在12≤t<20秒使期望航向偏LOS+30°；vertical在8–12秒期望俯仰+30°、16–20秒−30°、其余0，其他沿用上一轮工具。它们是固定诊断策略，不是训练策略或优化过的作战基线。
+
+所有首次时间按实际0.1秒样本记录；表中首次时间为出现事件局的条件中位数。每局均出现开火/命中/击毁，故相关时间样本数均20。时长是均值。命中计数按实际shot hit，多个射手命中同一目标可能只产生一次击毁。
+
+'''
+    doc+=tables['outcome']+'\n## 弹药与远射\n\n'+tables['ammo']+'\n'+tables['early']
+    doc+='''
+远射定义为实际选定目标的pre-fire距离>1000 m，不能用离线扩大候选窗口代替。首次1km前发射按每个射手此前从未进入任一存活对手的≤1000 m范围统计，含当前pre-fire样本。“1km前耗尽”包括整局未进入1km便死亡/终止的情况，不代表它以后必然进入1km。局末弹药包括死亡飞机保留的弹药，并非全部可继续使用；每机数据与存活机弹药另存aircraft.csv、ammo_diagnostics.csv。每策略20局/每方80架，耗尽架数以此为分母。
+
+新版本首次开火提前约2.2–2.4秒，首次击毁中位数提前0.9–1.1秒。提前开火没有同幅度提前击毁，符合远射理论命中率更低的冻结命中模型。红方远射约80.46%–97.06%，蓝方约83.38%–92.00%，且大多数射击确实在射手首次进入1km之前完成。零动作/追击/垂直策略中双方实际命中率降低；侧向红方降至约3.36%。弹药消耗增加是实验真实结果，本轮没有调弹药、冷却或命中函数以改善表现。
+
+## R3/R4曝光
+
+'''+tables['reward']+'''
+R3数值为每局红方四智能体分量累加后的均值。曝光agent-step分母为pre-fire存活且有存活敌人的红方样本；正向和负向R4分别统计，避免抵消掩盖曝光。本次160局正/负R4均为0；首正R4时间不存在，有弹正向R4也为0。独立向量几何重建全部轨迹的R3/R4与正式计算一致。因此这是当前固定策略及初始几何下的真实零曝光，不能自动诊断为实现错误，也不能声称扩大R4距离已改善战术奖励。
+
+全部160局正常终止，无超时，无红蓝水平出界、撞地或高度上界损失。R4的角度门限仍然必要，较远处保持对头几何不会因距离扩展自动形成尾追。R3均值下降是连续权重区间变化的预期影响，需在正式训练中关注其与事件奖励的相对比例。
+
+## MAPPO技术条件与限制
+
+'''
+    doc+=f"CUDA实际设备为{readiness['cuda_name']}，正式256/256 actor与MLP critic共{readiness['total_parameter_count']}参数（actor {readiness['actor_parameter_count']}，critic {readiness['critic_parameter_count']}）。16个worker均为CombatEnvironmentV340并使用原DistanceTierNearestTargetBluePolicy，reset观测shape=(16,4,45)。gamma=.99、lambda=.95、clip=.2、entropy=.001、rollout=256、PPO epochs=10、minibatch=512、评估间隔100000、checkpoint间隔500000，配置目标3000000 sampled steps。\n\n"
+    doc+='''仅构造模型和reset环境，sampled_steps=0、optimizer_updates=0、checkpoint_loaded=false。未启动run()、未执行PPO更新、未评估或加载旧模型、未保存模型权重。配置/版本/CUDA/并行初始化具备正式从头运行MAPPO的技术条件，未发现v3.40阻断问题；这不等于已经验证完整3M运行或学习稳定性。9项已复现的历史MADSAC测试消息问题独立列出。
+
+本次小样本固定策略结果不能推广到学习后性能。两有效参数同时改变，不能单独分离武器距离与奖励距离的因果贡献。配对种子只控制初始化，早期额外射击改变RNG消费；新旧胜负变化不能解释为共同随机数下同一命中序列的效果。正式3M对照应使用独立新输出目录，从头训练并保留相同算法超参数，不加载v3.39 checkpoint。本轮未执行该训练。
+
+## 交付与复现
+
+新增文件：env/combat_v340.py、env/v340_config.py、configs/combat_environment_v340.yaml、configs/mappo_4v4_v340.yaml、tests/test_combat_v340.py、tools/preflight_v340.py、tools/report_v340_preflight.py、tools/verify_v340_readiness.py及本文档。必要修改的五个共享文件如上所列；v3.39版本实现、配置、历史输出保持原样，保护哈希结果见source_protection.json。
+
+outputs/v340_preflight/ 下包括summary.json、comparison.csv、episodes.csv、aircraft.csv、shots.csv、paired_deltas.csv、ammo_diagnostics.csv、ammo_comparison.csv、trace_validation.json、source_protection.json、readiness/readiness.json，以及测试与运行日志。trajectory_data保留全部160个可复现NPZ诊断轨迹，含步前/开火前/步后状态、实际动作、目标、弹药、冷却、R3/R4、发射/命中/击毁、死亡原因和done。summary.json内包含数组语义和统计定义。seed和策略在单局表及文件名中均可追溯。
+
+Ubuntu复现（项目根目录，已安装uav依赖）：
+
+```bash
+conda activate uav
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 PYTHONDONTWRITEBYTECODE=1
+python -m pytest tests/test_combat_v340.py -q
+python -u tools/preflight_v340.py --seeds 20 --workers 4
+python -u tools/verify_v340_readiness.py
+python -u tools/report_v340_preflight.py
+```
+
+上述命令只验证和预检，不执行正式训练。报告生成需要对应测试日志及预检结果；历史保护快照由本次执行前独立生成，不由报告脚本伪造。
+'''
+    (ROOT/'docs/combat_environment_v340.md').write_text(doc,encoding='utf-8')
+    print(json.dumps(checks),flush=True)
+    print(tables['early'],flush=True)
+
+
+if __name__=='__main__':main()
