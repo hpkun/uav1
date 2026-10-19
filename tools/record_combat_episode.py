@@ -33,6 +33,9 @@ def record(trainer: Any, env_config: dict[str, Any], seed: int, output_dir: str 
     ensure_fresh_output(output_dir)
     env = RecordingCombatEnv(env_config)
     observation, _ = env.reset(seed)
+    algorithm_diagnostics = []
+    if hasattr(trainer, 'recording_step_data'):
+        trainer.begin_episode(seed, deterministic=True)
     frames = {key: [] for key in FRAME_FIELDS}
     transitions = {key: [] for key in TRANSITION_FIELDS}
     append_frame(frames, env)
@@ -54,6 +57,10 @@ def record(trainer: Any, env_config: dict[str, Any], seed: int, output_dir: str 
         else:
             action = trainer.act(observation[None], env.red_alive_mask[None], deterministic=True)[0]
         observation, reward, terminated, truncated, info = env.step(action)
+        if hasattr(trainer, 'recording_step_data'):
+            diagnostic = trainer.recording_step_data()
+            diagnostic.update(next_alive=env.red_alive_mask.copy(), episode_done=bool(terminated or truncated))
+            algorithm_diagnostics.append(diagnostic)
         if recurrent:
             hidden *= env.red_alive_mask[:, None]
             episode_start = np.array(0., dtype=np.float32)
@@ -81,6 +88,9 @@ def record(trainer: Any, env_config: dict[str, Any], seed: int, output_dir: str 
             raise RuntimeError('recording exceeded wall timeout')
     shapes = write_trace(output_dir / 'episode_trace.npz', frames, transitions, dt=env.dt)
     result = dict(metadata or {})
+    if algorithm_diagnostics:
+        from algorithm.acirl.recording import save_diagnostics
+        result.update(save_diagnostics(output_dir, algorithm_diagnostics))
     result.update({'trace_schema_version': TRACE_SCHEMA_VERSION, 'feature_names': FEATURE_NAMES,
          'reward_component_names': ['R1','R2','R3','R4'], 'reward_component_axis': 1, 'agent_axis': 2,
         'transition_state_alignment': 'transition[t]: frame[t] -> frame[t+1]; ammo/cooldown are post-transition',
@@ -124,6 +134,9 @@ def load_recording_policy(checkpoint, env_config, config, device='cuda'):
     if state.get('checkpoint_family') in ('eaa_mappo_v338', 'eaa_mappo_v339', 'eaa_mappo_v341'):
         from algorithm.eaa_mappo.evaluation import load_checkpoint
         trainer = load_checkpoint(checkpoint, config, env_config, device)
+    elif algorithm == 'acirl':
+        from algorithm.acirl.evaluation import load_checkpoint
+        trainer = load_checkpoint(checkpoint, env_config, config, device)
     elif algorithm == 'matd3':
         from algorithm.matd3.protocol import validate_checkpoint
         from algorithm.matd3.factory import build_matd3_trainer

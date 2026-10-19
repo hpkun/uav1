@@ -1,0 +1,71 @@
+algorithm: acirl
+environment:
+  environment_version: '3.39'
+  team_size: 4
+network:
+  observation_dim: 45
+  action_dim: 3
+  num_agents: 4
+  self_features: 7
+  ally_features: 6
+  enemy_features: 5
+  entity_embedding: 128
+  attention_heads: 4
+  gru_hidden: 128
+  intentions: 6
+  intention_embedding: 32
+  actor_hidden:
+  - 256
+  - 256
+  critic_hidden:
+  - 256
+  - 256
+  log_std_init: -1.5
+  mean_head_gain: 0.01
+  log_std_min: -5.0
+  log_std_max: 0.5
+  max_duration_scale: 30
+intention:
+  min_duration: 3
+  max_duration: 30
+  fixed_interval: 10
+ablation:
+  mode: no_intent
+training:
+  seed: 1
+  device: cuda
+  actor_learning_rate: 0.0003
+  critic_learning_rate: 0.0003
+  gamma: 0.99
+  gae_lambda: 0.95
+  lambda_high: 0.95
+  clip_ratio: 0.2
+  target_kl: 0.02
+  max_grad_norm: 0.5
+  normalize_advantages: true
+  value_clipping: true
+  num_train_envs: 16
+  total_sampled_steps: 3000000
+  rollout_steps: 256
+  ppo_epochs: 5
+  minibatch_size: 512
+  critic_minibatch_size: 512
+  sequence_length: 32
+  reward_reduction: mean
+  switching_cost: 0.001
+  evaluation_mode: deterministic
+  evaluation_seed_base: 10000000
+  evaluation_episodes: 20
+  evaluation_interval: 100000
+  checkpoint_interval: 500000
+loss_weights:
+  action: 1.0
+  intention: 1.0
+  gate: 1.0
+  team_value: 0.5
+  gate_q: 0.5
+  inference: 0.1
+entropy:
+  action: 0.001
+  intention: 0.01
+  gate: 0.001
