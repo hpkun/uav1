@@ -1,0 +1,52 @@
+algorithm: maddpg
+environment:
+  environment_version: '3.41'
+  team_size: 4
+network:
+  observation_dim: 45
+  action_dim: 3
+  num_agents: 4
+  actor_hidden_layers: [256, 256]
+  critic_hidden_layers: [256, 256]
+training:
+  optimizer: Adam
+  actor_learning_rate: 0.0001
+  critic_learning_rate: 0.0001
+  gamma: 0.99
+  tau: 0.001
+  replay_capacity: 1000000
+  minibatch_size: 1024
+  learning_starts: 10000
+  sampled_steps_per_update: 100
+  gradient_updates_per_event: 1
+  gradient_clip_norm: 0.5
+  diagnostics_interval_updates: 100
+  num_train_envs: 16
+  total_sampled_steps: 3000000
+  evaluation_episodes: 20
+  evaluation_interval_sampled_steps: 100000
+  device: cuda
+  seed: 1
+implementation:
+  noise_type: ou
+  ou_theta: 0.15
+  ou_sigma: 0.20
+  ou_mu: 0.0
+  exploration_scale_start: 1.0
+  exploration_scale_end: 0.1
+  exploration_decay_sampled_steps: 3000000
+  evaluation_mode: deterministic
+  evaluation_seed_base: 10000000
+  checkpoint_interval_sampled_steps: 500000
+runtime_logging:
+  console_interval_sampled_steps: 20000
+  recent_episode_window: 100
+metadata:
+  algorithm_structure: classic CTDE MADDPG; independent deterministic actors and per-agent centralized critics
+  environment_adaptation: 45D local observation; tanh normalized 3D action; alive masks; hidden=256; gamma=.99
+  project_training_choice: learning_starts=10000; lr=.0001; tau=.001; OU theta=.15 sigma=.20 mu=0; linear scale decay 1.0 to .1; 3M transitions; update_every=100
+  paper_reference_structure: Lowe et al. 2017, Multi-Agent Actor-Critic for Mixed Cooperative-Competitive Environments; decentralized deterministic actors, centralized per-agent critics, replay, target networks, behavior exploration noise
+  numerical_provenance: Numerical values are project adaptations, not claimed as the original paper hyperparameters.
+  gradient_clipping: Per-agent network global L2 clip=.5; official code clips each parameter tensor separately at .5, so scope differs.
+  policy_regularization: OFFICIAL-ONLY / NOT PORTED; distribution-parameter penalty is not equivalent to this deterministic tanh objective.
+  formal_exact_resume_supported: false

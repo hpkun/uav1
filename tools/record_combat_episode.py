@@ -124,6 +124,12 @@ def load_recording_policy(checkpoint, env_config, config, device='cuda'):
     if state.get('checkpoint_family') in ('eaa_mappo_v338', 'eaa_mappo_v339', 'eaa_mappo_v341'):
         from algorithm.eaa_mappo.evaluation import load_checkpoint
         trainer = load_checkpoint(checkpoint, config, env_config, device)
+    elif algorithm == 'matd3':
+        from algorithm.matd3.protocol import validate_checkpoint
+        from algorithm.matd3.factory import build_matd3_trainer
+        validate_checkpoint(state, env_config, config)
+        trainer = build_matd3_trainer(config, device, extra['training_seed'])
+        trainer.load(checkpoint, env_config, config)
     elif algorithm == 'maddpg':
         from algorithm.maddpg.protocol import validate_checkpoint, require_cuda
         from algorithm.maddpg.factory import build_maddpg_trainer
