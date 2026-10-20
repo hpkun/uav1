@@ -29,6 +29,8 @@ def resolved(value: str | Path) -> Path:
 
 def record(trainer: Any, env_config: dict[str, Any], seed: int, output_dir: str | Path,
            metadata: dict[str, Any] | None = None, wall_timeout_s: float = 0) -> dict[str, Any]:
+    if str((metadata or {}).get('algorithm', '')).lower() == 'ippo' and not 20_000_000 <= seed < 30_000_000:
+        raise ValueError('IPPO recording seeds must be in [20000000,30000000)')
     output_dir = Path(output_dir)
     ensure_fresh_output(output_dir)
     env = RecordingCombatEnv(env_config)
@@ -117,7 +119,10 @@ def record(trainer: Any, env_config: dict[str, Any], seed: int, output_dir: str 
         for field in ('ammo_used','ceiling_losses'):
             result[side+'_'+field] = env.combat_counts[side].get(field)
     from tools.combat_trace import read_trace
-    read_trace(output_dir / 'episode_trace.npz',result)
+    trace = read_trace(output_dir / 'episode_trace.npz',result)
+    if str(result.get('algorithm', '')).lower() == 'ippo':
+        from algorithm.ippo.diagnostics import trace_diagnostics
+        dump_metadata(output_dir / 'ippo_flight_diagnostics.json', trace_diagnostics(trace, result))
     dump_metadata(output_dir / 'metadata.json', result)
     return result
 
@@ -150,6 +155,9 @@ def load_recording_policy(checkpoint, env_config, config, device='cuda'):
         validate_checkpoint(state, env_config, config)
         trainer = build_maddpg_trainer(config, device, extra['training_seed'])
         trainer.load(checkpoint, env_config, config)
+    elif algorithm == 'ippo':
+        from algorithm.ippo.evaluation import load_checkpoint
+        trainer = load_checkpoint(checkpoint, config, env_config, device)
     elif algorithm == 'mappo':
         validate_checkpoint_for_evaluation(state, env_config, config)
         if extra.get('algorithm_config_sha256') != config_sha256(config):
