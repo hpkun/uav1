@@ -1,0 +1,61 @@
+algorithm: ETM-MAPPO
+network:
+  variant: B3
+  self_dim: 10
+  peer_dim: 4
+  obstacle_dim: 5
+  action_dim: 2
+  memory_dim: 64
+  fusion_dim: 128
+  attention_heads: 2
+  critic_dim: 64
+  log_std_init: -0.5
+  log_std_min: -5.0
+  log_std_max: 2.0
+training:
+  device: cuda
+  seed: 0
+  num_envs: 8
+  total_sampled_steps: 8192
+  actor_learning_rate: 0.0003
+  critic_learning_rate: 0.0003
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_ratio: 0.2
+  entropy_coefficient: 0.01
+  value_loss_coefficient: 0.5
+  max_grad_norm: 0.5
+  rollout_steps: 128
+  sequence_length: 16
+  ppo_epochs: 4
+  minibatch_joint_transitions: 256
+  normalize_advantages: true
+  clip_value_loss: true
+  target_kl: null
+  memory_reset_each_step: false
+  evaluation_seed_base: 10000000
+  evaluation_episodes: 6
+  evaluation_interval: 4096
+  checkpoint_interval: 4096
+  torch_threads: 1
+environment:
+  version: cooperative_navigation_v1
+  observation_schema: local_task_state_v1
+  num_agents: 4
+  num_obstacles: 3
+  scene: simple
+  dt: 0.12
+  max_steps: 80
+  max_speed: 1.0
+  max_acceleration: 1.0
+  visibility_radius: 1.25
+  robot_radius: 0.07
+  obstacle_radius: 0.12
+  goal_tolerance: 0.18
+  shuffle_slots: true
+  reward:
+    progress: 5.0
+    formation: 0.1
+    collision: 2.0
+    smoothness: 0.01
+
