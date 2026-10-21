@@ -1,0 +1,43 @@
+environment_id: navigation3d-v1
+observation_schema: local_navigation3d_20_plus_10_per_peer_v1
+num_agents: 4
+dt: 0.2
+max_steps: 400
+initial_center_ned: [-1200.0, 0.0, -800.0]
+formation_offsets_ned:
+  - [-75.0, -75.0, 0.0]
+  - [-75.0, 75.0, 0.0]
+  - [75.0, -75.0, 0.0]
+  - [75.0, 75.0, 0.0]
+initial_jitter_m: 5.0
+initial_speed: 180.0
+active_agents: [true, true, true, true]
+waypoint_centers_ned:
+  - [0.0, 0.0, -1000.0]
+  - [1100.0, 400.0, -900.0]
+goal_radius_m: 60.0
+visibility_radius_m: 1500.0
+distance_scale_m: 6000.0
+bounds:
+  horizontal_limit_m: 4000.0
+  min_altitude_m: 100.0
+  max_altitude_m: 2500.0
+motion:
+  v_min: 80.0
+  v_max: 250.0
+  pitch_limit_rad: 1.0471975511965976
+  heading_delta_max: 0.08726646259971647
+  pitch_delta_max: 0.05235987755982989
+  speed_delta_max: 5.0
+reward:
+  gamma: 0.99
+  distance_weight: 0.1
+  alignment_weight: 0.05
+  formation_weight: 0.05
+  formation_scale_m: 200.0
+  danger_radius_m: 60.0
+  collision_radius_m: 20.0
+  danger_penalty: 0.02
+  failure_penalty: 10.0
+  time_penalty: 0.001
+  completion_bonus: 10.0
