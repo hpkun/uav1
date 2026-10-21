@@ -14,10 +14,12 @@ def validate_algorithm_config(config, env_config=None):
     n, t, i = (config[key] for key in ('network','training','implementation'))
     if config.get('algorithm') != 'ippo':
         raise ValueError('algorithm must be ippo')
-    if config.get('environment') != dict(environment_version='3.41', team_size=4):
-        raise ValueError('IPPO requires v3.41 4v4 identity')
-    if [n[k] for k in ('observation_dim','action_dim','num_agents')] != [45,3,4]:
-        raise ValueError('IPPO requires 45/3/4 dimensions')
+    version = config.get('environment',{}).get('environment_version')
+    if version not in ('3.41','3.42','3.43') or config['environment'] != dict(environment_version=version,team_size=4):
+        raise ValueError('IPPO requires a supported 4v4 identity')
+    obs_dim = 49 if version == '3.43' else 45
+    if [n[k] for k in ('observation_dim','action_dim','num_agents')] != [obs_dim,3,4]:
+        raise ValueError(f'IPPO requires {obs_dim}/3/4 dimensions')
     if n.get('parameter_sharing') is not True or n.get('critic_scope') != 'local_observation' or n.get('critic_type') != 'local':
         raise ValueError('IPPO requires parameter sharing and local_observation critic')
     for key in ('actor_hidden_layers','critic_hidden_layers'):
@@ -53,8 +55,10 @@ def validate_algorithm_config(config, env_config=None):
         raise ValueError('development evaluation seeds must be below reserved holdout range')
     if env_config is not None:
         validate_config(env_config)
-        if str(env_config['environment_version']) != '3.41' or environment_dimensions(env_config) != (45,3,4):
-            raise ValueError('environment must be v3.41 4v4')
+        if str(env_config['environment_version']) != version or environment_dimensions(env_config) != (obs_dim,3,4):
+            raise ValueError('IPPO algorithm/environment identity mismatch')
+        from env.v343_config import validate_shaping_gamma
+        validate_shaping_gamma(env_config,config)
 
 def validate_checkpoint(state, env_config, config):
     from .trainer import IPPO_IMPL_VERSION
@@ -66,23 +70,24 @@ def validate_checkpoint(state, env_config, config):
     e = state.get('extra',{})
     for key, expected in [('environment_config_sha256', config_sha256(env_config)),
                           ('algorithm_config_sha256', config_sha256(config)),
-                          ('environment_version','3.41'), ('parameter_sharing',True),
+                          ('environment_version',env_config['environment_version']), ('parameter_sharing',True),
                           ('critic_scope','local_observation'), ('bit_exact_training_resume',False)]:
         if e.get(key) != expected:
             raise RuntimeError(f'checkpoint {key} mismatch/missing')
     validate_policy_protocol(state, config)
-    architecture = dict(observation_dim=45, action_dim=3, num_agents=4,
+    obs_dim = config['network']['observation_dim']
+    architecture = dict(observation_dim=obs_dim, action_dim=3, num_agents=4,
         actor_hidden_layers=config['network']['actor_hidden_layers'],
         critic_hidden_layers=config['network']['critic_hidden_layers'],
         actor_activation='relu', critic_activation='relu', critic_type='local')
     if e.get('network_architecture') != architecture:
         raise RuntimeError('checkpoint network_architecture mismatch')
-    for key, expected in [('actor_parameter_count',78342),('critic_parameter_count',77825)]:
+    for key, expected in [('actor_parameter_count',78342+256*(obs_dim-45)),('critic_parameter_count',77825+256*(obs_dim-45))]:
         component = key.split('_')[0]
         if e.get(key) != expected or sum(v.numel() for v in state[component].values()) != expected:
             raise RuntimeError(f'checkpoint {key} mismatch')
-    if state['critic']['value_network.0.weight'].shape != (256,45):
-        raise RuntimeError('checkpoint critic is not local 45D')
+    if state['critic']['value_network.0.weight'].shape != (256,obs_dim):
+        raise RuntimeError('checkpoint local critic observation dimension mismatch')
     required = ('training_seed','training_num_envs','training_total_sampled_steps','training_smoke',
                 'best_evaluation','evaluation_history','ppo_protocol','algorithm_config', 'evaluation_seed_base')
     if any(key not in e for key in required):

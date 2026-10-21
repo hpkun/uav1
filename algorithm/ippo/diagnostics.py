@@ -16,7 +16,7 @@ def action_statistics(actions, alive):
             f'action_saturation_0_99_{name}':float((np.abs(a)>.99).mean())})
     return out
 
-def rollout_action_diagnostics(batch):
+def rollout_action_diagnostics(batch, environment_version='3.41'):
     out=action_statistics(batch.actions,batch.alive_masks)
     # Consecutive controls must belong to the same episode and the agent must
     # be alive at both control instants. Terminal reward samples stay in PPO.
@@ -39,7 +39,7 @@ def rollout_action_diagnostics(batch):
         selected=value[mask]
         out[name+'_mean']=float(selected.mean()) if len(selected) else None
         out[name+'_std']=float(selected.std()) if len(selected) else None
-    out['flight_state_source']='decoded v3.41 own observation (float32); death transition angles excluded'
+    out['flight_state_source']=f'decoded v{environment_version} own observation (float32); death transition angles excluded'
     out['flight_angle_samples']=int(physical.sum())
     out.update(action_source='verified_executed_red_actions',
         consecutive_pair_samples=int(pair.sum()),units='alive agent control steps',
@@ -122,8 +122,9 @@ def save_observation_bank(path, observations, source):
     if path.exists():
         raise FileExistsError(path)
     observations=np.asarray(observations,dtype=np.float32)
-    if observations.shape[-2:]!=(4,45) or not np.isfinite(observations).all():
-        raise ValueError('diagnostic bank must contain finite [...,4,45] observations')
+    obs_dim = 49 if source.get('environment_version') == '3.43' else 45
+    if observations.shape[-2:]!=(4,obs_dim) or not np.isfinite(observations).all():
+        raise ValueError(f'diagnostic bank must contain finite [...,4,{obs_dim}] observations')
     np.savez_compressed(path,observations=observations,source_json=json.dumps(source))
 
 def compare_checkpoints(checkpoints, bank_path, environment_config, algorithm_config, device='cuda'):
@@ -134,6 +135,11 @@ def compare_checkpoints(checkpoints, bank_path, environment_config, algorithm_co
         raise ValueError('holdout/unknown observation bank is forbidden')
     if source.get('environment_config_sha256', config_sha256(environment_config)) != config_sha256(environment_config):
         raise ValueError('diagnostic observation bank environment fingerprint mismatch')
+    if environment_config['environment_version'] in ('3.42','3.43'):
+        if source.get('environment_version') != environment_config['environment_version'] or source.get('environment_config_sha256') != config_sha256(environment_config):
+            raise ValueError('new diagnostic observation bank requires exact environment identity')
+    if observations.shape[-1] != algorithm_config['network']['observation_dim']:
+        raise ValueError('diagnostic observation dimension mismatch')
     previous=None; rows=[]
     for checkpoint in checkpoints:
         trainer=load_checkpoint(checkpoint,algorithm_config,environment_config,device)

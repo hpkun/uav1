@@ -74,8 +74,8 @@ class IPPOTrainer(MAPPOTrainer):
         self.critic_type = str(critic_type)
         if self.critic_type != "local":
             raise ValueError("IPPO requires a local critic")
-        if (observation_dim, action_dim, num_agents) != (45, 3, 4):
-            raise ValueError("IPPO v3.41 requires 45/3/4 dimensions")
+        if observation_dim not in (45,49) or (action_dim, num_agents) != (3,4):
+            raise ValueError("IPPO requires 45 or 49 observations, 3 actions, 4 agents")
         self.attention_heads=int(attention_heads)
         self.actor_hidden_dim = int(hidden_dim)
         self.critic_hidden_dim = int(hidden_dim if critic_hidden_dim is None else critic_hidden_dim)
@@ -329,7 +329,7 @@ class IPPOTrainer(MAPPOTrainer):
             ippo_impl_version=IPPO_IMPL_VERSION,
             actor_parameter_count=sum(p.numel() for p in self.actor.parameters()),
             critic_parameter_count=sum(p.numel() for p in self.critic.parameters()),
-            network_architecture=dict(observation_dim=45, action_dim=3, num_agents=4,
+            network_architecture=dict(observation_dim=self.observation_dim, action_dim=3, num_agents=4,
                 actor_hidden_layers=[self.actor_hidden_dim]*2,
                 critic_hidden_layers=[self.critic_hidden_dim]*2,
                 actor_activation='relu', critic_activation='relu', critic_type='local'),

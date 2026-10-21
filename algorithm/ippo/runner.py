@@ -30,7 +30,7 @@ class IPPOTrainingRunner(MAPPOTrainingRunner):
         expected = environment_dimensions(env_config)
         if configured != expected:
             raise ValueError(f"network/environment dimension mismatch: configured obs/action/agents={configured}, environment={expected}")
-        if 'environment' in algorithm_config or str(env_config['environment_version']) in ('3.38', '3.39','3.40', '3.41'):
+        if 'environment' in algorithm_config or str(env_config['environment_version']) in ('3.38', '3.39','3.40', '3.41', '3.42', '3.43'):
             expected_identity = {
                 'environment_version': str(env_config['environment_version']),
                 'team_size': expected[2],
@@ -118,12 +118,13 @@ class IPPOTrainingRunner(MAPPOTrainingRunner):
         batch = RolloutBatch(**{key: np.stack(value).astype(np.float32)
                                for key, value in storage.items()})
         from .diagnostics import rollout_action_diagnostics
-        diagnostics = rollout_action_diagnostics(batch)
+        diagnostics = rollout_action_diagnostics(batch,self.env_config['environment_version'])
         bank_path = self.output_dir / 'diagnostic_observations.npz'
         if not bank_path.exists():
             from .diagnostics import save_observation_bank
             save_observation_bank(bank_path, batch.observations[:min(len(batch.observations),16)],
                 dict(split='training',seed_provenance=sorted(self.vector.used_training_seeds),
+                     environment_version=self.env_config['environment_version'],
                      environment_config_sha256=config_sha256(self.env_config),
                      source='first rollout observations before optimization'))
         with (self.output_dir / 'action_diagnostics.jsonl').open('a',encoding='utf-8') as stream:

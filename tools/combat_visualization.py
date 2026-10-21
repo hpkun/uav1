@@ -15,6 +15,7 @@ from tools.combat_trace import (TRACE_SCHEMA_VERSION, FEATURE_NAMES, FRAME_FIELD
 from env.v36_geometry import angle_within
 from env.v336_weapon import PaperATAHAWeapon
 from env.v317_weapon import BodyFrameGaussianWeapon
+from env.v342_weapon import ConeWeapon
 
 
 def states_array(states: list[AircraftState]) -> np.ndarray:
@@ -55,7 +56,10 @@ class RecordingCombatEnv(MultiUAVCombatEnv):
             # Capture the actual firing state before simultaneous kills mutate alive flags.
             geometry = engagement_geometry(attackers[attacker], targets[target])
             audit = {'range_pass': bool(self.config['weapon']['range_min'] <= geometry.distance <= self.config['weapon']['range_max'])}
-            if isinstance(self.weapon, PaperATAHAWeapon):
+            if isinstance(self.weapon, ConeWeapon):
+                audit.update(cone_pass=bool(angle_within(geometry.off_boresight,self.weapon.off_boresight_max)),
+                             probability_angular_frame='signed_body_azimuth_elevation')
+            elif isinstance(self.weapon, PaperATAHAWeapon):
                 audit.update(ata_pass=bool(angle_within(abs(geometry.ata),self.weapon.ata_max)),
                              ha_pass=bool(angle_within(abs(geometry.ha),self.weapon.ha_max)))
             elif isinstance(self.weapon, BodyFrameGaussianWeapon):
