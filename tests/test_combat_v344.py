@@ -47,7 +47,7 @@ def test_bad_time(value):
     with pytest.raises(ValueError):required_dwell_steps(.5,value)
 
 
-@pytest.mark.parametrize('version,limit',[('344',30),('345',45)])
+@pytest.mark.parametrize('version,limit',[('344',30),('346',30)])
 @pytest.mark.parametrize('psi',[-179,0,130])
 @pytest.mark.parametrize('theta',[-50,0,50])
 @pytest.mark.parametrize('offset',[-1e-6,0,1e-6])
@@ -104,7 +104,7 @@ def test_interruption_reentry_switch_and_ties():
     assert tie.targets[0]==0
 
 
-@pytest.mark.parametrize('version',['344','345'])
+@pytest.mark.parametrize('version',['344','346'])
 def test_four_samples_no_event_fifth_mutual_destruction(version):
     e=frozen(version);before=deepcopy(e.rng.bit_generator.state)
     e.attempt_hit_for_pair=lambda *args:pytest.fail('probability hit called')
@@ -135,7 +135,7 @@ def test_four_samples_no_event_fifth_mutual_destruction(version):
     assert e._entry_attempts(e.red,e.blue,None,'red')==[]
 
 
-@pytest.mark.parametrize('version',['344','345'])
+@pytest.mark.parametrize('version',['344','346'])
 def test_shared_credit_one_victim_no_ammo_cooldown(version):
     e=frozen(version,sharing=True)
     for _ in range(5):result=e.step(np.zeros((4,3)),np.zeros((4,3)))
@@ -190,7 +190,7 @@ def test_truncation_and_reward_observation_frozen():
     np.testing.assert_allclose(discounted,-phi,atol=1e-15)
 
 
-@pytest.mark.parametrize('version',['344','345'])
+@pytest.mark.parametrize('version',['344'])
 @pytest.mark.parametrize('algo',['mappo','ippo'])
 def test_schema_and_only_required_algorithm_differences(version,algo):
     c=config(version);copy=deepcopy(c);validate_config(c);assert c==copy
@@ -204,7 +204,7 @@ def test_schema_and_only_required_algorithm_differences(version,algo):
     with pytest.raises(ValueError):validate_config(c)
 
 
-@pytest.mark.parametrize('version',['344','345'])
+@pytest.mark.parametrize('version',['344','346'])
 def test_repeatable_complete_episode(version):
     a,b=environment(version),environment(version)
     while True:

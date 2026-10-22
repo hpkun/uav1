@@ -28,7 +28,7 @@ def require_cuda():
     torch.set_num_threads(1)
 
 
-@pytest.mark.parametrize('version',['344','345'])
+@pytest.mark.parametrize('version',['344','346'])
 def test_formal_configuration_only_identity_and_observation_changed(version):
     ec,ac=configs(version);old=configs('341')[1]
     validate_config_pair(ec,ac)
@@ -40,7 +40,7 @@ def test_formal_configuration_only_identity_and_observation_changed(version):
     assert obs.shape==(4,49) and np.isfinite(obs).all()
 
 
-@pytest.mark.parametrize('version',['344','345'])
+@pytest.mark.parametrize('version',['344','346'])
 @pytest.mark.parametrize('field,value',[('observation_dim',45),('action_dim',4),('num_agents',5),
                                        ('hidden_dim',32),('attention_heads',2)])
 def test_strict_dimensions(version,field,value):
@@ -48,11 +48,11 @@ def test_strict_dimensions(version,field,value):
     with pytest.raises(RuntimeError,match='exact dimensions'):validate_config_pair(ec,ac)
 
 
-@pytest.mark.parametrize('version',['344','345'])
+@pytest.mark.parametrize('version',['344','346'])
 def test_gamma_and_identity_fail_closed(version):
     ec,ac=configs(version);bad=deepcopy(ac);bad['training']['gamma']=.98
     with pytest.raises(ValueError,match='gamma'):validate_config_pair(ec,bad)
-    bad=deepcopy(ac);bad['environment']['environment_version']='3.45' if version=='344' else '3.44'
+    bad=deepcopy(ac);bad['environment']['environment_version']='3.46' if version=='344' else '3.44'
     with pytest.raises(RuntimeError,match='identity'):validate_config_pair(ec,bad)
 
 
@@ -74,7 +74,7 @@ def complete_episode(version):
     return replay,obs,info
 
 
-@pytest.mark.parametrize('version',['344','345'])
+@pytest.mark.parametrize('version',['344','346'])
 def test_joint_replay_full_episodes_dead_mask_baseline_and_update(version):
     replay,obs,_=complete_episode(version)
     batch=replay.sample(len(replay))
@@ -128,7 +128,7 @@ def frozen_record(version,sharing=False):
     return dict(episode_return=team,mean_agent_episode_return=agent,**info),infos
 
 
-@pytest.mark.parametrize('version',['344','345'])
+@pytest.mark.parametrize('version',['344','346'])
 def test_dwell_log_rates_unique_victims_and_evaluator_consistency(version,tmp_path):
     record,infos=frozen_record(version);shared,_=frozen_record(version,True)
     assert record['draw'] and record['red_survivors']==record['blue_survivors']==0
@@ -157,7 +157,7 @@ def test_dwell_log_rates_unique_victims_and_evaluator_consistency(version,tmp_pa
     assert runner.recent()['legacy_fire_metrics_applicable'] is False
 
 
-@pytest.mark.parametrize('source',['341','344','345'])
+@pytest.mark.parametrize('source',['341','344','346'])
 def test_checkpoint_all_networks_optimizers_and_version_isolation(source,tmp_path):
     ec,ac=configs(source);t=MAACTrainer(ec,ac,'cuda',seed=4,smoke=True)
     obs,_=MultiUAVCombatEnv(ec).reset(1);path=tmp_path/'c.pt';t.sampled_steps=24;t.save(path)
@@ -168,7 +168,7 @@ def test_checkpoint_all_networks_optimizers_and_version_isolation(source,tmp_pat
         for p,q in zip(getattr(t,name).parameters(),getattr(loaded,name).parameters()):assert torch.equal(p,q)
     for name in ('actor_optimizer','critic_optimizer','actor_updates','policy_updates','critic_updates','target_updates'):
         assert name in state
-    for other in set(('341','344','345'))-{source}:
+    for other in set(('341','344','346'))-{source}:
         with pytest.raises(RuntimeError):validate_checkpoint(state,*configs(other))
     for key in ('environment_config_sha256','algorithm_config_sha256'):
         changed=deepcopy(state);changed['extra'].pop(key)

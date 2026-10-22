@@ -122,7 +122,7 @@ def save_observation_bank(path, observations, source):
     if path.exists():
         raise FileExistsError(path)
     observations=np.asarray(observations,dtype=np.float32)
-    obs_dim = 49 if source.get('environment_version') in ('3.43','3.44','3.45') else 45
+    obs_dim = 49 if source.get('environment_version') in ('3.43','3.44','3.46') else 45
     if observations.shape[-2:]!=(4,obs_dim) or not np.isfinite(observations).all():
         raise ValueError(f'diagnostic bank must contain finite [...,4,{obs_dim}] observations')
     np.savez_compressed(path,observations=observations,source_json=json.dumps(source))
@@ -135,7 +135,7 @@ def compare_checkpoints(checkpoints, bank_path, environment_config, algorithm_co
         raise ValueError('holdout/unknown observation bank is forbidden')
     if source.get('environment_config_sha256', config_sha256(environment_config)) != config_sha256(environment_config):
         raise ValueError('diagnostic observation bank environment fingerprint mismatch')
-    if environment_config['environment_version'] in ('3.42','3.43','3.44','3.45'):
+    if environment_config['environment_version'] in ('3.42','3.43','3.44','3.46'):
         if source.get('environment_version') != environment_config['environment_version'] or source.get('environment_config_sha256') != config_sha256(environment_config):
             raise ValueError('new diagnostic observation bank requires exact environment identity')
     if observations.shape[-1] != algorithm_config['network']['observation_dim']:

@@ -1,6 +1,6 @@
-algorithm: MAPPO
+algorithm: ippo
 network:
-  critic_type: mlp
+  critic_type: local
   observation_dim: 49
   action_dim: 3
   num_agents: 4
@@ -10,7 +10,8 @@ network:
   critic_hidden_layers:
   - 256
   - 256
-  attention_heads: 2
+  parameter_sharing: true
+  critic_scope: local_observation
 training:
   optimizer: Adam
   actor_learning_rate: 0.0003
@@ -47,5 +48,5 @@ implementation:
   evaluation_seed_base: 10000000
   checkpoint_interval_sampled_steps: 500000
 environment:
-  environment_version: '3.45'
+  environment_version: '3.46'
   team_size: 4

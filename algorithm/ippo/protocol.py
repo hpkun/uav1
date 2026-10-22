@@ -15,9 +15,9 @@ def validate_algorithm_config(config, env_config=None):
     if config.get('algorithm') != 'ippo':
         raise ValueError('algorithm must be ippo')
     version = config.get('environment',{}).get('environment_version')
-    if version not in ('3.41','3.42','3.43','3.44','3.45') or config['environment'] != dict(environment_version=version,team_size=4):
+    if version not in ('3.41','3.42','3.43','3.44','3.46') or config['environment'] != dict(environment_version=version,team_size=4):
         raise ValueError('IPPO requires a supported 4v4 identity')
-    obs_dim = 49 if version in ('3.43','3.44','3.45') else 45
+    obs_dim = 49 if version in ('3.43','3.44','3.46') else 45
     if [n[k] for k in ('observation_dim','action_dim','num_agents')] != [obs_dim,3,4]:
         raise ValueError(f'IPPO requires {obs_dim}/3/4 dimensions')
     if n.get('parameter_sharing') is not True or n.get('critic_scope') != 'local_observation' or n.get('critic_type') != 'local':

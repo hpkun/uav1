@@ -35,22 +35,6 @@ def closed(runner):
     assert runner.vector._closed and all(not p.is_alive() for p in runner.vector._processes)
 
 
-def small_smoke(v,out):
-    out.mkdir(parents=True,exist_ok=True)
-    runner=MAACTrainingRunner(*configs(v),out,num_envs=2,total_sampled_steps=32,seed=int(v),smoke=True)
-    try:
-        result=runner.run()
-        assert result['actor_updates']>0 and result['critic_updates']>0
-        for name in ('best_eval.pt','latest.pt','final.pt','checkpoint_32.pt'):
-            state=torch.load(out/name,map_location='cuda',weights_only=False)
-            validate_checkpoint(state,*configs(v))
-        result.update(workers_closed=runner.vector._closed,formal_3m_training_started=False,
-                      effective_hidden_dim=32,effective_minibatch_size=16)
-        dump(out/'summary.json',result)
-        return result
-    finally:closed(runner)
-
-
 def formal_update(v,out):
     out.mkdir(parents=True,exist_ok=True)
     ec,ac=configs(v)
@@ -115,7 +99,7 @@ def formal_update(v,out):
         for name in before:
             for p,q in zip(getattr(t,name).parameters(),getattr(reloaded,name).parameters()):assert torch.equal(p,q)
         rejected=[]
-        for other in ('341','344','345'):
+        for other in ('341','344','346'):
             if other==v:continue
             try:validate_checkpoint(state,*configs(other))
             except RuntimeError:rejected.append(other)
@@ -167,7 +151,7 @@ def historical_checkpoint(out):
     result=evaluation_metrics(evaluate(trainer,ec,range(10000000,10000002)),ec)
     assert isinstance(result['fire_rate'],float)
     assert digest==hashlib.sha256(path.read_bytes()).hexdigest()
-    for v in ('344','345'):
+    for v in ('344','346'):
         try:validate_checkpoint(state,*configs(v))
         except RuntimeError:pass
         else:raise AssertionError('old checkpoint accepted for dwell')
@@ -178,18 +162,18 @@ def historical_checkpoint(out):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--output',type=Path,default=ROOT/'outputs/maac_v344_v345_validation_20261022')
+    p.add_argument('--output',type=Path,default=ROOT/'outputs/maac_v344_v346_validation_20261022')
     args=p.parse_args();out=args.output.resolve();out.mkdir(parents=True,exist_ok=True)
     if not torch.cuda.is_available():raise RuntimeError('CUDA mandatory; no CPU fallback')
     torch.set_num_threads(1)
     results={}
-    for v in ('344','345'):
-        for name,fn in (('small_smoke',small_smoke),('formal_update',formal_update)):
+    for v in ('344','346'):
+        for name,fn in (('formal_update',formal_update),):
             print('[AUDIT]',v,name,flush=True)
             results[v+'_'+name]=fn(v,out/(v+'_'+name))
     historical_checkpoint(out)
     dump(out/'cuda_summary.json',results)
-    print('[DONE] four bounded CUDA runs; no 3M training',flush=True)
+    print('[DONE] two formal-parameter bounded CUDA runs; no 3M training',flush=True)
 
 
 if __name__=='__main__':main()

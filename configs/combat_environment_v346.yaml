@@ -1,4 +1,4 @@
-environment_version: '3.45'
+environment_version: '3.46'
 simulation:
   dt: 0.1
   max_steps: 1000
@@ -36,7 +36,7 @@ sensor:
 weapon:
   range_min: 0.0
   range_max: 2000.0
-  off_boresight_max: 0.7853981633974483
+  off_boresight_max: 0.5235987755982988
 reward:
   kill_reward: 10.0
   loss_penalty: -10.0
@@ -81,9 +81,3 @@ research_reward:
   potential_distance: 8000.0
   potential_distance_weight: 0.5
   potential_angle_weight: 0.5
-  tactical_outer_distance: 4000.0
-  tactical_span: 2000.0
-  alignment_max: 1.0471975511965976
-  offense_base: 0.005
-  offense_tail: 0.015
-  defense_scale: 0.01

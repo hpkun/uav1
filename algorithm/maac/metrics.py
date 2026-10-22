@@ -1,5 +1,5 @@
 """MAAC log aliases; dwell events never masquerade as probabilistic fire."""
-DWELL_VERSIONS=('3.44','3.45')
+DWELL_VERSIONS=('3.44','3.46')
 EVENT_SEMANTICS='continuous_dwell_neutralization'
 
 

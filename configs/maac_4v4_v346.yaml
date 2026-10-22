@@ -1,6 +1,6 @@
 algorithm: MAAC
 environment:
-  environment_version: '3.45'
+  environment_version: '3.46'
   team_size: 4
 network:
   observation_dim: 49
