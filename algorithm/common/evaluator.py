@@ -103,16 +103,23 @@ def aggregate_combat_records(records: list[dict[str, Any]]) -> dict[str, float]:
             result[f'average_blue_{name}'] = mean(f'blue_{name}')
     if all(row.get('event_semantics') == 'continuous_dwell_neutralization' for row in records):
         result.update(event_semantics='continuous_dwell_neutralization',legacy_fire_metrics_applicable=False)
+        result['mean_episode_return']=result['average_return']
+        result['mutual_annihilation_draw_rate']=float(np.mean([
+            bool(row['draw']) and row['red_survivors']==0 and row['blue_survivors']==0 for row in records]))
         for side in ('red','blue'):
             for name in ('dwell_eligible_pair_steps','dwell_active_agent_steps','dwell_started',
                          'dwell_interrupted','dwell_target_switches','dwell_completed','dwell_neutralizations',
                          'mean_dwell_duration_steps','max_dwell_duration_steps'):
                 result[f'average_{side}_{name}']=mean(f'{side}_{name}')
+                result[f'{side}_{name}']=result[f'average_{side}_{name}']
             for event in ('start','complete','geometry'):
                 key=f'{side}_first_dwell_{event}_step'
                 values=[row[key] for row in records if row[key] is not None]
                 result[f'{side}_dwell_{event}_episode_rate']=len(values)/len(records)
                 result[f'average_{side}_first_dwell_{event}_step']=float(np.mean(values)) if values else None
+        # Unprefixed rates follow the learned Red team's historical rate convention.
+        result['dwell_start_episode_rate']=result['red_dwell_start_episode_rate']
+        result['dwell_complete_episode_rate']=result['red_dwell_complete_episode_rate']
     return result
 
 

@@ -1,4 +1,4 @@
-"""Strict CUDA deterministic evaluation of the v3.29 continuous MAAC adaptation."""
+"""Strict CUDA deterministic evaluation of registered continuous MAAC versions."""
 import argparse
 import json
 from pathlib import Path
@@ -10,6 +10,7 @@ sys.path.insert(0,str(ROOT))
 from algorithm.maac.trainer import MAACTrainer
 from algorithm.maac.protocol import validate_checkpoint
 from algorithm.common.evaluator import evaluate
+from algorithm.maac.metrics import evaluation_metrics
 
 
 def main():
@@ -25,9 +26,9 @@ def main():
     ec=yaml.safe_load(Path(args.env_config).read_text());ac=yaml.safe_load(Path(args.algorithm_config).read_text())
     state=torch.load(args.checkpoint,map_location='cuda',weights_only=False);validate_checkpoint(state,ec,ac)
     trainer=MAACTrainer(ec,ac,'cuda',state['training_seed'],state['extra']['training_smoke']);trainer.load(args.checkpoint)
-    row=evaluate(trainer,ec,range(args.seed_base,args.seed_base+args.episodes))
+    row=evaluation_metrics(evaluate(trainer,ec,range(args.seed_base,args.seed_base+args.episodes)),ec)
     row.update(algorithm='MAAC',variant=ac['implementation']['variant'],environment_version=ec['environment_version'],
-        evaluation_mode='deterministic',fire_rate=row['red_attempt_episode_rate'],kill_rate=row['red_kill_episode_rate'])
+        evaluation_mode='deterministic')
     out=Path(args.output);out.parent.mkdir(parents=True,exist_ok=True);out.write_text(json.dumps(row,indent=2,allow_nan=False))
     print(json.dumps(row,indent=2))
 

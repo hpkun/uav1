@@ -1,4 +1,4 @@
-"""Continuous off-policy MAAC v3.29 training; only explicit CUDA execution."""
+"""Continuous off-policy MAAC training for registered versions; CUDA only."""
 import argparse
 import json
 from pathlib import Path
@@ -12,6 +12,7 @@ from algorithm.maac.protocol import validate_config_pair
 from algorithm.maac.protocol import IMPLEMENTATION_VERSION
 from algorithm.maac.protocol import validate_checkpoint_for_resume
 from algorithm.maac.runner import MAACTrainingRunner
+from algorithm.maac.metrics import DWELL_VERSIONS,EVENT_SEMANTICS
 
 
 def main():
@@ -45,6 +46,8 @@ def main():
         effective_sampled_steps_per_update=runner.update_interval,
         effective_baseline_samples=runner.trainer.baseline_samples,
         effective_replay_capacity=runner.replay.capacity,
+        **(dict(event_semantics=EVENT_SEMANTICS,legacy_fire_metrics_applicable=False)
+           if ec['environment_version'] in DWELL_VERSIONS else {}),
         formal_exact_resume_supported=False,replay_buffer_in_checkpoint=False),indent=2))
     summary=runner.run();(out/'run_summary.json').write_text(json.dumps(summary,indent=2,allow_nan=False))
     print(f"[DONE] MAAC | steps={summary['sampled_steps']} | saved={out}",flush=True)

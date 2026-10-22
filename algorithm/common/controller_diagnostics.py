@@ -22,7 +22,7 @@ def controller_metric_values(infos):
                 values.setdefault(f'{side}_{key}', []).extend([total / n] * n)
     for key in ('live', 'range', 'range_az', 'geometry', 'eligible'):
         rows = [info['red_firing_geometry_agent_steps'][key] for info in infos
-                if 'red_firing_geometry_agent_steps' in info]
+                if key in info.get('red_firing_geometry_agent_steps', {})]
         if rows:
             values[f'red_funnel_{key}_agent_steps_per_env_step'] = rows
     return {key: np.asarray(value, dtype=float) for key, value in values.items()}

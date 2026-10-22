@@ -4,10 +4,11 @@ from pathlib import Path
 import numpy as np
 import torch
 from algorithm.common.vector_env import ParallelVectorEnv
-from algorithm.common.evaluator import evaluate,episode_return_metrics
+from algorithm.common.evaluator import evaluate,episode_return_metrics,aggregate_combat_records
 from algorithm.common.controller_diagnostics import controller_metric_values
 from .trainer import MAACTrainer
 from .replay import JointReplayBuffer
+from .metrics import DWELL_VERSIONS,evaluation_metrics,empty_dwell_metrics
 
 
 def steps_text(value):
@@ -67,6 +68,11 @@ class MAACTrainingRunner:
 
     def recent(self):
         rows=self.records[-self.config['training']['recent_episode_window']:]
+        if self.env_config['environment_version'] in DWELL_VERSIONS:
+            if not rows:return empty_dwell_metrics()
+            result=evaluation_metrics(aggregate_combat_records(rows),self.env_config)
+            result['mean_return']=result['average_return']
+            return result
         if not rows:return dict(mean_return=None,win_rate=None,fire_rate=None,kill_rate=None)
         return dict(mean_return=float(np.mean([r['episode_return'] for r in rows])),
             win_rate=float(np.mean([r['red_success'] for r in rows])),
@@ -84,24 +90,33 @@ class MAACTrainingRunner:
         for side in ('red','blue'):
             for field in ('step_fire_attempts','step_weapon_hits','step_attack_kills'):
                 key=f'{side}_{field}';row[key]=sum(i[key] for i in infos)
+            if self.env_config['environment_version'] in DWELL_VERSIONS:
+                row[f'{side}_step_dwell_completed']=sum(int(np.sum(i[f'{side}_dwell_completed_this_step'])) for i in infos)
+        if self.env_config['environment_version'] in DWELL_VERSIONS:
+            row['episode_metrics_scope']='equal-weight completed episodes in recent_episode_window'
+            row['step_metrics_scope']='all transitions since previous metrics write'
         self.write('training_metrics.jsonl',row)
         self.write('optimization_metrics.jsonl',dict(sampled_steps=self.trainer.sampled_steps,**self.last_metrics))
 
     def evaluate(self):
         row=dict(sampled_steps=self.trainer.sampled_steps,evaluation_mode='deterministic',
             evaluation_seeds=self.eval_seeds,**evaluate(self.trainer,self.env_config,self.eval_seeds))
-        row.update(fire_rate=row['red_attempt_episode_rate'],kill_rate=row['red_kill_episode_rate'])
+        row=evaluation_metrics(row,self.env_config)
         self.evaluation_history.append(row);self.write('evaluation_metrics.jsonl',row)
         key=(row['win_rate'],row['average_return'],-row['average_red_loss'])
         if self.best_key is None or key>self.best_key:
             self.best_key=key;self.trainer.save(self.output_dir/'best_eval.pt')
-        print(f"[EVAL] {steps_text(row['sampled_steps'])} | deterministic | win={row['win_rate']:.1%} | fire={row['fire_rate']:.1%} | kill={row['kill_rate']:.1%} | R={row['average_return']:.2f} | len={row['episode_length']:.0f}",flush=True)
+        event=(f"dwell_start={row['dwell_start_episode_rate']:.1%} | dwell_complete={row['dwell_complete_episode_rate']:.1%} | mutual_draw={row['mutual_annihilation_draw_rate']:.1%}"
+               if self.env_config['environment_version'] in DWELL_VERSIONS else f"fire={row['fire_rate']:.1%}")
+        print(f"[EVAL] {steps_text(row['sampled_steps'])} | deterministic | win={row['win_rate']:.1%} | {event} | kill={row['kill_rate']:.1%} | R={row['average_return']:.2f} | len={row['episode_length']:.0f}",flush=True)
         return row
 
     def run(self):
         t=self.config['training'];next_log=t['console_interval_sampled_steps']
         next_eval=t['evaluation_interval_sampled_steps'];next_save=t['checkpoint_interval_sampled_steps']
         print(f"[START] MAAC | env=v{self.env_config['environment_version']} | {self.trainer.num_agents}v{self.trainer.num_agents} | seed={self.seed} | cuda | envs={self.num_envs} | steps={steps_text(self.total_steps)}",flush=True)
+        if self.env_config['environment_version'] in DWELL_VERSIONS:
+            print('[EVENT] continuous_dwell_neutralization | fire_rate=N/A | dwell_complete counts attackers; neutralizations count unique victims',flush=True)
         pending=0;infos=[]
         try:
             while self.trainer.sampled_steps<self.total_steps:
@@ -130,4 +145,6 @@ class MAACTrainingRunner:
 
     def log_train(self,recent):
         fmt=lambda x:'-' if x is None else f'{x:.3f}'
-        print(f"[TRAIN] {steps_text(self.trainer.sampled_steps)}/{steps_text(self.total_steps)} | ep={len(self.records)} | win={fmt(recent['win_rate'])} | fire={fmt(recent['fire_rate'])} | kill={fmt(recent['kill_rate'])} | R={fmt(recent['mean_return'])} | Qloss={fmt(self.last_metrics.get('critic_loss'))} | Aloss={fmt(self.last_metrics.get('actor_loss'))}",flush=True)
+        event=(f"dwell_start={fmt(recent['dwell_start_episode_rate'])} | dwell_complete={fmt(recent['dwell_complete_episode_rate'])} | mutual_draw={fmt(recent['mutual_annihilation_draw_rate'])}"
+               if self.env_config['environment_version'] in DWELL_VERSIONS else f"fire={fmt(recent['fire_rate'])}")
+        print(f"[TRAIN] {steps_text(self.trainer.sampled_steps)}/{steps_text(self.total_steps)} | ep={len(self.records)} | win={fmt(recent['win_rate'])} | {event} | kill={fmt(recent['kill_rate'])} | R={fmt(recent['mean_return'])} | Qloss={fmt(self.last_metrics.get('critic_loss'))} | Aloss={fmt(self.last_metrics.get('actor_loss'))}",flush=True)

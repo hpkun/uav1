@@ -4,14 +4,14 @@ from algorithm.common.protocol import config_sha256
 
 IMPLEMENTATION_VERSION=3
 VARIANT='madsac_paper_maac_continuous_shared_eq15_mc_v3'
-DIMENSIONS={'3.29':(56,3,5),'3.30':(45,3,4),'3.31':(45,3,4),'3.32':(45,3,4),'3.33':(45,3,4),'3.34':(45,3,4),'3.35':(45,3,4),'3.36':(45,3,4),'3.37':(45,3,4),'3.38':(45,3,4),'3.39':(45,3,4),'3.41':(45,3,4)}
+DIMENSIONS={'3.29':(56,3,5),'3.30':(45,3,4),'3.31':(45,3,4),'3.32':(45,3,4),'3.33':(45,3,4),'3.34':(45,3,4),'3.35':(45,3,4),'3.36':(45,3,4),'3.37':(45,3,4),'3.38':(45,3,4),'3.39':(45,3,4),'3.41':(45,3,4),'3.44':(49,3,4),'3.45':(49,3,4)}
 
 
 def validate_config_pair(env_config,config):
     validate_config(env_config)
     expected_dims=DIMENSIONS.get(env_config.get('environment_version'))
     if expected_dims is None or environment_dimensions(env_config)!=expected_dims:
-        raise RuntimeError('MAAC requires a registered supported environment identity (environment_version) with exact dimensions: v3.29 uses 56/3/5; v3.30-v3.39 and v3.41 use 45/3/4')
+        raise RuntimeError('MAAC requires a registered supported environment identity (environment_version) with exact dimensions: v3.29 uses 56/3/5; v3.30-v3.39 and v3.41 use 45/3/4; v3.44-v3.45 use 49/3/4')
     if config.get('algorithm')!='MAAC' or config.get('environment')!={'environment_version':env_config['environment_version'],'team_size':expected_dims[2]}:
         raise RuntimeError('MAAC algorithm/environment identity mismatch')
     n,t=config['network'],config['training']
@@ -28,6 +28,8 @@ def validate_config_pair(env_config,config):
     if t['replay_capacity']<max(t['minibatch_size'],t['learning_starts']):raise RuntimeError('MAAC replay too small')
     if not 0<=t['gamma']<=1 or not 0<t['tau']<=1 or t['alpha']<0 or min(t['lr_actor'],t['lr_critic'])<=0:
         raise RuntimeError('invalid MAAC discount/temperature/update/learning rates')
+    from env.v343_config import validate_shaping_gamma
+    validate_shaping_gamma(env_config,config)
 
 
 def identity(env_config,config,smoke=False):

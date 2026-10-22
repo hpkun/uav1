@@ -212,7 +212,7 @@ def test_actual_four_agent_algorithm_networks(name):
 def test_old_checkpoint_version_rejected(name):
     cfg=yaml.safe_load(Path(f'configs/{name}_4v4_v330.yaml').read_text());ec=env().config
     s=dict(algorithm='MAPPO' if name=='mappo' else 'MAAC' if name=='maac' else 'madsac',
-        implementation_version=3,extra=dict(environment_version='3.29',training_smoke=True))
+        implementation_version=5 if name=='madsac' else 3,extra=dict(environment_version='3.29',training_smoke=True))
     if name=='mappo':
         from algorithm.common.checkpoint import validate_checkpoint_for_evaluation,validate_checkpoint_for_resume
         for fn in (validate_checkpoint_for_evaluation,validate_checkpoint_for_resume):
