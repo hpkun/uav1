@@ -20,6 +20,7 @@ from algorithm.madsac.protocol import validate_madsac_checkpoint
 from tools.combat_visualization import (FEATURE_NAMES, FRAME_FIELDS, TRANSITION_FIELDS,
     TRACE_SCHEMA_VERSION, COOLDOWN_FIELDS, RecordingCombatEnv, append_frame, checkpoint_sha256,
     dump_metadata, ensure_fresh_output, write_trace)
+from tools.combat_trace import DWELL_FIELDS
 
 
 def resolved(value: str | Path) -> Path:
@@ -35,15 +36,18 @@ def record(trainer: Any, env_config: dict[str, Any], seed: int, output_dir: str 
     ensure_fresh_output(output_dir)
     env = RecordingCombatEnv(env_config)
     observation, _ = env.reset(seed)
+    dwell=getattr(env,'event_semantics',None)=='continuous_dwell_neutralization'
     algorithm_diagnostics = []
     if hasattr(trainer, 'recording_step_data'):
         trainer.begin_episode(seed, deterministic=True)
     frames = {key: [] for key in FRAME_FIELDS}
     transitions = {key: [] for key in TRANSITION_FIELDS}
+    if dwell:transitions.update({key:[] for key in DWELL_FIELDS})
     append_frame(frames, env)
     initial_ammo = {side: getattr(env,side+'_ammo',None) for side in ('red','blue')}
     initial_ammo = {k:None if v is None else np.asarray(v).tolist() for k,v in initial_ammo.items()}
-    has_cooldown = all(hasattr(env,side+'_fire_cooldown_steps') for side in ('red','blue'))
+    if dwell:initial_ammo=dict(red=None,blue=None)
+    has_cooldown = not dwell and all(hasattr(env,side+'_fire_cooldown_steps') for side in ('red','blue'))
     if has_cooldown:
         transitions.update({name:[] for name in COOLDOWN_FIELDS})
     targets_available = None
@@ -59,6 +63,8 @@ def record(trainer: Any, env_config: dict[str, Any], seed: int, output_dir: str 
         else:
             action = trainer.act(observation[None], env.red_alive_mask[None], deterministic=True)[0]
         observation, reward, terminated, truncated, info = env.step(action)
+        if dwell:
+            for key in DWELL_FIELDS:transitions[key].append(info[key].copy())
         if hasattr(trainer, 'recording_step_data'):
             diagnostic = trainer.recording_step_data()
             diagnostic.update(next_alive=env.red_alive_mask.copy(), episode_done=bool(terminated or truncated))
@@ -75,6 +81,7 @@ def record(trainer: Any, env_config: dict[str, Any], seed: int, output_dir: str 
         transitions['blue_pursuit_target_indices'].append(np.asarray(info['blue_pursuit_target_indices'],dtype=np.int64).copy() if available else np.full(env.team_size,-1,dtype=np.int64))
         for side in ('red','blue'):
             ammo = info.get(side+'_ammo',getattr(env,side+'_ammo',None))
+            if dwell:ammo=None
             transitions[side+'_ammo'].append(np.full(env.team_size,-1,dtype=np.int64) if ammo is None else np.asarray(ammo,dtype=np.int64).copy())
             if has_cooldown:transitions[side+'_cooldown'].append(getattr(env,side+'_fire_cooldown_steps').copy())
         transitions['local_rewards'].append(np.asarray(reward).copy())
@@ -115,6 +122,10 @@ def record(trainer: Any, env_config: dict[str, Any], seed: int, output_dir: str 
         **{f'episode_{name}_total': info[f'episode_{name}_total'] for name in ('r1', 'r2', 'r3', 'r4')},
     })
     result['combat_counts'] = {side:dict(env.combat_counts[side]) for side in ('red','blue')}
+    if dwell:
+        result.update(event_semantics=env.event_semantics,legacy_fire_metrics_applicable=False,
+                      dwell_config=env.config['fire_control'],dwell_steps=env.dwell_steps)
+        result.update({k:v for k,v in info.items() if ('dwell' in k and (k.startswith('red_') or k.startswith('blue_'))) and not isinstance(v,np.ndarray)})
     for side in ('red','blue'):
         for field in ('ammo_used','ceiling_losses'):
             result[side+'_'+field] = env.combat_counts[side].get(field)

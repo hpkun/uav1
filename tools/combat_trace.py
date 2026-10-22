@@ -8,6 +8,8 @@ FRAME_FIELDS = ('red_kinematics', 'blue_kinematics', 'red_alive', 'blue_alive', 
 TRANSITION_FIELDS = ('red_actions', 'blue_actions', 'local_rewards', 'reward_components',
     'terminated', 'truncated', 'blue_pursuit_target_indices', 'red_ammo', 'blue_ammo')
 COOLDOWN_FIELDS = ('red_cooldown', 'blue_cooldown')
+DWELL_FIELDS = tuple(f'{side}_dwell_{name}' for side in ('red','blue') for name in
+                    ('targets','counts','eligible','sampled_targets','sampled_counts','completed_this_step'))
 
 
 def validate_trace(trace, metadata=None):
@@ -59,6 +61,17 @@ def validate_trace(trace, metadata=None):
         shapes.update(blue_actions=(t,n,3),blue_pursuit_target_indices=(t,n),red_ammo=(t,n),blue_ammo=(t,n))
     for name in COOLDOWN_FIELDS:
         if name in trace: shapes[name]=(t,n)
+    if metadata is not None and metadata.get('event_semantics') == 'continuous_dwell_neutralization':
+        if set(DWELL_FIELDS)-trace.keys():raise ValueError('dwell trace missing state fields')
+    for name in DWELL_FIELDS:
+        if name in trace:
+            shapes[name]=(t,n)
+            a=trace[name]
+            if name.endswith(('eligible','completed_this_step')):
+                if a.dtype.kind!='b':raise ValueError('dwell flags must be boolean')
+            elif a.dtype.kind not in 'iu':raise ValueError('dwell identities/counts must be integers')
+            if name.endswith('targets') and ((a < -1)|(a>=n)).any():raise ValueError('invalid dwell targets')
+            if name.endswith('counts') and (a<0).any():raise ValueError('invalid dwell counts')
     for key, shape in shapes.items():
         if trace[key].shape != shape:
             raise ValueError(f'{key} shape must be {shape}, got {trace[key].shape}')

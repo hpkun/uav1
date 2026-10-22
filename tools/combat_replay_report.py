@@ -16,6 +16,7 @@ def analyze_trace(trace, metadata):
     fires=[e for e in metadata['events'] if e['type']=='fire_attempt']
     kills=[e for e in metadata['events'] if e['type']=='attack_kill']
     losses=[e for e in metadata['events'] if e['type']=='noncombat_loss']
+    dwell=metadata.get('event_semantics')=='continuous_dwell_neutralization'
     components=trace['reward_components'].sum(axis=0,dtype=np.float64)
     rows=[];combat={}
     for side in ('red','blue'):
@@ -31,6 +32,12 @@ def analyze_trace(trace, metadata):
         count['ammo_used']=None if initial is None or ammo is None else int(np.sum(initial)-ammo[-1].sum())
         if initial is not None and count['ammo_used']!=len(own):raise ValueError('ammo use / actual fire attempts mismatch')
         combat[side]=count
+        if dwell:
+            completed=[e for e in metadata['events'] if e['type']=='dwell_complete' and e['side']==side]
+            if len(completed)!=metadata[f'{side}_dwell_completed']:raise ValueError('dwell completion metadata mismatch')
+            if len(credited)!=metadata[f'{side}_dwell_neutralizations']:raise ValueError('dwell victim metadata mismatch')
+            count.update(dwell_completed=len(completed),dwell_neutralizations=len(credited),
+                         first_dwell_complete_time_s=min((e['time_s'] for e in completed),default=None))
         alive=trace[side+'_alive'];states=trace[side+'_kinematics']
         if int(alive[-1].sum())!=metadata[side+'_survivors']:raise ValueError('survivor metadata mismatch')
         for i in range(states.shape[1]):
@@ -77,14 +84,17 @@ def export_csv(trace,metadata,output):
                     target=int(trace['blue_pursuit_target_indices'][k-1,i]) if k and side=='blue' and metadata.get('blue_target_available') else None
                     w.writerow(dict(step=int(step),time_s=float(trace['time_s'][k]),side=side,agent=i,uav=plane(side,i),alive=bool(trace[side+'_alive'][k,i]),
                         x=state[0],y=state[1],z_ned=state[2],altitude=-state[2],speed_m_s=state[3],theta_rad=state[4],psi_rad=state[5],theta_deg=np.rad2deg(state[4]),psi_deg=np.rad2deg(state[5]),ammo=ammo,cooldown_steps=cooldown,blue_pursuit_target_index=target))
-    events=[e for e in metadata['events'] if e['type']=='fire_attempt']
+    dwell=metadata.get('event_semantics')=='continuous_dwell_neutralization'
+    events=[e for e in metadata['events'] if e['type']==('dwell_complete' if dwell else 'fire_attempt')]
     geometry=['distance','horizontal_distance','line_of_sight','ata','ha','aa','hca','off_boresight','boresight_azimuth_error','boresight_elevation_error']
     audit=['range_pass','ata_pass','ha_pass','body_azimuth_pass','body_elevation_pass']
     if metadata.get('environment_version') in ('3.42','3.43'):
         audit += ['cone_pass','probability_angular_frame']
     fields=['step','time_s','side','attacker','target','attacker_uav','target_uav','hit',*geometry,*audit]
+    if dwell:
+        fields.remove('hit');fields+=['event_semantics','duration_steps','dwell_seconds','cone_pass']
     fields += [who+'_'+name for who in ('attacker','target') for name in ('x','y','z_ned','altitude','speed_m_s','theta_rad','psi_rad')]
-    with (output/'fire_events.csv').open('w',newline='',encoding='utf-8-sig') as f:
+    with (output/('dwell_events.csv' if dwell else 'fire_events.csv')).open('w',newline='',encoding='utf-8-sig') as f:
         w=csv.DictWriter(f,fieldnames=fields);w.writeheader()
         for event in events:
             row={key:event.get(key) for key in fields}
@@ -105,6 +115,16 @@ def write_report(trace,metadata,output):
     lines+=['','## Episode','', '| Field | Value |','|---|---|']
     for key in ('episode_seed','episode_steps','simulation_time_s','termination_reason','red_survivors','blue_survivors','red_win','blue_win','draw','episode_return'):
         lines.append(f'| {key} | {metadata[key]} |')
+    if metadata.get('event_semantics')=='continuous_dwell_neutralization':
+        lines+=['','Event semantics: continuous_dwell_neutralization. Fire/weapon-hit counters are zero compatibility placeholders; ammo/cooldown are unavailable.','',
+            '| Side | Dwell started | Interrupted | Target switches | Completed attackers | Unique neutralizations |','|---|---:|---:|---:|---:|---:|']
+        for side in ('red','blue'):
+            lines.append('| '+side+' | '+' | '.join(str(metadata[f'{side}_{k}']) for k in ('dwell_started','dwell_interrupted','dwell_target_switches','dwell_completed','dwell_neutralizations'))+' |')
+        lines+=['','All completion geometry is in dwell_events.csv. Per-transition dwell target/count and pre-settlement completion sample are in episode_trace.npz.','',
+                '| Time (s) | Attacker | Target | Duration steps | Distance (m) | 3D alpha (rad) |','|---|---|---|---:|---:|---:|']
+        for e in metadata['events']:
+            if e['type']=='dwell_complete':
+                lines.append(f"| {e['time_s']:.3f} | {plane(e['side'],e['attacker'])} | {plane('blue' if e['side']=='red' else 'red',e['target'])} | {e['duration_steps']} | {e['distance']:.6f} | {e['off_boresight']:.9f} |")
     lines+=['','Position units: metres. Source coordinates are NED (x,y,z); altitude=-z exactly once. Theta/psi in radians unless a column says deg. UAV CSV/event indices are zero-based; visible UAV labels are one-based.','',
         '## Reward breakdown','',
         f"reward_components[t,component,agent]; component axis=1, agent axis=2. Local reward equals sum of these components: {a['reward_sum_matches_local']}.",'',

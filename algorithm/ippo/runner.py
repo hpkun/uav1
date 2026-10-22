@@ -30,7 +30,7 @@ class IPPOTrainingRunner(MAPPOTrainingRunner):
         expected = environment_dimensions(env_config)
         if configured != expected:
             raise ValueError(f"network/environment dimension mismatch: configured obs/action/agents={configured}, environment={expected}")
-        if 'environment' in algorithm_config or str(env_config['environment_version']) in ('3.38', '3.39','3.40', '3.41', '3.42', '3.43'):
+        if 'environment' in algorithm_config or str(env_config['environment_version']) in ('3.38', '3.39','3.40', '3.41', '3.42', '3.43', '3.44', '3.45'):
             expected_identity = {
                 'environment_version': str(env_config['environment_version']),
                 'team_size': expected[2],

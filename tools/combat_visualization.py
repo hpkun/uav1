@@ -52,6 +52,16 @@ class RecordingCombatEnv(MultiUAVCombatEnv):
     def _entry_attempts(self, attackers: list[AircraftState], targets: list[AircraftState],
                         fire_states: list[FireState], side: str) -> list[tuple[int, int, bool]]:
         attempts = super()._entry_attempts(attackers, targets, fire_states, side)
+        if getattr(self,'event_semantics',None) == 'continuous_dwell_neutralization':
+            for i,j,_ in attempts:
+                g=engagement_geometry(attackers[i],targets[j])
+                self.events.append(dict(type='dwell_complete',event_semantics=self.event_semantics,
+                    step=self.steps,time_s=self.steps*self.dt,side=side,attacker=int(i),target=int(j),
+                    duration_steps=int(self.dwell[side].sampled_counts[i]),dwell_seconds=self.config['fire_control']['dwell_seconds'],
+                    cone_pass=bool(angle_within(g.off_boresight,self.weapon.off_boresight_max)),
+                    attacker_state=attackers[i].as_array().tolist(),target_state=targets[j].as_array().tolist(),
+                    start=attackers[i].as_array()[:3].tolist(),end=targets[j].as_array()[:3].tolist(),**asdict(g)))
+            return attempts
         for attacker, target, hit in attempts:
             # Capture the actual firing state before simultaneous kills mutate alive flags.
             geometry = engagement_geometry(attackers[attacker], targets[target])
@@ -79,7 +89,8 @@ class RecordingCombatEnv(MultiUAVCombatEnv):
         for side, kills in zip(('red', 'blue'), result):
             for target, attackers in kills.items():
                 self.events.append({'type': 'attack_kill', 'step': self.steps, 'time_s': self.steps*self.dt,
-                                    'side': side, 'target': target, 'attackers': attackers})
+                                    'side': side, 'target': target, 'attackers': attackers,
+                                    **({'cause':'continuous_dwell'} if getattr(self,'event_semantics',None)=='continuous_dwell_neutralization' else {})})
         return result
 
     def _resolve_noncombat_losses(self):

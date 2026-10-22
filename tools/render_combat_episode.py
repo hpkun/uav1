@@ -38,7 +38,7 @@ class CombatScene:
         ax.legend(handles=[Line2D([], [], color='#df3348', marker='o', label='Red alive'),
             Line2D([], [], color='#2484d0', marker='o', label='Blue alive'),
             Line2D([], [], color='gray', marker='x', linestyle='', label='Destroyed'),
-            Line2D([], [], color='green', linestyle='--', label='Hit'),
+            Line2D([], [], color='green', linestyle='--', label='Dwell completed' if metadata.get('event_semantics')=='continuous_dwell_neutralization' else 'Hit'),
             Line2D([], [], color='orange', linestyle='--', label='Miss')], loc='upper left', fontsize=8)
 
     def draw(self, frame, all_events=False):
@@ -72,10 +72,10 @@ class CombatScene:
         lower = -1 if all_events else int(trace['steps'][min(self.previous_frame, frame)])
         upper = int(trace['steps'][frame])
         for event in self.metadata.get('events', []):
-            if event['type'] == 'fire_attempt' and lower < event['step'] <= upper:
+            if event['type'] in ('fire_attempt','dwell_complete') and lower < event['step'] <= upper:
                 pair = np.asarray([event['start'], event['end']])
                 artist, = self.ax.plot(pair[:, 0], pair[:, 1], -pair[:, 2],
-                    color='green' if event['hit'] else 'orange', linestyle='--',
+                    color='green' if event.get('hit',True) else 'orange', linestyle='--',
                     alpha=.35 if all_events else .95, linewidth=1 if all_events else 2)
                 self.event_artists.append(artist)
         self.previous_frame = frame

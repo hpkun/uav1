@@ -47,11 +47,11 @@ def render(trace_path: str | Path, metadata_path: str | Path, output: str | Path
         for hit, color in ((True, '#20c75a'), (False, '#ed9924')):
             coordinates = []
             for event in metadata.get('events', []):
-                if event['type'] == 'fire_attempt' and int(trace['steps'][previous[frame]]) < event['step'] <= int(trace['steps'][frame]) and event['hit'] == hit:
+                if event['type'] in ('fire_attempt','dwell_complete') and int(trace['steps'][previous[frame]]) < event['step'] <= int(trace['steps'][frame]) and event.get('hit',True) == hit:
                     coordinates.extend([event['start'], event['end'], [None, None, None]])
             data.append(go.Scatter3d(x=[p[0] for p in coordinates], y=[p[1] for p in coordinates],
                 z=[None if p[2] is None else -p[2] for p in coordinates], mode='lines',
-                line=dict(color=color, width=4), name='Weapon hit' if hit else 'Missed attempt'))
+                line=dict(color=color, width=4), name=('Dwell completed' if metadata.get('event_semantics')=='continuous_dwell_neutralization' else 'Weapon hit') if hit else 'Missed attempt'))
         return data
 
     def title(frame):
