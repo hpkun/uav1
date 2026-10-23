@@ -88,7 +88,7 @@ def export_csv(trace,metadata,output):
     events=[e for e in metadata['events'] if e['type']==('dwell_complete' if dwell else 'fire_attempt')]
     geometry=['distance','horizontal_distance','line_of_sight','ata','ha','aa','hca','off_boresight','boresight_azimuth_error','boresight_elevation_error']
     audit=['range_pass','ata_pass','ha_pass','body_azimuth_pass','body_elevation_pass']
-    if metadata.get('environment_version') in ('3.42','3.43'):
+    if metadata.get('environment_version') in ('3.42','3.43','3.48'):
         audit += ['cone_pass','probability_angular_frame']
     fields=['step','time_s','side','attacker','target','attacker_uav','target_uav','hit',*geometry,*audit]
     if dwell:
@@ -166,7 +166,7 @@ def write_report(trace,metadata,output):
     artifacts=(('MP4','episode.mp4'),('Interactive replay','interactive.html'),
                ('All UAV states','all_uav_states.csv'),('Fire events','fire_events.csv'))
     links=[f'[{label}]({name})' for label,name in artifacts if (output/name).is_file()]
-    if links:lines+=['',' · '.join(links)]
+    if links:lines+=['',' 路 '.join(links)]
     (output/'detailed_report.md').write_text('\n'.join(lines)+'\n',encoding='utf-8')
     return a
 

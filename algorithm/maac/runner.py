@@ -68,6 +68,14 @@ class MAACTrainingRunner:
 
     def recent(self):
         rows=self.records[-self.config['training']['recent_episode_window']:]
+        if self.env_config['environment_version'] == '3.48':
+            from env.v348_metrics import mechanism_metrics
+            if not rows:
+                return dict(mean_return=None, win_rate=None, fire_rate=None, kill_rate=None,
+                            **mechanism_metrics())
+            result=evaluation_metrics(aggregate_combat_records(rows),self.env_config)
+            result['mean_return']=result['average_return']
+            return result
         if self.env_config['environment_version'] in DWELL_VERSIONS:
             if not rows:return empty_dwell_metrics()
             result=evaluation_metrics(aggregate_combat_records(rows),self.env_config)

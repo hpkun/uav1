@@ -21,7 +21,7 @@ def evaluate_mappo_checkpoint(
     evaluation_seeds: Iterable[int],
 ) -> dict[str, Any]:
     """Load one checkpoint and evaluate it under an explicit target protocol."""
-    if environment_config['environment_version'] in ('3.42','3.43','3.44','3.46','3.47'):
+    if environment_config['environment_version'] in ('3.42','3.43','3.44','3.46','3.47','3.48'):
         if torch.device(device).type != 'cuda' or not torch.cuda.is_available():
             raise RuntimeError('CUDA mandatory for v3.42/v3.43 evaluation')
     checkpoint = Path(checkpoint_path)

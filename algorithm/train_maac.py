@@ -38,6 +38,10 @@ def main():
     for name,value in [('env_config.yaml',ec),('algorithm_config.yaml',ac)]:
         (out/name).write_text(yaml.safe_dump(value,sort_keys=False),encoding='utf-8')
     runner=MAACTrainingRunner(ec,ac,out,args.num_envs,args.total_sampled_steps,args.seed,args.device,args.smoke)
+    mechanism={}
+    if ec['environment_version']=='3.48':
+        from env.v348_metrics import mechanism_metrics
+        mechanism=mechanism_metrics()
     (out/'run_config.json').write_text(json.dumps(dict(seed=runner.seed,num_envs=runner.num_envs,
         total_sampled_steps=runner.total_steps,device='cuda',smoke=args.smoke,
         implementation_version=IMPLEMENTATION_VERSION,variant=ac['implementation']['variant'],
@@ -48,7 +52,7 @@ def main():
         effective_replay_capacity=runner.replay.capacity,
         **(dict(event_semantics=EVENT_SEMANTICS,legacy_fire_metrics_applicable=False)
            if ec['environment_version'] in DWELL_VERSIONS else {}),
-        formal_exact_resume_supported=False,replay_buffer_in_checkpoint=False),indent=2))
+        **mechanism,formal_exact_resume_supported=False,replay_buffer_in_checkpoint=False),indent=2))
     summary=runner.run();(out/'run_summary.json').write_text(json.dumps(summary,indent=2,allow_nan=False))
     print(f"[DONE] MAAC | steps={summary['sampled_steps']} | saved={out}",flush=True)
 

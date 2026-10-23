@@ -172,3 +172,7 @@ python tools/render_combat_episode_interactive.py --trace outputs/combat_recordi
 ## v3.47 observation ablation
 
 v3.47 继承 v3.46 的全部机制，仅恢复原始 v3.38 的45维观测（动作3维）。新增 MAPPO/IPPO/MAAC 配置及版本、Checkpoint、驻留评估支持；v3.44/v3.46 保持49维。实现与有界验证命令见 [v3.47 文档](docs/combat_environment_v347.md)。不自动启动正式3M训练。
+
+## v3.48 probability weapon ablation
+
+v3.48 保持 v3.47 原始45维观测与 R1–R4/PBRS，复用 v3.42 的三维圆锥概率武器，双方各6次弹药、1秒冷却。新增独立 MAPPO/MAAC 配置、严格 Checkpoint 身份与真实概率攻击指标。实现、公式与有界 CUDA 验证见 [v3.48 文档](docs/combat_environment_v348.md)。不会自动启动3M训练。

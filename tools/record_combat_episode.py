@@ -122,6 +122,10 @@ def record(trainer: Any, env_config: dict[str, Any], seed: int, output_dir: str 
         **{f'episode_{name}_total': info[f'episode_{name}_total'] for name in ('r1', 'r2', 'r3', 'r4')},
     })
     result['combat_counts'] = {side:dict(env.combat_counts[side]) for side in ('red','blue')}
+    if env.environment_version == '3.48':
+        from env.v348_metrics import mechanism_metrics
+        result.update(mechanism_metrics())
+        result['probability_angular_frame'] = 'signed_body_azimuth_elevation'
     if dwell:
         result.update(event_semantics=env.event_semantics,legacy_fire_metrics_applicable=False,
                       dwell_config=env.config['fire_control'],dwell_steps=env.dwell_steps)
