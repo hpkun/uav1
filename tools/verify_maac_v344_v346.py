@@ -46,7 +46,7 @@ def formal_update(v,out):
         assert runner.num_envs==12 and runner.batch_size==1024 and t.baseline_samples==16
         assert t.critic.hidden_dim==128 and t.critic.heads==4
         assert runner.replay.capacity==1000000 and runner.update_interval==100
-        assert runner.observations.shape==(12,4,49)
+        assert runner.observations.shape==(12,4,ac['network']['observation_dim'])
         grads={name:dict(calls=0,max_abs=0.,finite=True) for name in ('actor','critic','attention')}
         def hook(name):
             def receive(g):
@@ -65,7 +65,7 @@ def formal_update(v,out):
             if t.sampled_steps>=1024 and len(runner.records)>=12:break
         assert len(runner.replay)==t.sampled_steps and len(runner.records)>=12
         batch=runner.replay.sample(1024);d=t.batch_tensors(batch)
-        assert d['observations'].shape==(1024,4,49)
+        assert d['observations'].shape==(1024,4,ac['network']['observation_dim'])
         all_samples=runner.replay.sample(len(runner.replay))
         assert all_samples.dones.sum()>=12 and np.any(all_samples.next_alive_masks==0)
         y=t.td_targets(d['rewards'],d['next_observations'],d['dones'],d['next_alive_masks'])

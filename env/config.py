@@ -9,7 +9,7 @@ from .models import AircraftSpec
 
 
 ENVIRONMENT_VERSION = "2.3"
-SUPPORTED_ENVIRONMENT_VERSIONS = frozenset({"2.3", "2.4", "2.5", "2.6", "2.7", "2.8", "2.9", "3.0", "3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7", "3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14", "3.15", "3.16", "3.17", "3.18", "3.19", "3.20", "3.21", "3.22", "3.23", "3.24", "3.25", "3.26", "3.27", "3.28", "3.29", "3.30", "3.31", "3.32", "3.33", "3.34", "3.35", "3.36", "3.37", "3.38", "3.39", "3.40", "3.41", "3.42", "3.43", "3.44", "3.46"})
+SUPPORTED_ENVIRONMENT_VERSIONS = frozenset({"2.3", "2.4", "2.5", "2.6", "2.7", "2.8", "2.9", "3.0", "3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7", "3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14", "3.15", "3.16", "3.17", "3.18", "3.19", "3.20", "3.21", "3.22", "3.23", "3.24", "3.25", "3.26", "3.27", "3.28", "3.29", "3.30", "3.31", "3.32", "3.33", "3.34", "3.35", "3.36", "3.37", "3.38", "3.39", "3.40", "3.41", "3.42", "3.43", "3.44", "3.46", "3.47"})
 
 
 def load_config(path: str | Path) -> dict[str, Any]:
@@ -21,6 +21,9 @@ def load_config(path: str | Path) -> dict[str, Any]:
 
 def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     """Reject unsupported schemas before constructing a combat environment."""
+    if isinstance(config,dict) and config.get('environment_version') == '3.47':
+        from .v347_config import validate_v347
+        return validate_v347(config)
     if isinstance(config,dict) and config.get('environment_version') == '3.46':
         from .v346_config import validate_v346
         return validate_v346(config)
@@ -218,7 +221,7 @@ def environment_dimensions(config: dict[str, Any]) -> tuple[int, int, int]:
     validate_config(config)
     if config['environment_version'] in ('3.43','3.44','3.46'):
         return 49, 3, 4
-    if config['environment_version'] in ('3.30','3.31','3.32','3.33','3.34','3.35','3.36','3.37','3.38','3.39','3.40','3.41','3.42'):
+    if config['environment_version'] in ('3.47','3.30','3.31','3.32','3.33','3.34','3.35','3.36','3.37','3.38','3.39','3.40','3.41','3.42'):
         return 45, 3, 4
     agents = int(config["scenario"]["team_size"])
     if str(config['environment_version']) in ('3.12', '3.13', '3.14', '3.15', '3.16', '3.17', '3.18', '3.19', '3.20', '3.21', '3.22', '3.23', '3.24', '3.25', '3.26', '3.27', '3.28', '3.29'):

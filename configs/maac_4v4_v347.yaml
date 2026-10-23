@@ -1,0 +1,75 @@
+algorithm: MAAC
+environment:
+  environment_version: '3.47'
+  team_size: 4
+network:
+  observation_dim: 45
+  action_dim: 3
+  num_agents: 4
+  hidden_dim: 128
+  attention_heads: 4
+training:
+  gamma: 0.99
+  alpha: 0.01
+  tau: 0.005
+  lr_actor: 0.001
+  lr_critic: 0.001
+  num_train_envs: 12
+  replay_capacity: 1000000
+  minibatch_size: 1024
+  sampled_steps_per_update: 100
+  critic_updates_per_cycle: 4
+  policy_updates_per_cycle: 4
+  learning_starts: 1024
+  baseline_samples: 16
+  actor_grad_clip: 0.5
+  critic_grad_clip: 50.0
+  total_sampled_steps: 3000000
+  device: cuda
+  seed: 1
+  evaluation_episodes: 20
+  evaluation_interval_sampled_steps: 100000
+  checkpoint_interval_sampled_steps: 500000
+  console_interval_sampled_steps: 20000
+  recent_episode_window: 100
+implementation:
+  variant: madsac_paper_maac_continuous_shared_eq15_mc_v3
+  evaluation_seed_base: 10000000
+  log_std_min: -5.0
+  log_std_max: 2.0
+metadata:
+  original_maac_reference:
+    source: Iqbal & Sha 2019 supplementary / author code, not Li et al. MAAC-specific
+      parameter table
+    hidden_dim: 128
+    attention_heads: 4
+    gamma: 0.99
+    alpha: 0.01
+    tau_online_weight: 0.005
+    lr_actor: 0.001
+    lr_critic: 0.001
+    num_train_envs: 12
+    replay_capacity: 1000000
+    minibatch_size: 1024
+    sampled_steps_per_update: 100
+    critic_updates_per_cycle: 4
+    policy_updates_per_cycle: 4
+    reference_episode_steps: 100
+  madsac_paper_specific_modifications:
+    source: Li et al. 2023, Section 3.1.3 / Table 3
+    continuous_action_adaptation: true
+    shared_actor_parameter_mechanism: true
+  engineering_choices:
+    baseline_samples: 16
+    actor_distribution: tanh_gaussian
+    log_std_bounds:
+    - -5.0
+    - 2.0
+    learning_starts: 1024
+    preserve_uav_episode_steps: 1000
+    total_sampled_steps: 3000000
+    exact_resume_supported: false
+  author_code_choices:
+    actor_grad_clip: 0.5
+    critic_grad_clip: 50.0
+    shared_critic_gradient_scale: 0.2

@@ -135,7 +135,7 @@ def compare_checkpoints(checkpoints, bank_path, environment_config, algorithm_co
         raise ValueError('holdout/unknown observation bank is forbidden')
     if source.get('environment_config_sha256', config_sha256(environment_config)) != config_sha256(environment_config):
         raise ValueError('diagnostic observation bank environment fingerprint mismatch')
-    if environment_config['environment_version'] in ('3.42','3.43','3.44','3.46'):
+    if environment_config['environment_version'] in ('3.42','3.43','3.44','3.46','3.47'):
         if source.get('environment_version') != environment_config['environment_version'] or source.get('environment_config_sha256') != config_sha256(environment_config):
             raise ValueError('new diagnostic observation bank requires exact environment identity')
     if observations.shape[-1] != algorithm_config['network']['observation_dim']:

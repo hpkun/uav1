@@ -17,6 +17,6 @@ def validate_v343(config):
 
 
 def validate_shaping_gamma(env_config, algorithm_config):
-    if env_config.get('environment_version') in ('3.43','3.44','3.46'):
+    if env_config.get('environment_version') in ('3.43','3.44','3.46','3.47'):
         if algorithm_config['training']['gamma'] != env_config['research_reward']['gamma']:
             raise ValueError('v3.43 PBRS gamma must equal training gamma')

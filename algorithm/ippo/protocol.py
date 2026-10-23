@@ -15,7 +15,7 @@ def validate_algorithm_config(config, env_config=None):
     if config.get('algorithm') != 'ippo':
         raise ValueError('algorithm must be ippo')
     version = config.get('environment',{}).get('environment_version')
-    if version not in ('3.41','3.42','3.43','3.44','3.46') or config['environment'] != dict(environment_version=version,team_size=4):
+    if version not in ('3.41','3.42','3.43','3.44','3.46','3.47') or config['environment'] != dict(environment_version=version,team_size=4):
         raise ValueError('IPPO requires a supported 4v4 identity')
     obs_dim = 49 if version in ('3.43','3.44','3.46') else 45
     if [n[k] for k in ('observation_dim','action_dim','num_agents')] != [obs_dim,3,4]:
@@ -68,6 +68,11 @@ def validate_checkpoint(state, env_config, config):
         or state.get('critic_type') != 'local'):
         raise RuntimeError('checkpoint is not compatible PS-IPPO')
     e = state.get('extra',{})
+    if env_config['environment_version'] == '3.47':
+        for key, expected in zip(('observation_dim', 'action_dim', 'num_agents'),
+                                 environment_dimensions(env_config)):
+            if type(e.get(key)) is not int or e[key] != expected:
+                raise RuntimeError(f'checkpoint {key} mismatch/missing')
     for key, expected in [('environment_config_sha256', config_sha256(env_config)),
                           ('algorithm_config_sha256', config_sha256(config)),
                           ('environment_version',env_config['environment_version']), ('parameter_sharing',True),

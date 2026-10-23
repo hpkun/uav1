@@ -168,3 +168,7 @@ python tools/render_combat_episode_interactive.py --trace outputs/combat_recordi
 ```
 
 记录器支持 MAPPO 与 MADSAC。输出真实射击、命中、击杀、损失事件与奖励数据；交互 HTML 内嵌 Plotly，支持播放、暂停、时间滑块、3D camera 和实体状态查看。静态渲染也支持 GIF 与 MP4；MP4 需要可用的 FFmpeg。详见 [记录工具说明](docs/combat_episode_visualization.md)。
+
+## v3.47 observation ablation
+
+v3.47 继承 v3.46 的全部机制，仅恢复原始 v3.38 的45维观测（动作3维）。新增 MAPPO/IPPO/MAAC 配置及版本、Checkpoint、驻留评估支持；v3.44/v3.46 保持49维。实现与有界验证命令见 [v3.47 文档](docs/combat_environment_v347.md)。不自动启动正式3M训练。

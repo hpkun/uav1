@@ -4,14 +4,14 @@ from algorithm.common.protocol import config_sha256
 
 IMPLEMENTATION_VERSION=3
 VARIANT='madsac_paper_maac_continuous_shared_eq15_mc_v3'
-DIMENSIONS={'3.29':(56,3,5),'3.30':(45,3,4),'3.31':(45,3,4),'3.32':(45,3,4),'3.33':(45,3,4),'3.34':(45,3,4),'3.35':(45,3,4),'3.36':(45,3,4),'3.37':(45,3,4),'3.38':(45,3,4),'3.39':(45,3,4),'3.41':(45,3,4),'3.44':(49,3,4),'3.46':(49,3,4)}
+DIMENSIONS={'3.29':(56,3,5),'3.30':(45,3,4),'3.31':(45,3,4),'3.32':(45,3,4),'3.33':(45,3,4),'3.34':(45,3,4),'3.35':(45,3,4),'3.36':(45,3,4),'3.37':(45,3,4),'3.38':(45,3,4),'3.39':(45,3,4),'3.41':(45,3,4),'3.44':(49,3,4),'3.46':(49,3,4),'3.47':(45,3,4)}
 
 
 def validate_config_pair(env_config,config):
     validate_config(env_config)
     expected_dims=DIMENSIONS.get(env_config.get('environment_version'))
     if expected_dims is None or environment_dimensions(env_config)!=expected_dims:
-        raise RuntimeError('MAAC requires a registered supported environment identity (environment_version) with exact dimensions: v3.29 uses 56/3/5; v3.30-v3.39 and v3.41 use 45/3/4; v3.44 and v3.46 use 49/3/4')
+        raise RuntimeError('MAAC requires a registered supported environment identity (environment_version) with exact dimensions: v3.29 uses 56/3/5; v3.30-v3.39, v3.41 and v3.47 use 45/3/4; v3.44 and v3.46 use 49/3/4')
     if config.get('algorithm')!='MAAC' or config.get('environment')!={'environment_version':env_config['environment_version'],'team_size':expected_dims[2]}:
         raise RuntimeError('MAAC algorithm/environment identity mismatch')
     n,t=config['network'],config['training']
