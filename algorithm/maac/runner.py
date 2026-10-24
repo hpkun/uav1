@@ -25,7 +25,9 @@ class MAACTrainingRunner:
         self.num_envs=t['num_train_envs'] if num_envs is None else num_envs
         self.total_steps=(32 if smoke else t['total_sampled_steps']) if total_sampled_steps is None else total_sampled_steps
         if self.num_envs<=0 or self.total_steps<=0:raise ValueError('envs/steps must be positive')
-        if self.total_steps%self.num_envs:raise ValueError('total steps must be divisible by num_envs')
+        # Each vector step contributes num_envs transitions. Keep the requested
+        # budget and finish the last full batch instead of rejecting it.
+        self.effective_total_steps=((self.total_steps+self.num_envs-1)//self.num_envs)*self.num_envs
         self.batch_size=min(16,t['minibatch_size']) if smoke else t['minibatch_size']
         self.learning_starts=self.batch_size if smoke else max(t['learning_starts'],self.batch_size)
         self.update_interval=4 if smoke else t['sampled_steps_per_update']
@@ -125,6 +127,8 @@ class MAACTrainingRunner:
         t=self.config['training'];next_log=t['console_interval_sampled_steps']
         next_eval=t['evaluation_interval_sampled_steps'];next_save=t['checkpoint_interval_sampled_steps']
         print(f"[START] MAAC | env=v{self.env_config['environment_version']} | {self.trainer.num_agents}v{self.trainer.num_agents} | seed={self.seed} | cuda | envs={self.num_envs} | steps={steps_text(self.total_steps)}",flush=True)
+        if self.effective_total_steps!=self.total_steps:
+            print(f'[BUDGET] requested={self.total_steps} | effective={self.effective_total_steps} | full vector batches of {self.num_envs}',flush=True)
         if self.env_config['environment_version'] in DWELL_VERSIONS:
             print('[EVENT] continuous_dwell_neutralization | fire_rate=N/A | dwell_complete counts attackers; neutralizations count unique victims',flush=True)
         pending=0;infos=[]
@@ -147,6 +151,8 @@ class MAACTrainingRunner:
             for name in ('latest.pt','final.pt',f'checkpoint_{self.trainer.sampled_steps}.pt'):self.trainer.save(self.output_dir/name)
             return dict(**reward_outcome_identity(self.env_config['environment_version']),
                 algorithm='MAAC',variant=self.config['implementation']['variant'],environment_version=self.env_config['environment_version'],
+                requested_total_sampled_steps=self.total_steps,effective_total_sampled_steps=self.effective_total_steps,
+                sampled_steps_overshoot=self.trainer.sampled_steps-self.total_steps,
                 sampled_steps=self.trainer.sampled_steps,completed_episodes=len(self.records),replay_size=len(self.replay),
                 actor_updates=self.trainer.actor_updates,policy_updates=self.trainer.policy_updates,
                 critic_updates=self.trainer.critic_updates,target_updates=self.trainer.target_updates,update_cycles=self.update_cycles,

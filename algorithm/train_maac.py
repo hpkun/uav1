@@ -15,6 +15,33 @@ from algorithm.maac.runner import MAACTrainingRunner
 from algorithm.maac.metrics import DWELL_VERSIONS,EVENT_SEMANTICS
 
 
+def prepare_output_directory(out,env_config,algorithm_config):
+    """Retry a failed startup with matching config-only snapshots, never a run.
+
+    run_config.json is written before training begins. Any run metadata, model,
+    log, unexpected entry or nonmatching snapshot still blocks reuse.
+    """
+    snapshots={'env_config.yaml':env_config,'algorithm_config.yaml':algorithm_config}
+    if out.exists():
+        if not out.is_dir() or out.is_symlink():
+            raise RuntimeError('MAAC output directory must be fresh')
+        entries={p.name:p for p in out.iterdir()}
+        if entries:
+            if set(entries)!=set(snapshots):
+                raise RuntimeError('MAAC output directory must be fresh')
+            for name,value in snapshots.items():
+                path=entries[name]
+                if path.is_symlink() or not path.is_file():
+                    raise RuntimeError('MAAC output directory must be fresh')
+                if yaml.safe_load(path.read_text(encoding='utf-8'))!=value:
+                    raise RuntimeError(f'MAAC failed-startup {name} mismatch; choose a new output directory')
+            print('[OUTPUT] Reusing matching config-only snapshots from failed startup',flush=True)
+            return
+    out.mkdir(parents=True,exist_ok=True)
+    for name,value in snapshots.items():
+        (out/name).write_text(yaml.safe_dump(value,sort_keys=False),encoding='utf-8')
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--env-config',default='configs/combat_environment_v329.yaml')
@@ -33,10 +60,7 @@ def main():
         state=torch.load(resolve(args.resume),map_location='cuda',weights_only=False)
         validate_checkpoint_for_resume(state,ec,ac)
     out=resolve(args.output_dir)
-    if out.exists() and any(out.iterdir()):raise RuntimeError('MAAC output directory must be fresh')
-    out.mkdir(parents=True,exist_ok=True)
-    for name,value in [('env_config.yaml',ec),('algorithm_config.yaml',ac)]:
-        (out/name).write_text(yaml.safe_dump(value,sort_keys=False),encoding='utf-8')
+    prepare_output_directory(out,ec,ac)
     runner=MAACTrainingRunner(ec,ac,out,args.num_envs,args.total_sampled_steps,args.seed,args.device,args.smoke)
     mechanism={}
     if ec['environment_version']in ('3.48','3.49','3.50'):
@@ -46,6 +70,7 @@ def main():
     mechanism.update(reward_outcome_identity(ec['environment_version']))
     (out/'run_config.json').write_text(json.dumps(dict(seed=runner.seed,num_envs=runner.num_envs,
         total_sampled_steps=runner.total_steps,device='cuda',smoke=args.smoke,
+        requested_total_sampled_steps=runner.total_steps,effective_total_sampled_steps=runner.effective_total_steps,
         implementation_version=IMPLEMENTATION_VERSION,variant=ac['implementation']['variant'],
         effective_hidden_dim=32 if args.smoke else ac['network']['hidden_dim'],
         effective_minibatch_size=runner.batch_size,effective_learning_starts=runner.learning_starts,
