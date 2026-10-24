@@ -176,3 +176,7 @@ v3.47 继承 v3.46 的全部机制，仅恢复原始 v3.38 的45维观测（动�
 ## v3.48 probability weapon ablation
 
 v3.48 保持 v3.47 原始45维观测与 R1–R4/PBRS，复用 v3.42 的三维圆锥概率武器，双方各6次弹药、1秒冷却。新增独立 MAPPO/MAAC 配置、严格 Checkpoint 身份与真实概率攻击指标。实现、公式与有界 CUDA 验证见 [v3.48 文档](docs/combat_environment_v348.md)。不会自动启动3M训练。
+
+## MAAC v3.48 failure audit and opt-in v3.49
+
+新增多种子动作/价值/Reward专项审查工具，以及仅替换R4的独立v3.49候选。原45维观测、概率武器、R1–R3、网络和训练参数保持不变。候选默认不启用，未启动正式3M训练；短程对照不代表性能改善。公式、风险及复现步骤见 [v3.49文档](docs/combat_environment_v349.md)。
