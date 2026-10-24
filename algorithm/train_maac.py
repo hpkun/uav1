@@ -39,9 +39,11 @@ def main():
         (out/name).write_text(yaml.safe_dump(value,sort_keys=False),encoding='utf-8')
     runner=MAACTrainingRunner(ec,ac,out,args.num_envs,args.total_sampled_steps,args.seed,args.device,args.smoke)
     mechanism={}
-    if ec['environment_version']in ('3.48','3.49'):
+    if ec['environment_version']in ('3.48','3.49','3.50'):
         from env.v348_metrics import mechanism_metrics
         mechanism=mechanism_metrics(ec['environment_version'])
+    from env.v350_metrics import reward_outcome_identity
+    mechanism.update(reward_outcome_identity(ec['environment_version']))
     (out/'run_config.json').write_text(json.dumps(dict(seed=runner.seed,num_envs=runner.num_envs,
         total_sampled_steps=runner.total_steps,device='cuda',smoke=args.smoke,
         implementation_version=IMPLEMENTATION_VERSION,variant=ac['implementation']['variant'],

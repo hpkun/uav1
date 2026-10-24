@@ -4,7 +4,7 @@ from algorithm.common.protocol import config_sha256
 
 IMPLEMENTATION_VERSION=3
 VARIANT='madsac_paper_maac_continuous_shared_eq15_mc_v3'
-DIMENSIONS={'3.29':(56,3,5),'3.30':(45,3,4),'3.31':(45,3,4),'3.32':(45,3,4),'3.33':(45,3,4),'3.34':(45,3,4),'3.35':(45,3,4),'3.36':(45,3,4),'3.37':(45,3,4),'3.38':(45,3,4),'3.39':(45,3,4),'3.41':(45,3,4),'3.44':(49,3,4),'3.46':(49,3,4),'3.47':(45,3,4),'3.48':(45,3,4),'3.49':(45,3,4),'3.49':(45,3,4)}
+DIMENSIONS={'3.29':(56,3,5),'3.30':(45,3,4),'3.31':(45,3,4),'3.32':(45,3,4),'3.33':(45,3,4),'3.34':(45,3,4),'3.35':(45,3,4),'3.36':(45,3,4),'3.37':(45,3,4),'3.38':(45,3,4),'3.39':(45,3,4),'3.41':(45,3,4),'3.44':(49,3,4),'3.46':(49,3,4),'3.47':(45,3,4),'3.48':(45,3,4),'3.49':(45,3,4),'3.50':(45,3,4)}
 
 
 def validate_config_pair(env_config,config):
@@ -33,8 +33,10 @@ def validate_config_pair(env_config,config):
 
 
 def identity(env_config,config,smoke=False):
+    from env.v350_metrics import reward_outcome_identity
     n=config['network'];t=config['training']
-    return dict(environment_version=env_config['environment_version'],
+    return dict(**reward_outcome_identity(env_config['environment_version']),
+        environment_version=env_config['environment_version'],
         environment_config_sha256=config_sha256(env_config),algorithm_config_sha256=config_sha256(config),
         **dict(zip(('observation_dim','action_dim','num_agents'),environment_dimensions(env_config))),variant=VARIANT,training_smoke=bool(smoke),
         network_architecture=dict(hidden_dim=32 if smoke else n['hidden_dim'],attention_heads=n['attention_heads'],

@@ -62,6 +62,11 @@ def _validate_common_checkpoint_contract(
     if state.get("algorithm") != "MAPPO":
         raise RuntimeError("checkpoint is not a MAPPO checkpoint")
     extra = _checkpoint_extra(state)
+    if env_config['environment_version'] == '3.50':
+        from env.v350_metrics import reward_outcome_identity
+        for key, value in reward_outcome_identity('3.50').items():
+            if extra.get(key) != value:
+                raise RuntimeError(f'checkpoint {key} mismatch')
     expected_version = str(env_config.get("environment_version", ENVIRONMENT_VERSION))
     checkpoint_version = extra.get("environment_version")
     if checkpoint_version != expected_version:
@@ -88,7 +93,7 @@ def _validate_common_checkpoint_contract(
             raise RuntimeError(f"checkpoint {key} mismatch: expected {expected}, got {extra[key]}")
     configured = _configured_dimensions(algorithm_config)
     environment = environment_dimensions(env_config)
-    if env_config['environment_version'] in ('3.42','3.43','3.44','3.46','3.47','3.48','3.49'):
+    if env_config['environment_version'] in ('3.42','3.43','3.44','3.46','3.47','3.48','3.49','3.50'):
         identity = dict(environment_version=env_config['environment_version'],team_size=4)
         if algorithm_config.get('environment') != identity:
             raise RuntimeError('MAPPO checkpoint algorithm/environment identity mismatch')
@@ -135,7 +140,7 @@ def validate_checkpoint_for_resume(
         ("algorithm_config_sha256", config_sha256(algorithm_config)),
     ):
         recorded = extra.get(label)
-        if (recorded is not None or env_config['environment_version'] in ('3.39', '3.40', '3.41', '3.42', '3.43', '3.44', '3.46','3.47','3.48','3.49')) and recorded != expected:
+        if (recorded is not None or env_config['environment_version'] in ('3.39', '3.40', '3.41', '3.42', '3.43', '3.44', '3.46','3.47','3.48','3.49','3.50')) and recorded != expected:
             raise RuntimeError(
                 f"checkpoint {label} mismatch: expected {expected!r}, "
                 f"got {recorded!r}"
@@ -147,7 +152,7 @@ def validate_checkpoint_for_evaluation(
 ) -> None:
     """Validate the combat and network contract for evaluation."""
     _validate_common_checkpoint_contract(state, env_config, algorithm_config)
-    if env_config['environment_version'] in ('3.39', '3.40', '3.41', '3.42', '3.43', '3.44', '3.46','3.47','3.48','3.49'):
+    if env_config['environment_version'] in ('3.39', '3.40', '3.41', '3.42', '3.43', '3.44', '3.46','3.47','3.48','3.49','3.50'):
         for key, expected in (('environment_config_sha256', config_sha256(env_config)),
                               ('algorithm_config_sha256', config_sha256(algorithm_config))):
             if _checkpoint_extra(state).get(key) != expected:

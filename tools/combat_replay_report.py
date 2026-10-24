@@ -88,7 +88,7 @@ def export_csv(trace,metadata,output):
     events=[e for e in metadata['events'] if e['type']==('dwell_complete' if dwell else 'fire_attempt')]
     geometry=['distance','horizontal_distance','line_of_sight','ata','ha','aa','hca','off_boresight','boresight_azimuth_error','boresight_elevation_error']
     audit=['range_pass','ata_pass','ha_pass','body_azimuth_pass','body_elevation_pass']
-    if metadata.get('environment_version') in ('3.42','3.43','3.48','3.49'):
+    if metadata.get('environment_version') in ('3.42','3.43','3.48','3.49','3.50'):
         audit += ['cone_pass','probability_angular_frame']
     fields=['step','time_s','side','attacker','target','attacker_uav','target_uav','hit',*geometry,*audit]
     if dwell:
@@ -115,6 +115,10 @@ def write_report(trace,metadata,output):
     lines+=['','## Episode','', '| Field | Value |','|---|---|']
     for key in ('episode_seed','episode_steps','simulation_time_s','termination_reason','red_survivors','blue_survivors','red_win','blue_win','draw','episode_return'):
         lines.append(f'| {key} | {metadata[key]} |')
+    if metadata.get('environment_version') == '3.50':
+        lines += ['', 'Reward: Li (2023) Eq. (25), one nearest living Blue per Red; no PBRS.',
+                  'Outcome: all Blue eliminated means Red wins, including mutual destruction; otherwise Blue wins at episode end.',
+                  'Reward/outcome alignment only. Flight dynamics and weapons remain v3.48; this is not a full paper replication.', '']
     if metadata.get('event_semantics')=='continuous_dwell_neutralization':
         lines+=['','Event semantics: continuous_dwell_neutralization. Fire/weapon-hit counters are zero compatibility placeholders; ammo/cooldown are unavailable.','',
             '| Side | Dwell started | Interrupted | Target switches | Completed attackers | Unique neutralizations |','|---|---:|---:|---:|---:|---:|']

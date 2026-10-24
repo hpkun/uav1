@@ -9,6 +9,7 @@ from algorithm.common.controller_diagnostics import controller_metric_values
 from .trainer import MAACTrainer
 from .replay import JointReplayBuffer
 from .metrics import DWELL_VERSIONS,evaluation_metrics,empty_dwell_metrics
+from env.v350_metrics import reward_outcome_identity
 
 
 def steps_text(value):
@@ -68,10 +69,11 @@ class MAACTrainingRunner:
 
     def recent(self):
         rows=self.records[-self.config['training']['recent_episode_window']:]
-        if self.env_config['environment_version'] in ('3.48','3.49'):
+        if self.env_config['environment_version'] in ('3.48','3.49','3.50'):
             from env.v348_metrics import mechanism_metrics
             if not rows:
                 return dict(mean_return=None, win_rate=None, fire_rate=None, kill_rate=None,
+                            **reward_outcome_identity(self.env_config['environment_version']),
                             **mechanism_metrics(self.env_config['environment_version']))
             result=evaluation_metrics(aggregate_combat_records(rows),self.env_config)
             result['mean_return']=result['average_return']
@@ -143,7 +145,8 @@ class MAACTrainingRunner:
             self.log_train(self.recent())
             if not self.evaluation_history or self.evaluation_history[-1]['sampled_steps']!=self.trainer.sampled_steps:self.evaluate()
             for name in ('latest.pt','final.pt',f'checkpoint_{self.trainer.sampled_steps}.pt'):self.trainer.save(self.output_dir/name)
-            return dict(algorithm='MAAC',variant=self.config['implementation']['variant'],environment_version=self.env_config['environment_version'],
+            return dict(**reward_outcome_identity(self.env_config['environment_version']),
+                algorithm='MAAC',variant=self.config['implementation']['variant'],environment_version=self.env_config['environment_version'],
                 sampled_steps=self.trainer.sampled_steps,completed_episodes=len(self.records),replay_size=len(self.replay),
                 actor_updates=self.trainer.actor_updates,policy_updates=self.trainer.policy_updates,
                 critic_updates=self.trainer.critic_updates,target_updates=self.trainer.target_updates,update_cycles=self.update_cycles,

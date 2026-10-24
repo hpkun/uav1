@@ -180,3 +180,7 @@ v3.48 保持 v3.47 原始45维观测与 R1–R4/PBRS，复用 v3.42 的三维圆
 ## MAAC v3.48 failure audit and opt-in v3.49
 
 新增多种子动作/价值/Reward专项审查工具，以及仅替换R4的独立v3.49候选。原45维观测、概率武器、R1–R3、网络和训练参数保持不变。候选默认不启用，未启动正式3M训练；短程对照不代表性能改善。公式、风险及复现步骤见 [v3.49文档](docs/combat_environment_v349.md)。
+
+## v3.50 paper reward and task-success outcome
+
+新增独立 v3.50，基于 v3.48 仅对齐 Li 等（2023）式(25)的 R1–R4 和“全部 Blue 被消灭”的任务成功条件。移除实际 PBRS 贡献，对同一最近存活 Blue 计算 R3/R4；双方全灭按任务条件判 Red 胜。45维观测、直接增量飞行动力学、概率武器及 MAPPO/MAAC 参数保持不变。这不是完整论文环境或 MAAC 性能复现，不启动3M训练；后续先研究飞行动力学方案。实现约定和验收方式见 [v3.50文档](docs/combat_environment_v350.md)。
