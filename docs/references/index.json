@@ -1,0 +1,34 @@
+{
+  "IET Control Theory   Appl - 2025 - Jiao - Collaborative decision‐making for UAV swarm confrontation based on reinforcement.pdf": {
+    "destination": "docs/references/IET Control Theory   Appl - 2025 - Jiao - Collaborative decision‐making for UAV swarm confrontation based on reinforcement.pdf",
+    "sha256": "83a826d4bb727ee47d4fba8e989e38f7344380d631da7d974a04d34a242f04f7"
+  },
+  "基于多智能体强化学习的大规模无人机集群博弈对抗研究_孙世彬 (1).pdf": {
+    "destination": "docs/references/基于多智能体强化学习的大规模无人机集群博弈对抗研究_孙世彬 (1).pdf",
+    "sha256": "fbb685a043defe6e918906c1585ef9a34bb93732079aff9221f2b4f0feca6a53"
+  },
+  "基于多智能体强化学习的大规模无人机集群博弈对抗研究_孙世彬 (2).pdf": {
+    "destination": "docs/references/基于多智能体强化学习的大规模无人机集群博弈对抗研究_孙世彬 (2).pdf",
+    "sha256": "fbb685a043defe6e918906c1585ef9a34bb93732079aff9221f2b4f0feca6a53"
+  },
+  "基于多智能体强化学习的无人机对抗技术研究_孙笠晋 (1).pdf": {
+    "destination": "docs/references/基于多智能体强化学习的无人机对抗技术研究_孙笠晋 (1).pdf",
+    "sha256": "59d255a0d999ba6fa9b515f9b1d29e2f61e142b8eb1133b698aa63c46fcb4022"
+  },
+  "基于强化学习的无人机集群协同打击策略研究_刘莹春.pdf": {
+    "destination": "docs/references/基于强化学习的无人机集群协同打击策略研究_刘莹春.pdf",
+    "sha256": "6323cf9bb136b8ad840de16f37bf681f3e8c448f8d2bf0f8ddcc255a47ec29eb"
+  },
+  "基于深度强化学习的无人机集群空战决策研究_邓岩.pdf": {
+    "destination": "docs/references/基于深度强化学习的无人机集群空战决策研究_邓岩.pdf",
+    "sha256": "e064b08b4c353cfcbe1f5b6c3633e6005ea9c52928a79ff0201bd0a0366ed495"
+  },
+  "面向多无人机对抗的多智能体强化学习对手建模方法研究_裴谕.pdf": {
+    "destination": "docs/references/面向多无人机对抗的多智能体强化学习对手建模方法研究_裴谕.pdf",
+    "sha256": "09c463685b6c3a193ff67efb70fc832ec706c0d7d68a5d5d2db147d260530bc9"
+  },
+  "面向对抗任务的无人机集群协同对抗策略研究-高雷.pdf": {
+    "destination": "docs/references/面向对抗任务的无人机集群协同对抗策略研究-高雷.pdf",
+    "sha256": "7c49d94662c0d2376af050ebb19c07e1252d122512b1c1ff8da293223cefb280"
+  }
+}

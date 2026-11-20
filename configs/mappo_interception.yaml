@@ -1,0 +1,16 @@
+algorithm: mappo
+parameters:
+  hidden_size: 128
+  actor_learning_rate: 0.0003
+  critic_learning_rate: 0.0003
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_ratio: 0.2
+  value_clip: 0.2
+  entropy_coefficient: 0.01
+  value_coefficient: 0.5
+  max_grad_norm: 0.5
+  update_epochs: 4
+  minibatch_size: 128
+training:
+  rollout_length: 128

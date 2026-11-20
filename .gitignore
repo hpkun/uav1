@@ -1,22 +1,15 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
-
-# Generated experiment outputs (keep only the directory placeholder).
-outputs/*
-!outputs/.gitkeep
-
-# Temporary local files.
-tmp/
-
-# Model checkpoints
-*.pt
-*.pth
-*.ckpt
-
-# Fixed pre-change 5v5 compatibility regression fixture, not an experiment run.
-!tests/fixtures/formal_5v5_before_8v8.pt
-
-# Test/runtime artifacts.
-.pytest_tmp/
 .pytest_cache/
+/.pytest_codex*/
+/.pytest_tmp*/
+.ruff_cache/
+.mypy_cache/
+.coverage
+runs/
+/replays/
+/outputs/
+dist/
+build/
+

@@ -1,2 +1,1 @@
-"""Training, evaluation, and reusable reinforcement-learning components."""
-
+"""Interception MAPPO, MADDPG and shared dual-critic learners."""

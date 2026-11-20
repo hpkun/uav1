@@ -1,0 +1,16 @@
+# Current source uses UTF-8 without BOM and LF on all platforms.
+# Raw-byte SHA256 identifies a specific artifact; normalized-text SHA256
+# identifies source text across LF/CRLF. Historical recorded digests stay intact.
+*.py text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.sh text eol=lf
+
+# Scientific artifacts are always binary; never normalize their bytes.
+*.pt -text
+*.pth -text
+*.npz -text
+*.pdf -text
+*.png -text
+*.gif -text

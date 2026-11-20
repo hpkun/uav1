@@ -1,0 +1,246 @@
+"""Interception training and evaluation using the existing MAPPO/MADDPG learners."""
+from __future__ import annotations
+
+from dataclasses import asdict, replace
+import gzip
+import hashlib
+import json
+from pathlib import Path
+
+import numpy as np
+import torch
+import yaml
+
+from algorithm.mappo import MAPPO, RolloutBuffer
+from algorithm.mappo_config import MAPPOConfig
+from algorithm.maddpg import MADDPG
+from algorithm.maddpg_config import MADDPGConfig
+from algorithm.dual_critic import DualCritic, DualCriticConfig
+from env.interception import InterceptionConfig, InterceptionEnv
+from env.parallel import ParallelInterceptionEnvs
+
+
+def write_json(path, value):
+    Path(path).write_text(json.dumps(value,ensure_ascii=False,allow_nan=False,indent=2,default=_plain)+'\n',encoding='utf-8')
+
+
+def _plain(value):
+    if isinstance(value,np.ndarray):return value.tolist()
+    if isinstance(value,np.generic):return value.item()
+    raise TypeError(type(value).__name__)
+
+
+def digest(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def read_config(env_path, algorithm_path=None):
+    raw=yaml.safe_load(Path(env_path).read_text(encoding='utf-8'))
+    if not isinstance(raw,dict) or set(raw)!={'schema','environment'} or raw['schema']!='Interception/1':
+        raise ValueError('Expected Interception/1 environment configuration')
+    config=InterceptionConfig(**raw['environment'])
+    if algorithm_path is None:return config,None,None
+    learner=yaml.safe_load(Path(algorithm_path).read_text(encoding='utf-8'))
+    if not isinstance(learner,dict) or set(learner)!={'algorithm','parameters','training'}:
+        raise ValueError('Expected algorithm, parameters and training sections')
+    name=learner['algorithm']
+    if name not in ('mappo','maddpg','dual_critic'):
+        raise ValueError('Unsupported interception algorithm')
+    parameters={'mappo':MAPPOConfig,'maddpg':MADDPGConfig,'dual_critic':DualCriticConfig}[name](**learner['parameters'])
+    rollout=int(learner['training']['rollout_length'])
+    if rollout<1:raise ValueError('rollout_length must be positive')
+    return config,parameters,rollout
+
+
+def make_policy(name,config,parameters,device,seed):
+    contract=InterceptionEnv(config).contract
+    snapshot=dict(environment=asdict(config))
+    if name=='mappo':
+        return MAPPO(36,180,5,parameters,device,seed,environment_config=snapshot,environment_contract=contract)
+    if name=='maddpg':
+        return MADDPG(parameters,device,seed,environment_config=snapshot,environment_contract=contract)
+    if name=='dual_critic':
+        return DualCritic(parameters,device,seed,environment_config=snapshot,environment_contract=contract)
+    raise ValueError(name)
+
+
+def save_policy(policy,name,path,step,config):
+    if name=='mappo':policy.save(path,global_step=step)
+    else:policy.save(path,global_step=step,environment_config=dict(environment=asdict(config)))
+
+
+def load_run(checkpoint,label='Best',device='cpu'):
+    root=Path(checkpoint)
+    if root.is_file():root=root.parent.parent if root.parent.name=='checkpoints' else root.parent
+    settings=json.loads((root/'settings.json').read_text(encoding='utf-8'))
+    config=InterceptionConfig(**settings['environment'])
+    name=settings['algorithm']
+    parameters={'mappo':MAPPOConfig,'maddpg':MADDPGConfig,'dual_critic':DualCriticConfig}[name](**settings['parameters'])
+    model=(root/'checkpoints'/('best.pt' if label=='Best' else 'last.pt')) if Path(checkpoint).is_dir() else Path(checkpoint)
+    index=json.loads((root/'checkpoints'/'index.json').read_text(encoding='utf-8'))
+    expected=index['checkpoints'].get(label)
+    if expected is None or expected['sha256']!=digest(model):raise ValueError('Checkpoint catalog digest mismatch')
+    policy=make_policy(name,config,parameters,device,settings['seed'])
+    policy.load(model,load_optimizers=False)
+    return config,policy,name,model,settings
+
+
+def evaluate_policy(config,policy,mode,episodes,seed_start):
+    rows=[]
+    for offset in range(episodes):
+        seed=seed_start+offset
+        env=InterceptionEnv(replace(config,attack_mode=mode))
+        obs,info=env.reset(seed=seed)
+        while True:
+            actions=policy.policy_actions(obs[None],np.ones((1,5),np.float32),deterministic=True)[0]
+            obs,_,term,trunc,info=env.step(actions)
+            if term or trunc:
+                rows.append(dict(seed=seed,**info['episode_summary']))
+                break
+        env.close()
+    return rows
+
+
+def summarize(rows):
+    count=len(rows)
+    if not count:raise ValueError('No evaluation episodes')
+    outcomes={key:sum(row['outcome']==key for row in rows) for key in ('all_captured','penetrated','time_limit')}
+    first=[row['first_capture_time_s'] for row in rows if row['first_capture_time_s'] is not None]
+    def interval(successes):
+        z=1.96
+        p=successes/count
+        center=(p+z*z/(2*count))/(1+z*z/count)
+        half=z*np.sqrt((p*(1-p)+z*z/(4*count))/count)/(1+z*z/count)
+        return [float(max(0,center-half)),float(min(1,center+half))]
+    return dict(episodes=count,counts=outcomes,all_capture_rate=outcomes['all_captured']/count,
+                penetration_rate=outcomes['penetrated']/count,time_limit_rate=outcomes['time_limit']/count,
+                all_capture_95pct_wilson=interval(outcomes['all_captured']),
+                penetration_95pct_wilson=interval(outcomes['penetrated']),
+                capture_efficiency=sum(row['captured_count'] for row in rows)/(5*count),
+                mean_first_capture_time_s=float(np.mean(first)) if first else None,
+                mean_duration_s=float(np.mean([row['duration_s'] for row in rows])),
+                mean_defender_oob_count=float(np.mean([row['defender_oob_count'] for row in rows])),
+                mean_team_return=float(np.mean([row['team_return'] for row in rows])))
+
+
+class ReplayBuffer:
+    """Joint transition replay for the existing MADDPG update loop."""
+    def __init__(self,capacity,seed):
+        self.capacity=capacity
+        self.rows=[]
+        self.cursor=0
+        self.rng=np.random.default_rng(seed)
+
+    def add(self,**row):
+        copied={k:np.asarray(v,dtype=np.float32).copy() for k,v in row.items()}
+        if len(self.rows)<self.capacity:self.rows.append(copied)
+        else:self.rows[self.cursor]=copied
+        self.cursor=(self.cursor+1)%self.capacity
+
+    def __len__(self):return len(self.rows)
+
+    def sample(self,size):
+        chosen=self.rng.integers(0,len(self.rows),size=size)
+        return {key:np.stack([self.rows[i][key] for i in chosen]) for key in self.rows[0]}
+
+
+def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mode,output,
+          eval_interval=0,eval_episodes=10):
+    if steps<1 or steps%num_envs or num_envs<1 or attack_mode not in ('mixed','direct_rush','split_attack'):
+        raise ValueError('Invalid training budget or attack mode')
+    root=Path(output)
+    root.mkdir(parents=True,exist_ok=False)
+    (root/'checkpoints').mkdir()
+    settings=dict(schema='InterceptionRun/1',environment=asdict(config),environment_contract=InterceptionEnv(config).contract,
+                  algorithm=name,parameters=asdict(parameters),rollout_length=rollout,seed=seed,
+                  attack_mode=attack_mode,total_sampled_steps=steps,num_envs=num_envs)
+    write_json(root/'settings.json',settings)
+    policy=make_policy(name,config,parameters,device,seed)
+    replay=ReplayBuffer(parameters.buffer_capacity,seed) if name!='mappo' else None
+    episode_log=(root/'episodes.jsonl').open('x',encoding='utf-8')
+    update_log=(root/'updates.jsonl').open('x',encoding='utf-8')
+    evaluation_log=(root/'evaluations.jsonl').open('x',encoding='utf-8')
+    reward_log=gzip.open(root/'reward_steps.jsonl.gz','xt',encoding='utf-8')
+    best_score=None
+    best_entry=None
+    next_eval=eval_interval if eval_interval else None
+    sampled=0
+    episodes=0
+    mode_episodes={mode:0 for mode in ('direct_rush','split_attack')}
+    worker_episode_ids=[0]*num_envs
+    updates=0
+    try:
+        with ParallelInterceptionEnvs(num_envs,config,seed=seed,attack_mode=attack_mode) as sampler:
+            obs,states,masks,_=sampler.reset()
+            while sampled<steps:
+                horizon=min(rollout,(steps-sampled)//num_envs)
+                buffer=(RolloutBuffer(horizon,num_envs,5,36,180,2,action_transform=policy.action_transform,
+                                      disk_radius=policy.disk_radius) if name=='mappo' else None)
+                for _ in range(horizon):
+                    if name=='mappo':
+                        actions,logp,values,raw=policy.act_rollout(obs,states,masks)
+                    else:
+                        actions=policy.policy_actions(obs,masks,deterministic=False)
+                    result=sampler.step(actions)
+                    if name=='mappo':
+                        buffer.insert(obs,states,actions,logp,values,result.rewards,result.dones,masks,raw_actions=raw)
+                    else:
+                        for i in range(num_envs):
+                            item=dict(observations=obs[i],states=states[i],actions=actions[i],
+                                      next_observations=result.transition_observations[i],next_states=result.transition_states[i],
+                                      dones=result.dones[i],active_masks=masks[i],next_active_masks=result.transition_masks[i])
+                            if name=='dual_critic':
+                                item.update(global_rewards=result.infos[i]['global_reward'],
+                                            local_rewards=float(np.mean(result.infos[i]['local_rewards'])))
+                            else:item['rewards']=result.rewards[i]
+                            replay.add(**item)
+                    for i,info in enumerate(result.infos):
+                        record=dict(sampled_step=sampled+num_envs,worker=i,worker_episode_id=worker_episode_ids[i],
+                                    episode_step=info['step'],
+                                    attack_mode=info['attack_mode'],global_reward=info['global_reward'],
+                                    local_rewards=info['local_rewards'],team_reward=info['team_reward'],
+                                    components=info['reward_components'],events=info['events'])
+                        reward_log.write(json.dumps(record,default=_plain,allow_nan=False)+'\n')
+                        if 'episode_summary' in info:
+                            episodes+=1
+                            mode_episodes[info['attack_mode']]+=1
+                            episode_log.write(json.dumps(dict(worker=i,episode_id=episodes,**info['episode_summary']),allow_nan=False)+'\n')
+                            worker_episode_ids[i]+=1
+                    obs,states,masks=result.observations,result.states,result.active_masks
+                    sampled+=num_envs
+                    if replay is not None and len(replay)>=parameters.warmup(config.episode_steps) and sampled%parameters.update_interval_steps==0:
+                        for _update in range(parameters.updates_per_interval):
+                            metrics=policy.update(replay.sample(parameters.batch_size));updates+=1
+                            update_log.write(json.dumps(dict(step=sampled,update=updates,**metrics),allow_nan=False)+'\n')
+                if buffer is not None:
+                    buffer.compute_returns_and_advantages(policy.values(states),parameters.gamma,parameters.gae_lambda)
+                    metrics=policy.update(buffer);updates+=1
+                    update_log.write(json.dumps(dict(step=sampled,update=updates,**metrics),allow_nan=False)+'\n')
+                if eval_interval and (sampled>=next_eval or sampled==steps):
+                    summaries={mode:summarize(evaluate_policy(config,policy,mode,eval_episodes,600000))
+                               for mode in ('direct_rush','split_attack')}
+                    evaluation_log.write(json.dumps(dict(step=sampled,modes=summaries),allow_nan=False)+'\n')
+                    score=(min(v['all_capture_rate'] for v in summaries.values()),
+                           np.mean([v['all_capture_rate'] for v in summaries.values()]),
+                           min(v['capture_efficiency'] for v in summaries.values()))
+                    if best_score is None or score>best_score:
+                        model=root/'checkpoints'/'best.pt'
+                        save_policy(policy,name,model,sampled,config)
+                        best_entry=dict(path='checkpoints/best.pt',sha256=digest(model),step=sampled)
+                        best_score=score
+                    next_eval=(sampled//eval_interval+1)*eval_interval
+                print(f'{name}: {sampled}/{steps} sampled steps, {episodes} episodes, {updates} updates',flush=True)
+        last=root/'checkpoints'/'last.pt'
+        save_policy(policy,name,last,sampled,config)
+        if best_entry is None:
+            best=root/'checkpoints'/'best.pt'
+            save_policy(policy,name,best,sampled,config)
+            best_entry=dict(path='checkpoints/best.pt',sha256=digest(best),step=sampled)
+        write_json(root/'checkpoints'/'index.json',dict(schema='InterceptionCheckpoints/1',checkpoints=dict(
+            Best=best_entry,Last=dict(path='checkpoints/last.pt',sha256=digest(last),step=sampled))))
+        result=dict(sampled_steps=sampled,completed_episodes=episodes,episodes_by_attack_mode=mode_episodes,
+                    updates=updates,best_score=best_score)
+        write_json(root/'summary.json',result)
+        return result
+    finally:
+        episode_log.close();update_log.close();evaluation_log.close();reward_log.close()

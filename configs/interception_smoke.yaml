@@ -1,0 +1,3 @@
+schema: Interception/1
+environment:
+  episode_steps: 40
