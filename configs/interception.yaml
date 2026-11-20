@@ -13,8 +13,9 @@ environment:
   attacker_speed_max: 8.0
   attacker_acceleration_max: 3.0
   sensing_radius: 80.0
-  communication_radius: 60.0
-  danger_weight: 0.05
+  visible_neighbors: 4
+  visible_attackers: 5
+  observation_layout: absolute_no_base
   capture_reward: 20.0
   boundary_penalty: 2.0
   penetration_penalty: 100.0

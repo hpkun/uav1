@@ -27,30 +27,38 @@ class InterceptionConfig:
     attacker_speed_max: float = 8.0
     attacker_acceleration_max: float = 3.0
     sensing_radius: float = 80.0
-    communication_radius: float = 60.0
-    visible_attackers: int = 3
-    visible_neighbors: int = 3
+    communication_radius: float | None = None  # Historical relative-observation runs only.
+    visible_attackers: int = 5
+    visible_neighbors: int = 4
+    observation_layout: str = 'absolute_no_base'
     spawn_min_spacing: float = 8.0
     attack_mode: str = 'direct_rush'
     split_waypoint_x: float = 70.0
     split_waypoint_y: float = 5.0
     split_switch_radius: float = 12.0
-    danger_weight: float = 0.05
+    danger_weight: float = 0.0  # Kept for loading historical runs.
     capture_reward: float = 20.0
     boundary_penalty: float = 2.0
     penetration_penalty: float = 100.0
     approach_weight: float = 0.05
 
     def __post_init__(self):
-        if (self.n_defenders, self.n_attackers, self.visible_attackers, self.visible_neighbors) != (5, 5, 3, 3):
-            raise ValueError('Interception/1 requires five defenders, five attackers and three observation slots per role')
+        if ((self.n_defenders,self.n_attackers)!=(5,5) or
+                (self.visible_neighbors,self.visible_attackers) not in ((3,3),(4,5))):
+            raise ValueError('Interception requires five agents per side and a supported observation layout')
+        if self.observation_layout not in ('relative_with_base','absolute_no_base'):
+            raise ValueError('Unsupported observation layout')
+        if self.observation_layout=='relative_with_base' and (
+                self.communication_radius is None or not math.isfinite(self.communication_radius)
+                or self.communication_radius<=0):
+            raise ValueError('Historical relative observations require a communication radius')
         if self.attack_mode not in ('direct_rush', 'split_attack'):
             raise ValueError('Unknown attack mode')
         if type(self.episode_steps) is not int or self.episode_steps < 1:
             raise ValueError('episode_steps must be positive')
         names = ('arena_half_extent','breach_radius','danger_radius','capture_radius','dt',
                  'defender_speed_max','defender_acceleration_max','attacker_speed_max',
-                 'attacker_acceleration_max','sensing_radius','communication_radius','spawn_min_spacing',
+                 'attacker_acceleration_max','sensing_radius','spawn_min_spacing',
                  'split_switch_radius')
         if any(not math.isfinite(getattr(self, name)) or getattr(self, name) <= 0 for name in names):
             raise ValueError('Physical scales must be finite and positive')
@@ -73,15 +81,15 @@ def _limit(vectors: np.ndarray, maximum: float) -> np.ndarray:
 
 class InterceptionEnv:
     """Five controlled defenders against five scripted attackers."""
-    observation_dim = 36
-    state_dim = 180
-
     def __init__(self, config: InterceptionConfig | None = None):
         self.config = config or InterceptionConfig()
-        self.observation_space = spaces.Box(-np.inf, np.inf, (5, 36), np.float32)
+        own_features=4 if self.config.observation_layout=='absolute_no_base' else 6
+        self.observation_dim = own_features+5*(self.config.visible_neighbors+self.config.visible_attackers)
+        self.state_dim = 5*self.observation_dim
+        self.observation_space = spaces.Box(-np.inf, np.inf, (5, self.observation_dim), np.float32)
         self.action_space = spaces.Box(-self.config.defender_acceleration_max,
                                        self.config.defender_acceleration_max, (5, 2), np.float32)
-        self.state_space = spaces.Box(-np.inf, np.inf, (180,), np.float32)
+        self.state_space = spaces.Box(-np.inf, np.inf, (self.state_dim,), np.float32)
         self.base = np.array([self.config.base_x, self.config.base_y], dtype=np.float64)
         self.positions = np.zeros((2, 5, 2), np.float64)  # 0 defenders, 1 attackers
         self.velocities = np.zeros_like(self.positions)
@@ -92,11 +100,15 @@ class InterceptionEnv:
     @property
     def contract(self):
         return dict(schema='Interception/1', version='interception_1', n_agents=5,
-                    n_attackers=5, observation_dim=36, state_dim=180, action_dim=2,
+                    n_attackers=5, observation_dim=self.observation_dim, state_dim=self.state_dim, action_dim=2,
                     action_schema='world_acceleration_disk_si',
                     max_acceleration=self.config.defender_acceleration_max,
                     reward_schema='r_i=global+local_i; team=global+mean(local_i)',
-                    observation_schema='self_xy_vxy_base_relative_xy_nearest_3_defenders_nearest_3_attackers_relative_xy_vxy_valid',
+                    observation_schema=('self_xy_vxy_base_relative_xy_nearest_3_defenders_nearest_3_attackers_relative_xy_vxy_valid'
+                                        if self.observation_dim==36 else
+                                        'self_xy_vxy_base_relative_xy_all_4_visible_defenders_all_5_visible_attackers_relative_xy_vxy_valid'
+                                        if self.observation_dim==51 else
+                                        'self_xy_vxy_all_4_visible_defenders_all_5_visible_attackers_absolute_xy_vxy_valid'),
                     state_schema='five_defender_observations_in_agent_order',
                     implementation_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                     config=asdict(self.config))
@@ -137,30 +149,33 @@ class InterceptionEnv:
 
     def observations(self):
         c = self.config
-        out = np.zeros((5, 36), dtype=np.float32)
+        out = np.zeros((5,self.observation_dim),dtype=np.float32)
+        absolute=c.observation_layout=='absolute_no_base'
+        own_features=4 if absolute else 6
         for i in range(5):
             own = self.positions[0, i]
             out[i, :2] = own / c.arena_half_extent
-            out[i, 2:4] = self.velocities[0, i] / c.defender_speed_max
-            out[i, 4:6] = (self.base-own) / (2*c.arena_half_extent)
+            out[i, 2:4] = self.velocities[0, i] / (c.attacker_speed_max if absolute else c.defender_speed_max)
+            if not absolute:
+                out[i, 4:6] = (self.base-own) / (2*c.arena_half_extent)
             groups = (([(j, self.positions[0,j], self.velocities[0,j]) for j in range(5) if j != i],
-                       c.communication_radius, 6),
+                       c.sensing_radius if absolute else c.communication_radius, own_features, c.visible_neighbors),
                       ([(j, self.positions[1,j], self.velocities[1,j]) for j in range(5) if self.attacker_alive[j]],
-                       c.sensing_radius, 21))
-            for candidates, radius, start in groups:
+                       c.sensing_radius, own_features+5*c.visible_neighbors, c.visible_attackers))
+            for candidates, radius, start, slots in groups:
                 nearest = sorted(((float(np.linalg.norm(p-own)),j,p,v) for j,p,v in candidates),
                                  key=lambda row:(row[0],row[1]))
                 for slot, (distance, _, pos, vel) in enumerate(row for row in nearest if row[0] <= radius):
-                    if slot == 3:
+                    if slot == slots:
                         break
                     k = start + slot*5
-                    out[i,k:k+2] = (pos-own)/(2*c.arena_half_extent)
-                    out[i,k+2:k+4] = (vel-self.velocities[0,i])/c.attacker_speed_max
+                    out[i,k:k+2] = pos/c.arena_half_extent if absolute else (pos-own)/(2*c.arena_half_extent)
+                    out[i,k+2:k+4] = vel/c.attacker_speed_max if absolute else (vel-self.velocities[0,i])/c.attacker_speed_max
                     out[i,k+4] = 1.0
         return out
 
     def central_state(self):
-        return self.observations().reshape(180).copy()
+        return self.observations().reshape(self.state_dim).copy()
 
     def _attacker_actions(self):
         c = self.config
@@ -246,15 +261,20 @@ class InterceptionEnv:
         self.finished = outcome is not None
         if outcome == 'time_limit':
             events.append(dict(type='time_limit',step=self.step_count,time_s=time_s))
-        # Track the same pre-step target, including if it was captured this step.
+        # Legacy reward definitions are retained for historical run configurations.
         approach = np.zeros(5)
         for i in range(5):
-            candidates = np.flatnonzero(alive_before)
+            candidates = [j for j in np.flatnonzero(alive_before)
+                          if c.danger_weight or np.linalg.norm(before[0,i]-before[1,j]) <= c.sensing_radius]
             if len(candidates):
                 target = min(candidates,key=lambda j:(np.linalg.norm(before[0,i]-before[1,j]),int(j)))
-                approach[i] = np.linalg.norm(before[0,i]-before[1,target])-np.linalg.norm(self.positions[0,i]-self.positions[1,target])
-        active_distance = np.linalg.norm(self.positions[1,self.attacker_alive]-self.base,axis=1)
-        global_reward = -c.danger_weight*float(np.exp(-np.square(active_distance/c.danger_radius)).sum())
+                target_after = self.positions[1,target] if c.danger_weight else before[1,target]
+                approach[i] = np.linalg.norm(before[0,i]-before[1,target])-np.linalg.norm(self.positions[0,i]-target_after)
+        # Legacy configurations retain their original reward for historical checkpoints.
+        global_reward = 0.0
+        if c.danger_weight:
+            active_distance = np.linalg.norm(self.positions[1,self.attacker_alive]-self.base,axis=1)
+            global_reward = -c.danger_weight*float(np.exp(-np.square(active_distance/c.danger_radius)).sum())
         local = (c.capture_reward*captured_by-c.boundary_penalty*boundary.astype(float)
                  -c.penetration_penalty*bool(breached)+c.approach_weight*approach)
         self.global_return += global_reward
@@ -275,9 +295,11 @@ class InterceptionEnv:
                     global_reward=float(global_reward), local_rewards=np.asarray(local_rewards,dtype=np.float64).copy(),
                     individual_rewards=(global_reward+local_rewards).copy(),
                     team_reward=float(global_reward+np.mean(local_rewards)), events=list(events),
-                    reward_components=dict(danger=float(global_reward),capture=float(self.config.capture_reward*sum(e['type']=='capture' for e in events))/5,
+                    reward_components=dict(capture=float(self.config.capture_reward*sum(e['type']=='capture' for e in events))/5,
                                            boundary=-float(self.config.boundary_penalty*sum(e['type']=='defender_oob' for e in events))/5,
                                            penetration=-float(self.config.penetration_penalty*any(e['type']=='penetration' for e in events))))
+        if self.config.danger_weight:
+            info['reward_components']['danger'] = float(global_reward)
         if outcome is not None:
             info['episode_summary'] = dict(attack_mode=self.config.attack_mode,outcome=outcome,
                 seed=self.seed,steps=self.step_count,duration_s=info['time_s'],captured_count=self.captured_count,

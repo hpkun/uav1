@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>无人机拦截回放</title>
+<style>
+  :root{font:15px system-ui,sans-serif;color:#e8eef7;background:#0e1622}
+  *{box-sizing:border-box}
+  body{margin:0}
+  .layout{max-width:1510px;margin:auto;min-height:100vh;display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:20px;padding:20px}
+  main,aside{background:#182537;border:1px solid #304156;border-radius:16px;padding:20px}
+  h1{font-size:25px;margin:0 0 5px}h2{font-size:18px;margin:0 0 12px}
+  .muted{color:#aabbd0}.subtitle{margin:0 0 15px}
+  .board{max-width:850px;margin:auto}
+  canvas{display:block;width:100%;height:auto;aspect-ratio:1;background:#f4f7fb;border-radius:10px}
+  .controls{display:flex;align-items:center;gap:12px;margin-top:15px}
+  button{border:1px solid #5c7896;background:#29435e;color:white;border-radius:7px;padding:9px 16px;cursor:pointer}
+  button:hover{background:#3c5875}input[type=range]{flex:1;accent-color:#78c6ff}
+  select{background:#29435e;color:white;border:1px solid #5c7896;border-radius:6px;padding:5px}
+  .toggles{display:flex;flex-wrap:wrap;gap:12px;margin:14px 0}.toggles label{white-space:nowrap;cursor:pointer}
+  .legend{display:flex;flex-wrap:wrap;gap:10px 18px;margin-top:12px;font-size:13px}
+  .swatch{display:inline-block;width:13px;height:13px;border-radius:50%;vertical-align:-2px;margin-right:5px}
+  .red{background:#dc414b}.blue{background:#2c78d4}.amber{background:#cb9026}.purple{background:#8656bd}
+  .line{display:inline-block;width:17px;border-top:2px dashed #d65c64;vertical-align:4px;margin-right:5px}
+  .line.solid{border-style:solid}
+  .stat{padding:10px 0;border-bottom:1px solid #304156}
+  ol{padding-left:24px}li{padding:5px 0;cursor:pointer}li:hover{color:#87c9ff}
+  @media(max-width:900px){.layout{grid-template-columns:1fr;padding:10px}main,aside{padding:15px}aside{order:2}}
+</style>
+</head>
+<body>
+<div class="layout">
+  <main>
+    <h1>无人机拦截回放</h1>
+    <p class="subtitle muted" id="status"></p>
+    <div class="board">
+      <canvas id="view" width="1000" height="1000" aria-label="拦截场景地图"></canvas>
+      <div class="controls"><button id="play" type="button">播放</button><input id="slider" type="range" min="0" value="0" aria-label="回放进度"><span id="time"></span></div>
+      <div class="toggles"><label><input id="show-sensing" type="checkbox" checked> 感知范围</label><label><input id="show-capture" type="checkbox" checked> 拦截范围</label><label><input id="show-trails" type="checkbox" checked> 最近轨迹</label><label>查看 <select id="focus-defender"><option value="0">D0</option><option value="1">D1</option><option value="2">D2</option><option value="3">D3</option><option value="4">D4</option></select> 的感知目标</label></div>
+      <div class="legend">
+        <span><i class="swatch red"></i>防御方 D0–D4</span><span><i class="swatch blue"></i>进攻方 A0–A4</span>
+        <span><i class="line"></i><span id="sensing-label">双方感知半径</span> <b id="sensing-value"></b></span><span><i class="line solid"></i>拦截半径 <b id="capture-value"></b></span>
+        <span id="danger-legend"><i class="swatch amber"></i>旧版危险奖励范围</span><span><i class="swatch purple"></i>目标区入侵范围</span>
+      </div>
+    </div>
+  </main>
+  <aside><h2>对局结果</h2><div id="summary" class="stat"></div><h2 style="margin-top:22px">感知目标</h2><div id="sensor-count" class="stat"></div><h2 style="margin-top:22px">事件</h2><ol id="events"></ol></aside>
+</div>
+<script id="trace" type="application/json">__DATA__</script>
+<script>
+(() => {
+  'use strict';
+  const d=JSON.parse(document.getElementById('trace').textContent);
+  const frames=d.frames, cfg=d.config, canvas=document.getElementById('view');
+  const g=canvas.getContext('2d'), slider=document.getElementById('slider');
+  const showSensing=document.getElementById('show-sensing');
+  const showCapture=document.getElementById('show-capture');
+  const showTrails=document.getElementById('show-trails');
+  const focus=document.getElementById('focus-defender');
+  const play=document.getElementById('play');
+  const W=canvas.width, H=canvas.height;
+  const half=cfg.arena_half_extent;
+  const baseRing=cfg.danger_weight?cfg.danger_radius:cfg.breach_radius;
+  const extent=Math.max(half,Math.abs(cfg.base_x)+baseRing,Math.abs(cfg.base_y)+baseRing)+5;
+  const unit=W/(2*extent), sx=x=>W/2+x*unit, sy=y=>H/2-y*unit;
+  const colors=['#dc414b','#2c78d4'];
+  let index=0,timer=null;
+  slider.max=frames.length-1;
+  document.getElementById('sensing-value').textContent=`${cfg.sensing_radius} m`;
+  if(cfg.observation_layout!=='absolute_no_base')document.getElementById('sensing-label').textContent='进攻方感知半径';
+  document.getElementById('capture-value').textContent=`${cfg.capture_radius} m`;
+  document.getElementById('danger-legend').hidden=!cfg.danger_weight;
+
+  function circle(x,y,r,stroke,fill=null,width=2,dash=[]){
+    g.beginPath();g.arc(sx(x),sy(y),r*unit,0,Math.PI*2);
+    if(fill){g.fillStyle=fill;g.fill()}
+    if(stroke){g.strokeStyle=stroke;g.lineWidth=width;g.setLineDash(dash);g.stroke();g.setLineDash([])}
+  }
+  function background(){
+    g.fillStyle='#f4f7fb';g.fillRect(0,0,W,H);
+    g.strokeStyle='#dce4ed';g.lineWidth=1;
+    for(let n=-Math.floor(half/20)*20;n<=half;n+=20){
+      g.beginPath();g.moveTo(sx(n),sy(-half));g.lineTo(sx(n),sy(half));g.stroke();
+      g.beginPath();g.moveTo(sx(-half),sy(n));g.lineTo(sx(half),sy(n));g.stroke();
+    }
+    g.strokeStyle='#8a9cad';g.lineWidth=2;g.strokeRect(sx(-half),sy(half),2*half*unit,2*half*unit);
+    g.font='13px system-ui';g.fillStyle='#546578';g.fillText('进攻方向 ↓',sx(-half)+9,sy(half)+19);
+    if(cfg.danger_weight)circle(cfg.base_x,cfg.base_y,cfg.danger_radius,'#c58b24','rgba(212,155,52,.045)',2,[8,6]);
+    circle(cfg.base_x,cfg.base_y,cfg.breach_radius,'#8656bd','rgba(134,86,189,.08)',2);
+    circle(cfg.base_x,cfg.base_y,2.4,null,'#172638');
+    g.fillStyle='#172638';g.fillText('目标区',sx(cfg.base_x)+12,sy(cfg.base_y)+5);
+  }
+  function trails(){
+    if(!showTrails.checked)return;
+    const begin=Math.max(0,index-75);
+    for(let side=0;side<2;side++)for(let agent=0;agent<5;agent++){
+      g.beginPath();let started=false;
+      for(let k=begin;k<=index;k++){
+        const row=frames[k];if(side===1&&!row.attacker_alive[agent]){started=false;continue}
+        const p=row.positions[side][agent];
+        if(started)g.lineTo(sx(p[0]),sy(p[1]));else g.moveTo(sx(p[0]),sy(p[1]));
+        started=true;
+      }
+      g.strokeStyle=side===0?'rgba(220,65,75,.48)':'rgba(44,120,212,.48)';g.lineWidth=2;g.stroke();
+    }
+  }
+  function sensingLinks(row){
+    const selected=Number(focus.value), own=row.positions[0][selected];
+    const friendRadius=cfg.observation_layout==='absolute_no_base'?cfg.sensing_radius:cfg.communication_radius;
+    let friends=0,attackers=0;
+    for(let side=0;side<2;side++)for(let i=0;i<5;i++){
+      if(side===0&&i===selected||side===1&&!row.attacker_alive[i])continue;
+      const p=row.positions[side][i],radius=side===0?friendRadius:cfg.sensing_radius;
+      if(Math.hypot(p[0]-own[0],p[1]-own[1])>radius)continue;
+      if(side===0)friends++;else attackers++;
+      g.beginPath();g.moveTo(sx(own[0]),sy(own[1]));g.lineTo(sx(p[0]),sy(p[1]));
+      g.strokeStyle=side===0?'rgba(220,65,75,.55)':'rgba(44,120,212,.65)';g.lineWidth=2;g.stroke();
+    }
+    document.getElementById('sensor-count').textContent=`D${selected}：友方 ${friends}/4 · 进攻方 ${attackers}/5`;
+  }
+  function vehicles(row){
+    for(let i=0;i<5;i++){
+      const p=row.positions[0][i];
+      if(showSensing.checked)circle(p[0],p[1],cfg.sensing_radius,'rgba(220,65,75,.47)','rgba(220,65,75,.018)',1.4,[8,6]);
+      if(showCapture.checked)circle(p[0],p[1],cfg.capture_radius,'rgba(220,65,75,.85)','rgba(220,65,75,.09)',1.8);
+    }
+    for(let side=0;side<2;side++)for(let i=0;i<5;i++){
+      if(side===1&&!row.attacker_alive[i])continue;
+      const p=row.positions[side][i],x=sx(p[0]),y=sy(p[1]);
+      g.beginPath();g.arc(x,y,side===0?8:7,0,Math.PI*2);
+      g.fillStyle=colors[side];g.fill();g.lineWidth=2;g.strokeStyle='white';g.stroke();
+      const angle=(i*2.4)+(side?0.8:0),dx=Math.cos(angle)*16,dy=Math.sin(angle)*16;
+      g.font='bold 14px system-ui';g.textAlign=dx<0?'right':'left';
+      g.lineWidth=4;g.strokeStyle='white';g.strokeText((side===0?'D':'A')+i,x+dx,y+dy);
+      g.fillStyle='#172638';g.fillText((side===0?'D':'A')+i,x+dx,y+dy);
+    }
+  }
+  function draw(){
+    const row=frames[index];background();trails();sensingLinks(row);vehicles(row);
+    document.getElementById('status').textContent=`${d.mode} · seed ${d.seed} · 第 ${row.step}/${d.summary.steps} 步`;
+    document.getElementById('time').textContent=`${row.time_s.toFixed(1)} s`;
+    slider.value=index;
+  }
+  function stop(){if(timer)clearInterval(timer);timer=null;play.textContent='播放'}
+  slider.addEventListener('input',()=>{index=Number(slider.value);draw()});
+  for(const toggle of [showSensing,showCapture,showTrails,focus])toggle.addEventListener('change',draw);
+  play.addEventListener('click',()=>{
+    if(timer){stop();return}if(index===frames.length-1)index=0;
+    play.textContent='暂停';draw();
+    timer=setInterval(()=>{index=Math.min(index+1,frames.length-1);draw();if(index===frames.length-1)stop()},70);
+  });
+  const summary=d.summary;
+  document.getElementById('summary').textContent=`${summary.outcome} · 拦截 ${summary.captured_count}/5 · ${summary.duration_s.toFixed(1)} s`;
+  const list=document.getElementById('events');
+  for(const event of d.events){
+    const li=document.createElement('li');
+    li.textContent=`${event.time_s.toFixed(1)} s · ${event.type}${event.defender===undefined?'':` D${event.defender}`}${event.attacker===undefined?'':` A${event.attacker}`}`;
+    li.addEventListener('click',()=>{const at=frames.findIndex(row=>row.step>=event.step);if(at>=0){index=at;draw()}});
+    list.append(li);
+  }
+  draw();
+})();
+</script>
+</body>
+</html>

@@ -58,7 +58,8 @@ class MADDPG:
     @staticmethod
     def validate_environment_spec(contract):
         if (not isinstance(contract,dict) or contract.get('version')!='interception_1' or
-                any(contract.get(k)!=v for k,v in dict(observation_dim=36,state_dim=180,n_agents=5,action_dim=2).items()) or
+                (contract.get('observation_dim'),contract.get('state_dim')) not in ((36,180),(51,255),(49,245)) or
+                any(contract.get(k)!=v for k,v in dict(n_agents=5,action_dim=2).items()) or
                 contract.get('action_schema')!='world_acceleration_disk_si' or
                 not isinstance(contract.get('max_acceleration'),(int,float)) or contract['max_acceleration']<=0):
             raise ValueError('MADDPG requires the exact Interception/1 interface')

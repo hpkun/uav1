@@ -25,6 +25,9 @@ where = ["."]
 include = ["env*", "algorithm*", "experiment*", "tools*"]
 namespaces = false
 
+[tool.setuptools.package-data]
+tools = ["replay_template.html"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

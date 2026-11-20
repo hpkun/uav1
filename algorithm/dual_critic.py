@@ -66,7 +66,8 @@ class DualCritic:
     schema='interception_dual_critic_1'
 
     def __init__(self,config,device,seed,*,environment_config,environment_contract):
-        if environment_contract.get('version')!='interception_1' or environment_contract.get('observation_dim')!=36:
+        if (environment_contract.get('version')!='interception_1' or
+                (environment_contract.get('observation_dim'),environment_contract.get('state_dim')) not in ((36,180),(51,255),(49,245))):
             raise ValueError('Dual critic requires Interception/1')
         self.config=config
         self.device=torch.device(device)
@@ -76,8 +77,8 @@ class DualCritic:
         self.rng=np.random.default_rng(seed)
         torch.manual_seed(seed)
         radius=environment_contract['max_acceleration']
-        self.actor=Actor(36,config.hidden_dim,radius).to(self.device)
-        self.critics=nn.ModuleList([Critic(180,config.hidden_dim) for _ in range(2)]).to(self.device)
+        self.actor=Actor(environment_contract['observation_dim'],config.hidden_dim,radius).to(self.device)
+        self.critics=nn.ModuleList([Critic(environment_contract['state_dim'],config.hidden_dim) for _ in range(2)]).to(self.device)
         self.target_actor=deepcopy(self.actor).requires_grad_(False).eval()
         self.target_critics=deepcopy(self.critics).requires_grad_(False).eval()
         self.actor_optimizer=torch.optim.Adam(self.actor.parameters(),lr=config.actor_learning_rate)
@@ -104,9 +105,12 @@ class DualCritic:
         b={key:torch.as_tensor(value,dtype=torch.float32,device=self.device) for key,value in batch.items()}
         size=len(b['states'])
         if any(b[key].shape!=shape for key,shape in dict(
-                observations=(size,5,36),states=(size,180),actions=(size,5,2),
-                global_rewards=(size,),local_rewards=(size,),next_observations=(size,5,36),
-                next_states=(size,180),dones=(size,),active_masks=(size,5),next_active_masks=(size,5)).items()):
+                observations=(size,5,self.environment_contract['observation_dim']),
+                states=(size,self.environment_contract['state_dim']),actions=(size,5,2),
+                global_rewards=(size,),local_rewards=(size,),
+                next_observations=(size,5,self.environment_contract['observation_dim']),
+                next_states=(size,self.environment_contract['state_dim']),dones=(size,),
+                active_masks=(size,5),next_active_masks=(size,5)).items()):
             raise ValueError('Invalid dual-critic replay batch')
         with torch.no_grad():
             target_actions=self.target_actor(b['next_observations'])

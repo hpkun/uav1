@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from dataclasses import asdict, replace
-import gzip
 import hashlib
 import json
 from pathlib import Path
@@ -53,11 +52,12 @@ def read_config(env_path, algorithm_path=None):
     return config,parameters,rollout
 
 
-def make_policy(name,config,parameters,device,seed):
-    contract=InterceptionEnv(config).contract
-    snapshot=dict(environment=asdict(config))
+def make_policy(name,config,parameters,device,seed,environment_contract=None,environment_config=None):
+    environment=InterceptionEnv(config)
+    contract=environment_contract if environment_contract is not None else environment.contract
+    snapshot=dict(environment=asdict(config) if environment_config is None else environment_config)
     if name=='mappo':
-        return MAPPO(36,180,5,parameters,device,seed,environment_config=snapshot,environment_contract=contract)
+        return MAPPO(environment.observation_dim,environment.state_dim,5,parameters,device,seed,environment_config=snapshot,environment_contract=contract)
     if name=='maddpg':
         return MADDPG(parameters,device,seed,environment_config=snapshot,environment_contract=contract)
     if name=='dual_critic':
@@ -74,14 +74,18 @@ def load_run(checkpoint,label='Best',device='cpu'):
     root=Path(checkpoint)
     if root.is_file():root=root.parent.parent if root.parent.name=='checkpoints' else root.parent
     settings=json.loads((root/'settings.json').read_text(encoding='utf-8'))
-    config=InterceptionConfig(**settings['environment'])
+    saved_environment=settings['environment']
+    config=InterceptionConfig(**(saved_environment if 'observation_layout' in saved_environment else
+                                 dict(saved_environment,observation_layout='relative_with_base')))
     name=settings['algorithm']
     parameters={'mappo':MAPPOConfig,'maddpg':MADDPGConfig,'dual_critic':DualCriticConfig}[name](**settings['parameters'])
     model=(root/'checkpoints'/('best.pt' if label=='Best' else 'last.pt')) if Path(checkpoint).is_dir() else Path(checkpoint)
     index=json.loads((root/'checkpoints'/'index.json').read_text(encoding='utf-8'))
     expected=index['checkpoints'].get(label)
     if expected is None or expected['sha256']!=digest(model):raise ValueError('Checkpoint catalog digest mismatch')
-    policy=make_policy(name,config,parameters,device,settings['seed'])
+    policy=make_policy(name,config,parameters,device,settings['seed'],
+                       environment_contract=settings['environment_contract'],
+                       environment_config=saved_environment)
     policy.load(model,load_optimizers=False)
     return config,policy,name,model,settings
 
@@ -153,6 +157,7 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
     if steps<1 or steps%num_envs or num_envs<1 or log_every_steps<1 or attack_mode not in ('mixed','direct_rush','split_attack'):
         raise ValueError('Invalid training budget or attack mode')
     root=Path(output)
+    environment=InterceptionEnv(config)
     root.mkdir(parents=True,exist_ok=False)
     (root/'checkpoints').mkdir()
     settings=dict(schema='InterceptionRun/1',environment=asdict(config),environment_contract=InterceptionEnv(config).contract,
@@ -168,7 +173,6 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
     update_log=(root/'updates.jsonl').open('x',encoding='utf-8')
     evaluation_log=(root/'evaluations.jsonl').open('x',encoding='utf-8')
     progress_log=(root/'progress.jsonl').open('x',encoding='utf-8')
-    reward_log=gzip.open(root/'reward_steps.jsonl.gz','xt',encoding='utf-8')
     progress=ProgressLogger(name,steps,log_every_steps)
     best_score=None
     best_entry=None
@@ -176,7 +180,7 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
     sampled=0
     episodes=0
     mode_episodes={mode:0 for mode in ('direct_rush','split_attack')}
-    worker_episode_ids=[0]*num_envs
+    reward_component_totals=[{} for _ in range(num_envs)]
     updates=0
     try:
         print(f'[train {name}] attack={attack_mode} workers={num_envs} device={device} '
@@ -185,7 +189,7 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
             obs,states,masks,_=sampler.reset()
             while sampled<steps:
                 horizon=min(rollout,(steps-sampled)//num_envs)
-                buffer=(RolloutBuffer(horizon,num_envs,5,36,180,2,action_transform=policy.action_transform,
+                buffer=(RolloutBuffer(horizon,num_envs,5,environment.observation_dim,environment.state_dim,2,action_transform=policy.action_transform,
                                       disk_radius=policy.disk_radius) if name=='mappo' else None)
                 for _ in range(horizon):
                     if name=='mappo':
@@ -206,19 +210,19 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                             else:item['rewards']=result.individual_rewards[i]
                             replay.add(**item)
                     for i,info in enumerate(result.infos):
-                        record=dict(sampled_step=sampled+num_envs,worker=i,worker_episode_id=worker_episode_ids[i],
-                                    episode_step=info['step'],
-                                    attack_mode=info['attack_mode'],global_reward=info['global_reward'],
-                                    local_rewards=info['local_rewards'],individual_rewards=info['individual_rewards'],
-                                    team_reward=info['team_reward'],
-                                    components=info['reward_components'],events=info['events'])
-                        reward_log.write(json.dumps(record,default=_plain,allow_nan=False)+'\n')
+                        totals=reward_component_totals[i]
+                        for component,value in info['reward_components'].items():
+                            totals[component]=totals.get(component,0.0)+value
                         if 'episode_summary' in info:
+                            summary=info['episode_summary']
+                            if not np.isclose(sum(totals.values()),summary['team_return'],rtol=0,atol=1e-6):
+                                raise AssertionError('Episode reward ledger mismatch')
                             episodes+=1
                             mode_episodes[info['attack_mode']]+=1
-                            episode_log.write(json.dumps(dict(worker=i,episode_id=episodes,**info['episode_summary']),allow_nan=False)+'\n')
-                            progress.episode(info['episode_summary'])
-                            worker_episode_ids[i]+=1
+                            episode_log.write(json.dumps(dict(worker=i,episode_id=episodes,**summary,
+                                                             reward_components=totals),allow_nan=False)+'\n')
+                            progress.episode(summary)
+                            reward_component_totals[i]={}
                     obs,states,masks=result.observations,result.states,result.active_masks
                     sampled+=num_envs
                     if replay is not None and len(replay)>=parameters.warmup(config.episode_steps) and sampled%parameters.update_interval_steps==0:
@@ -242,7 +246,8 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                     if best_score is None or score>best_score:
                         model=root/'checkpoints'/'best.pt'
                         save_policy(policy,name,model,sampled,config)
-                        best_entry=dict(path='checkpoints/best.pt',sha256=digest(model),step=sampled)
+                        best_entry=dict(path='checkpoints/best.pt',sha256=digest(model),step=sampled,
+                                        selection='periodic_evaluation')
                         best_score=score
                     next_eval=(sampled//eval_interval+1)*eval_interval
                 if progress.ready(sampled,final=sampled==steps):
@@ -257,12 +262,13 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
         if best_entry is None:
             best=root/'checkpoints'/'best.pt'
             save_policy(policy,name,best,sampled,config)
-            best_entry=dict(path='checkpoints/best.pt',sha256=digest(best),step=sampled)
+            best_entry=dict(path='checkpoints/best.pt',sha256=digest(best),step=sampled,
+                            selection='final_unvalidated')
         write_json(root/'checkpoints'/'index.json',dict(schema='InterceptionCheckpoints/1',checkpoints=dict(
             Best=best_entry,Last=dict(path='checkpoints/last.pt',sha256=digest(last),step=sampled))))
         result=dict(sampled_steps=sampled,completed_episodes=episodes,episodes_by_attack_mode=mode_episodes,
-                    updates=updates,best_score=best_score)
+                    updates=updates,best_score=best_score,best_selection=best_entry['selection'])
         write_json(root/'summary.json',result)
         return result
     finally:
-        episode_log.close();update_log.close();evaluation_log.close();progress_log.close();reward_log.close()
+        episode_log.close();update_log.close();evaluation_log.close();progress_log.close()
