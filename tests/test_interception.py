@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from env.interception import InterceptionConfig, InterceptionEnv
 from env.parallel import ParallelInterceptionEnvs
@@ -55,6 +56,9 @@ def test_parallel_sampler_preserves_terminal_state():
         result=sampler.step(np.zeros((2,5,2)))
     assert result.dones.tolist()==[1,1]
     assert result.truncated.tolist()==[True,True]
+    assert result.rewards.shape==(2,)
+    assert result.individual_rewards.shape==(2,5)
+    np.testing.assert_allclose(result.rewards,result.individual_rewards.mean(axis=1),atol=1e-5)
     assert all(info['episode_summary']['outcome']=='time_limit' for info in result.infos)
     assert np.any(result.observations!=result.transition_observations)
 
@@ -70,3 +74,42 @@ def test_unopposed_attackers_reach_the_lower_target():
         assert terminated and not truncated
         assert info['episode_summary']['outcome']=='penetrated'
         assert 0<info['episode_summary']['steps']<500
+
+
+def test_mappo_team_and_maddpg_individual_interfaces():
+    from algorithm.mappo_config import MAPPOConfig
+    from algorithm.maddpg_config import MADDPGConfig
+    from experiment.interception import make_policy
+
+    config=InterceptionConfig()
+    env=InterceptionEnv(config)
+    observations,info=env.reset(seed=9)
+    batch_obs=observations[None]
+    masks=info['active_masks'][None]
+    state=info['central_state'][None]
+    mappo=make_policy('mappo',config,MAPPOConfig(hidden_size=16),'cpu',9)
+    assert mappo.policy_actions(batch_obs,masks).shape==(1,5,2)
+    assert mappo.values(state).shape==(1,)
+    maddpg=make_policy('maddpg',config,MADDPGConfig(hidden_dim=16,batch_size=2,learning_starts=2),'cpu',9)
+    assert maddpg.policy_actions(batch_obs,masks).shape==(1,5,2)
+    transition=dict(observations=np.repeat(batch_obs,2,axis=0),next_observations=np.repeat(batch_obs,2,axis=0),
+                    states=np.repeat(state,2,axis=0),next_states=np.repeat(state,2,axis=0),
+                    actions=np.zeros((2,5,2),np.float32),rewards=np.zeros((2,5),np.float32),
+                    dones=np.zeros(2,np.float32),active_masks=np.ones((2,5),np.float32),
+                    next_active_masks=np.ones((2,5),np.float32))
+    maddpg._batch(transition)
+    with pytest.raises(ValueError,match='Invalid MADDPG joint replay batch'):
+        maddpg._batch(dict(transition,rewards=np.zeros(2,np.float32)))
+
+
+def test_evaluation_rows_use_environment_seed_once():
+    from experiment.interception import evaluate_policy
+
+    class StationaryPolicy:
+        def policy_actions(self,observations,active_masks,*,deterministic):
+            return np.zeros((len(observations),5,2),np.float32)
+
+    rows=evaluate_policy(InterceptionConfig(episode_steps=2),StationaryPolicy(),
+                         'direct_rush',episodes=2,seed_start=600000)
+    assert [row['seed'] for row in rows]==[600000,600001]
+    assert all(row['outcome']=='time_limit' for row in rows)

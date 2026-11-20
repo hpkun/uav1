@@ -14,6 +14,7 @@ class VectorStep:
     states: np.ndarray
     active_masks: np.ndarray
     rewards: np.ndarray
+    individual_rewards: np.ndarray
     terminated: np.ndarray
     truncated: np.ndarray
     dones: np.ndarray
@@ -44,7 +45,7 @@ def _worker(pipe,config,attack_mode):
                 obs,info=env.reset(seed=base_seed)
                 pipe.send(('result',(obs,info['central_state'],info['active_masks'],info)))
             elif command=='step':
-                obs,_,term,trunc,info=env.step(payload)
+                obs,individual,term,trunc,info=env.step(payload)
                 final=(obs,info['central_state'],info['active_masks'])
                 reward=info['team_reward']
                 if term or trunc:
@@ -56,7 +57,7 @@ def _worker(pipe,config,attack_mode):
                     current=(obs,reset['central_state'],reset['active_masks'])
                 else:
                     current=final
-                pipe.send(('result',(current,final,reward,term,trunc,info)))
+                pipe.send(('result',(current,final,reward,individual,term,trunc,info)))
             else:
                 raise ValueError('Unknown sampler command')
     except EOFError:
@@ -117,10 +118,11 @@ class ParallelInterceptionEnvs:
         rows=[self._receive(i) for i in range(self.num_envs)]
         current=[np.stack([row[0][k] for row in rows]) for k in range(3)]
         final=[np.stack([row[1][k] for row in rows]) for k in range(3)]
-        term=np.asarray([row[3] for row in rows],bool)
-        trunc=np.asarray([row[4] for row in rows],bool)
-        return VectorStep(*current,np.asarray([row[2] for row in rows],np.float32),term,trunc,
-                          (term|trunc).astype(np.float32),*final,[row[5] for row in rows])
+        term=np.asarray([row[4] for row in rows],bool)
+        trunc=np.asarray([row[5] for row in rows],bool)
+        return VectorStep(*current,np.asarray([row[2] for row in rows],np.float32),
+                          np.stack([row[3] for row in rows]).astype(np.float32),term,trunc,
+                          (term|trunc).astype(np.float32),*final,[row[6] for row in rows])
 
     def close(self):
         for connection,process in zip(self.connections,self.processes):

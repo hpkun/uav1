@@ -18,6 +18,7 @@ from algorithm.maddpg_config import MADDPGConfig
 from algorithm.dual_critic import DualCritic, DualCriticConfig
 from env.interception import InterceptionConfig, InterceptionEnv
 from env.parallel import ParallelInterceptionEnvs
+from .progress import ProgressLogger
 
 
 def write_json(path, value):
@@ -95,7 +96,10 @@ def evaluate_policy(config,policy,mode,episodes,seed_start):
             actions=policy.policy_actions(obs[None],np.ones((1,5),np.float32),deterministic=True)[0]
             obs,_,term,trunc,info=env.step(actions)
             if term or trunc:
-                rows.append(dict(seed=seed,**info['episode_summary']))
+                row=dict(info['episode_summary'])
+                if row['seed']!=seed:
+                    raise AssertionError('Evaluation episode seed mismatch')
+                rows.append(row)
                 break
         env.close()
     return rows
@@ -145,22 +149,27 @@ class ReplayBuffer:
 
 
 def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mode,output,
-          eval_interval=0,eval_episodes=10):
-    if steps<1 or steps%num_envs or num_envs<1 or attack_mode not in ('mixed','direct_rush','split_attack'):
+          eval_interval=0,eval_episodes=10,log_every_steps=10000):
+    if steps<1 or steps%num_envs or num_envs<1 or log_every_steps<1 or attack_mode not in ('mixed','direct_rush','split_attack'):
         raise ValueError('Invalid training budget or attack mode')
     root=Path(output)
     root.mkdir(parents=True,exist_ok=False)
     (root/'checkpoints').mkdir()
     settings=dict(schema='InterceptionRun/1',environment=asdict(config),environment_contract=InterceptionEnv(config).contract,
                   algorithm=name,parameters=asdict(parameters),rollout_length=rollout,seed=seed,
-                  attack_mode=attack_mode,total_sampled_steps=steps,num_envs=num_envs)
+                  attack_mode=attack_mode,total_sampled_steps=steps,num_envs=num_envs,
+                  log_every_steps=log_every_steps,
+                  learner_reward_interface=('team_scalar' if name=='mappo' else 'per_defender_vector' if name=='maddpg'
+                                            else 'global_scalar_and_mean_local_scalar'))
     write_json(root/'settings.json',settings)
     policy=make_policy(name,config,parameters,device,seed)
     replay=ReplayBuffer(parameters.buffer_capacity,seed) if name!='mappo' else None
     episode_log=(root/'episodes.jsonl').open('x',encoding='utf-8')
     update_log=(root/'updates.jsonl').open('x',encoding='utf-8')
     evaluation_log=(root/'evaluations.jsonl').open('x',encoding='utf-8')
+    progress_log=(root/'progress.jsonl').open('x',encoding='utf-8')
     reward_log=gzip.open(root/'reward_steps.jsonl.gz','xt',encoding='utf-8')
+    progress=ProgressLogger(name,steps,log_every_steps)
     best_score=None
     best_entry=None
     next_eval=eval_interval if eval_interval else None
@@ -170,6 +179,8 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
     worker_episode_ids=[0]*num_envs
     updates=0
     try:
+        print(f'[train {name}] attack={attack_mode} workers={num_envs} device={device} '
+              f'budget={steps:,} log_every={log_every_steps:,}',flush=True)
         with ParallelInterceptionEnvs(num_envs,config,seed=seed,attack_mode=attack_mode) as sampler:
             obs,states,masks,_=sampler.reset()
             while sampled<steps:
@@ -192,19 +203,21 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                             if name=='dual_critic':
                                 item.update(global_rewards=result.infos[i]['global_reward'],
                                             local_rewards=float(np.mean(result.infos[i]['local_rewards'])))
-                            else:item['rewards']=result.rewards[i]
+                            else:item['rewards']=result.individual_rewards[i]
                             replay.add(**item)
                     for i,info in enumerate(result.infos):
                         record=dict(sampled_step=sampled+num_envs,worker=i,worker_episode_id=worker_episode_ids[i],
                                     episode_step=info['step'],
                                     attack_mode=info['attack_mode'],global_reward=info['global_reward'],
-                                    local_rewards=info['local_rewards'],team_reward=info['team_reward'],
+                                    local_rewards=info['local_rewards'],individual_rewards=info['individual_rewards'],
+                                    team_reward=info['team_reward'],
                                     components=info['reward_components'],events=info['events'])
                         reward_log.write(json.dumps(record,default=_plain,allow_nan=False)+'\n')
                         if 'episode_summary' in info:
                             episodes+=1
                             mode_episodes[info['attack_mode']]+=1
                             episode_log.write(json.dumps(dict(worker=i,episode_id=episodes,**info['episode_summary']),allow_nan=False)+'\n')
+                            progress.episode(info['episode_summary'])
                             worker_episode_ids[i]+=1
                     obs,states,masks=result.observations,result.states,result.active_masks
                     sampled+=num_envs
@@ -212,14 +225,17 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                         for _update in range(parameters.updates_per_interval):
                             metrics=policy.update(replay.sample(parameters.batch_size));updates+=1
                             update_log.write(json.dumps(dict(step=sampled,update=updates,**metrics),allow_nan=False)+'\n')
+                            progress.update(metrics)
                 if buffer is not None:
                     buffer.compute_returns_and_advantages(policy.values(states),parameters.gamma,parameters.gae_lambda)
                     metrics=policy.update(buffer);updates+=1
                     update_log.write(json.dumps(dict(step=sampled,update=updates,**metrics),allow_nan=False)+'\n')
+                    progress.update(metrics)
                 if eval_interval and (sampled>=next_eval or sampled==steps):
                     summaries={mode:summarize(evaluate_policy(config,policy,mode,eval_episodes,600000))
                                for mode in ('direct_rush','split_attack')}
                     evaluation_log.write(json.dumps(dict(step=sampled,modes=summaries),allow_nan=False)+'\n')
+                    print(ProgressLogger.evaluation(sampled,summaries),flush=True)
                     score=(min(v['all_capture_rate'] for v in summaries.values()),
                            np.mean([v['all_capture_rate'] for v in summaries.values()]),
                            min(v['capture_efficiency'] for v in summaries.values()))
@@ -229,7 +245,13 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                         best_entry=dict(path='checkpoints/best.pt',sha256=digest(model),step=sampled)
                         best_score=score
                     next_eval=(sampled//eval_interval+1)*eval_interval
-                print(f'{name}: {sampled}/{steps} sampled steps, {episodes} episodes, {updates} updates',flush=True)
+                if progress.ready(sampled,final=sampled==steps):
+                    status=progress.snapshot(sampled,episodes,updates,
+                                             replay_size=len(replay) if replay is not None else None,
+                                             warmup=parameters.warmup(config.episode_steps) if replay is not None else None)
+                    progress_log.write(json.dumps(status,allow_nan=False)+'\n')
+                    progress_log.flush()
+                    for line in ProgressLogger.lines(status):print(line,flush=True)
         last=root/'checkpoints'/'last.pt'
         save_policy(policy,name,last,sampled,config)
         if best_entry is None:
@@ -243,4 +265,4 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
         write_json(root/'summary.json',result)
         return result
     finally:
-        episode_log.close();update_log.close();evaluation_log.close();reward_log.close()
+        episode_log.close();update_log.close();evaluation_log.close();progress_log.close();reward_log.close()

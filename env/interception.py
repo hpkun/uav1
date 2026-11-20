@@ -95,6 +95,7 @@ class InterceptionEnv:
                     n_attackers=5, observation_dim=36, state_dim=180, action_dim=2,
                     action_schema='world_acceleration_disk_si',
                     max_acceleration=self.config.defender_acceleration_max,
+                    reward_schema='r_i=global+local_i; team=global+mean(local_i)',
                     observation_schema='self_xy_vxy_base_relative_xy_nearest_3_defenders_nearest_3_attackers_relative_xy_vxy_valid',
                     state_schema='five_defender_observations_in_agent_order',
                     implementation_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),

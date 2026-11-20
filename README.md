@@ -23,6 +23,7 @@ python -m experiment.cli train `
   --algorithm dual_critic --attack-mode mixed `
   --total-sampled-steps 10000 --num-envs 4 `
   --eval-interval 5000 --eval-episodes 20 `
+  --log-every-steps 5000 `
   --output-dir runs/interception_example
 
 python -m experiment.cli evaluate `
@@ -43,8 +44,12 @@ python -m experiment.cli report `
 
 MAPPO and MADDPG are also available using `configs/mappo_interception.yaml` and `configs/maddpg_interception.yaml`. `configs/interception_smoke.yaml` limits episodes to 40 steps for interface checks only. Its checkpoint contract differs from the full scenario.
 
+The exact MAPPO, MADDPG and dual-critic observation, action, critic and reward interfaces are documented in `docs/ALGORITHM_IO.md`.
+
 ## Outputs
 
-Training writes `settings.json`, `episodes.jsonl`, `updates.jsonl`, `evaluations.jsonl`, `reward_steps.jsonl.gz`, `summary.json`, and a SHA-256 checkpoint catalog under `checkpoints/`. Independent evaluation writes `evaluation.json` and `episodes.jsonl`. Replay writes a complete compressed trace, an offline HTML player, and a summary. A time limit is a separate outcome; all-capture and penetration rates do not have to sum to one.
+Training writes `settings.json`, `episodes.jsonl`, `updates.jsonl`, `evaluations.jsonl`, `progress.jsonl`, `reward_steps.jsonl.gz`, `summary.json`, and a SHA-256 checkpoint catalog under `checkpoints/`. Independent evaluation writes `evaluation.json` and `episodes.jsonl`. Replay writes a complete compressed trace, an offline HTML player, and a summary. A time limit is a separate outcome; all-capture and penetration rates do not have to sum to one.
 
 Existing run and replay artifacts are not modified by the new commands.
+
+Training prints one compact status block every `--log-every-steps` sampled steps (default 10,000), at the next rollout boundary after 30 seconds without a status block, and at completion. It includes recent direct-rush and split-attack outcomes, capture efficiency, return, learner losses, throughput and ETA. The same snapshots are saved to `progress.jsonl`.

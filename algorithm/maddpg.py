@@ -35,7 +35,7 @@ class JointCritic(nn.Module):
 
 class MADDPG:
     algorithm='maddpg'
-    schema='interception_maddpg_1'
+    schema='interception_maddpg_2'
 
     def __init__(self,config=None,device='cpu',seed=0,*,environment_config,environment_contract):
         self.config=config or MADDPGConfig()
@@ -84,9 +84,9 @@ class MADDPG:
 
     def _batch(self,batch):
         b={k:torch.as_tensor(v,dtype=torch.float32,device=self.device) for k,v in batch.items()}
-        size=b['rewards'].shape[0] if 'rewards' in b and b['rewards'].ndim==1 else 0
+        size=b['rewards'].shape[0] if 'rewards' in b and b['rewards'].ndim==2 else 0
         shapes=dict(observations=(size,5,self.environment_spec['observation_dim']),next_observations=(size,5,self.environment_spec['observation_dim']),states=(size,self.environment_spec['state_dim']),
-            next_states=(size,self.environment_spec['state_dim']),actions=(size,5,2),rewards=(size,),dones=(size,),
+            next_states=(size,self.environment_spec['state_dim']),actions=(size,5,2),rewards=(size,5),dones=(size,),
             active_masks=(size,5),next_active_masks=(size,5))
         if size<1 or set(b)!=set(shapes) or any(b[k].shape!=shape or not torch.isfinite(b[k]).all() for k,shape in shapes.items()):
             raise ValueError('Invalid MADDPG joint replay batch')
@@ -100,7 +100,7 @@ class MADDPG:
         b=self._batch(batch);mask=b['active_masks']
         with torch.no_grad():
             next_actions=self._joint(b['next_observations'],b['next_active_masks'],target=True)
-            targets=torch.stack([b['rewards']+self.config.gamma*(1-b['dones'])*b['next_active_masks'][:,i]*
+            targets=torch.stack([b['rewards'][:,i]+self.config.gamma*(1-b['dones'])*b['next_active_masks'][:,i]*
                 critic(b['next_states'],next_actions) for i,critic in enumerate(self.target_critics)],1)
         q=torch.stack([critic(b['states'],b['actions']) for critic in self.critics],1)
         critic_loss=(((q-targets).square()*mask).sum()/mask.sum().clamp_min(1))
