@@ -8,10 +8,12 @@ from pathlib import Path
 import numpy as np
 
 from env.interception import InterceptionEnv
-from experiment.interception import digest,load_run
+from experiment.interception import digest,load_run,require_matching_attack_mode
 
 
 def collect(config,policy,mode,seed):
+    if mode!=config.attack_mode:
+        raise ValueError('Replay mode differs from checkpoint training mode')
     env=InterceptionEnv(replace(config,attack_mode=mode))
     obs,info=env.reset(seed=seed)
     frames=[]
@@ -77,7 +79,8 @@ def main(argv=None):
     p.add_argument('--output',type=Path,required=True)
     args=p.parse_args(argv)
     if args.frame_stride<1 or args.output.exists():raise ValueError('Invalid stride or existing output')
-    config,policy,name,model,_=load_run(args.checkpoint,args.label,args.device)
+    config,policy,name,model,settings=load_run(args.checkpoint,args.label,args.device)
+    require_matching_attack_mode(settings,args.attack_mode)
     trace=validate_trace(collect(config,policy,args.attack_mode,args.seed))
     trace['algorithm']=name
     trace['checkpoint_sha256']=digest(model)

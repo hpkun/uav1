@@ -21,7 +21,7 @@
   .toggles{display:flex;flex-wrap:wrap;gap:12px;margin:14px 0}.toggles label{white-space:nowrap;cursor:pointer}
   .legend{display:flex;flex-wrap:wrap;gap:10px 18px;margin-top:12px;font-size:13px}
   .swatch{display:inline-block;width:13px;height:13px;border-radius:50%;vertical-align:-2px;margin-right:5px}
-  .red{background:#dc414b}.blue{background:#2c78d4}.amber{background:#cb9026}.purple{background:#8656bd}
+  .red{background:#dc414b}.blue{background:#2c78d4}.purple{background:#8656bd}
   .line{display:inline-block;width:17px;border-top:2px dashed #d65c64;vertical-align:4px;margin-right:5px}
   .line.solid{border-style:solid}
   .stat{padding:10px 0;border-bottom:1px solid #304156}
@@ -41,7 +41,7 @@
       <div class="legend">
         <span><i class="swatch red"></i>防御方 D0–D4</span><span><i class="swatch blue"></i>进攻方 A0–A4</span>
         <span><i class="line"></i><span id="sensing-label">双方感知半径</span> <b id="sensing-value"></b></span><span><i class="line solid"></i>拦截半径 <b id="capture-value"></b></span>
-        <span id="danger-legend"><i class="swatch amber"></i>旧版危险奖励范围</span><span><i class="swatch purple"></i>目标区入侵范围</span>
+        <span><i class="swatch purple"></i>目标区入侵范围</span>
       </div>
     </div>
   </main>
@@ -61,8 +61,7 @@
   const play=document.getElementById('play');
   const W=canvas.width, H=canvas.height;
   const half=cfg.arena_half_extent;
-  const baseRing=cfg.danger_weight?cfg.danger_radius:cfg.breach_radius;
-  const extent=Math.max(half,Math.abs(cfg.base_x)+baseRing,Math.abs(cfg.base_y)+baseRing)+5;
+  const extent=Math.max(half,Math.abs(cfg.base_x)+cfg.breach_radius,Math.abs(cfg.base_y)+cfg.breach_radius)+5;
   const unit=W/(2*extent), sx=x=>W/2+x*unit, sy=y=>H/2-y*unit;
   const colors=['#dc414b','#2c78d4'];
   let index=0,timer=null;
@@ -70,7 +69,6 @@
   document.getElementById('sensing-value').textContent=`${cfg.sensing_radius} m`;
   if(cfg.observation_layout!=='absolute_no_base')document.getElementById('sensing-label').textContent='进攻方感知半径';
   document.getElementById('capture-value').textContent=`${cfg.capture_radius} m`;
-  document.getElementById('danger-legend').hidden=!cfg.danger_weight;
 
   function circle(x,y,r,stroke,fill=null,width=2,dash=[]){
     g.beginPath();g.arc(sx(x),sy(y),r*unit,0,Math.PI*2);
@@ -86,7 +84,6 @@
     }
     g.strokeStyle='#8a9cad';g.lineWidth=2;g.strokeRect(sx(-half),sy(half),2*half*unit,2*half*unit);
     g.font='13px system-ui';g.fillStyle='#546578';g.fillText('进攻方向 ↓',sx(-half)+9,sy(half)+19);
-    if(cfg.danger_weight)circle(cfg.base_x,cfg.base_y,cfg.danger_radius,'#c58b24','rgba(212,155,52,.045)',2,[8,6]);
     circle(cfg.base_x,cfg.base_y,cfg.breach_radius,'#8656bd','rgba(134,86,189,.08)',2);
     circle(cfg.base_x,cfg.base_y,2.4,null,'#172638');
     g.fillStyle='#172638';g.fillText('目标区',sx(cfg.base_x)+12,sy(cfg.base_y)+5);

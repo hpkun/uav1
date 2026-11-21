@@ -24,10 +24,6 @@ class VectorStep:
     infos: list
 
 
-def _mode(requested,seed):
-    return ('direct_rush' if seed%2==0 else 'split_attack') if requested=='mixed' else requested
-
-
 def _worker(pipe,config,attack_mode):
     env=None
     try:
@@ -41,7 +37,7 @@ def _worker(pipe,config,attack_mode):
             if command=='reset':
                 base_seed=int(payload)
                 episode=0
-                env=InterceptionEnv(replace(config,attack_mode=_mode(attack_mode,base_seed)))
+                env=InterceptionEnv(replace(config,attack_mode=attack_mode))
                 obs,info=env.reset(seed=base_seed)
                 pipe.send(('result',(obs,info['central_state'],info['active_masks'],info)))
             elif command=='step':
@@ -52,7 +48,7 @@ def _worker(pipe,config,attack_mode):
                     episode+=1
                     seed=base_seed+1_000_003*episode
                     env.close()
-                    env=InterceptionEnv(replace(config,attack_mode=_mode(attack_mode,seed)))
+                    env=InterceptionEnv(replace(config,attack_mode=attack_mode))
                     obs,reset=env.reset(seed=seed)
                     current=(obs,reset['central_state'],reset['active_masks'])
                 else:
@@ -71,8 +67,8 @@ def _worker(pipe,config,attack_mode):
 
 
 class ParallelInterceptionEnvs:
-    def __init__(self,num_envs,config:InterceptionConfig,*,seed=0,attack_mode='mixed'):
-        if num_envs<1 or attack_mode not in ('mixed','direct_rush','split_attack'):
+    def __init__(self,num_envs,config:InterceptionConfig,*,seed=0,attack_mode='direct_rush'):
+        if num_envs<1 or attack_mode not in ('direct_rush','split_attack'):
             raise ValueError('Invalid sampler configuration')
         self.num_envs=num_envs
         self.seed=seed

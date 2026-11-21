@@ -213,7 +213,8 @@ def test_visible_attacker_reaches_actor_input(algorithm):
 
 @pytest.mark.parametrize('algorithm',('mappo','maddpg'))
 @pytest.mark.parametrize('eval_interval',(0,4))
-def test_training_writes_compact_episode_rewards(tmp_path,algorithm,eval_interval):
+@pytest.mark.parametrize('attack_mode',('direct_rush','split_attack'))
+def test_training_writes_compact_episode_rewards(tmp_path,algorithm,eval_interval,attack_mode):
     import json
 
     from algorithm.mappo_config import MAPPOConfig
@@ -226,17 +227,78 @@ def test_training_writes_compact_episode_rewards(tmp_path,algorithm,eval_interva
                                   learning_starts=2,update_interval_steps=2,updates_per_interval=1))
     output=tmp_path/algorithm
     train(config,parameters,2,algorithm,steps=4,num_envs=2,seed=7,device='cpu',
-          attack_mode='mixed',output=output,log_every_steps=4,
+          attack_mode=attack_mode,output=output,log_every_steps=4,
           eval_interval=eval_interval,eval_episodes=1)
     assert not (output/'reward_steps.jsonl.gz').exists()
     rows=[json.loads(line) for line in (output/'episodes.jsonl').read_text(encoding='utf-8').splitlines()]
     assert len(rows)==2
+    assert all(row['attack_mode']==attack_mode for row in rows)
     for row in rows:
         assert set(row['reward_components'])=={'capture','boundary','penetration','approach'}
         assert np.isclose(sum(row['reward_components'].values()),row['team_return'],rtol=0,atol=1e-6)
     expected_selection='periodic_evaluation' if eval_interval else 'final_unvalidated'
     summary=json.loads((output/'summary.json').read_text(encoding='utf-8'))
+    settings=json.loads((output/'settings.json').read_text(encoding='utf-8'))
     index=json.loads((output/'checkpoints'/'index.json').read_text(encoding='utf-8'))
+    assert settings['attack_mode']==attack_mode
+    assert settings['environment']['attack_mode']==attack_mode
     assert summary['best_selection']==expected_selection
+    assert summary['best_selection_mode']==attack_mode
     assert index['checkpoints']['Best']['selection']==expected_selection
+    assert index['checkpoints']['Best']['selection_mode']==attack_mode
     assert (summary['best_score'] is not None)==bool(eval_interval)
+    evaluations=[json.loads(line) for line in (output/'evaluations.jsonl').read_text(encoding='utf-8').splitlines()]
+    if eval_interval:
+        assert all(set(row['modes'])=={attack_mode} for row in evaluations)
+    else:
+        assert evaluations==[]
+    if algorithm=='mappo' and eval_interval==0 and attack_mode=='direct_rush':
+        from experiment.cli import main as cli_main
+        from tools.replay import main as replay_main
+
+        with pytest.raises(ValueError,match='Checkpoint trained for direct_rush'):
+            replay_main(['--checkpoint',str(output),'--attack-mode','split_attack',
+                         '--output',str(tmp_path/'wrong_replay')])
+        with pytest.raises(ValueError,match='Checkpoint trained for direct_rush'):
+            cli_main(['evaluate','--checkpoint',str(output),'--attack-mode','split_attack',
+                      '--episodes-per-mode','1','--output-dir',str(tmp_path/'wrong_eval')])
+        assert not (tmp_path/'wrong_replay').exists()
+        assert not (tmp_path/'wrong_eval').exists()
+        replay_main(['--checkpoint',str(output),'--attack-mode','direct_rush',
+                     '--output',str(tmp_path/'matching_replay')])
+        assert (tmp_path/'matching_replay'/'replay.html').exists()
+        assert cli_main(['report','--run',str(output)])['best_selection_mode']=='direct_rush'
+
+
+def test_unsupported_training_mode_is_rejected(tmp_path):
+    from algorithm.mappo_config import MAPPOConfig
+    from experiment.cli import parser
+    from experiment.interception import train
+
+    with pytest.raises(SystemExit):
+        parser().parse_args(['train','--env-config','configs/interception.yaml',
+            '--algorithm-config','configs/mappo_interception.yaml','--algorithm','mappo',
+            '--attack-mode','unsupported_mode','--total-sampled-steps','4',
+            '--output-dir',str(tmp_path/'rejected')])
+    with pytest.raises(SystemExit):
+        parser().parse_args(['evaluate','--checkpoint',str(tmp_path/'checkpoint'),
+            '--attack-mode','unsupported_mode','--output-dir',str(tmp_path/'evaluation')])
+    with pytest.raises(ValueError,match='Invalid training budget or attack mode'):
+        train(InterceptionConfig(),MAPPOConfig(hidden_size=16),2,'mappo',steps=4,
+              num_envs=2,seed=7,device='cpu',attack_mode='unsupported_mode',output=tmp_path/'rejected')
+    assert not (tmp_path/'rejected').exists()
+
+
+def test_unsupported_checkpoint_mode_is_rejected(tmp_path):
+    import json
+
+    from experiment.cli import main as cli_main
+    from experiment.interception import load_run,require_matching_attack_mode
+
+    (tmp_path/'settings.json').write_text(json.dumps({'attack_mode':'unsupported_mode'}),encoding='utf-8')
+    with pytest.raises(ValueError,match='training attack mode is unsupported'):
+        load_run(tmp_path)
+    with pytest.raises(ValueError,match='Checkpoint trained for unsupported_mode'):
+        require_matching_attack_mode({'attack_mode':'unsupported_mode'},'direct_rush')
+    with pytest.raises(ValueError,match='Run training attack mode is unsupported'):
+        cli_main(['report','--run',str(tmp_path)])

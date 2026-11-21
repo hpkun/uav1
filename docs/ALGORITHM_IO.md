@@ -34,6 +34,8 @@ The defender active mask has shape `[5]` and is currently all ones: defenders ar
 
 For the current scenario configuration, `r_global` is zero. The approach term uses defender displacement toward a pre-step visible attacker position, so an attacker moving closer while the defender stands still produces no approach reward.
 
+New MAPPO runs seed PyTorch before network initialization and stochastic action sampling. The value critic predicts a normalized team return using running return statistics; rollout values and GAE remain on the original reward scale. Value clipping uses the normalization statistics from the rollout, before those statistics are updated with the new returns. New checkpoints save the running statistics and CPU/CUDA RNG states. Historical MAPPO checkpoints without ValueNorm state retain their original unnormalized critic behavior. Checkpoints still do not contain parallel worker states or unfinished rollouts, so they are not exact training resumes.
+
 ## MADDPG
 
 | Item | Shape | Meaning |
@@ -44,7 +46,9 @@ For the current scenario configuration, `r_global` is zero. The approach term us
 | Critic `i` output | `[B]` | `Q_i(s,a_0,...,a_4)` |
 | Learning reward | `[B,5]` | `r_i = r_global + r_local,i` for each critic |
 
-Replay stores each defender's local observation, the joint state and action, all five individual rewards, the actual terminal next observation/state, `done`, and active masks. Actor `i` updates through critic `i`, replacing only its own action in the joint action. The five critics must not receive a broadcast team reward. Checkpoints using this reward interface have schema `interception_maddpg_2`.
+Replay stores each defender's local observation, the joint state and action, all five individual rewards, the actual terminal next observation/state, `done`, and active masks. Actor `i` updates through critic `i`, replacing only its own action in the current-policy joint action; the other four actions are detached. This cooperative current-policy choice differs from the original MADDPG replay-other-actions actor gradient. The five critics must not receive a broadcast team reward. Checkpoints using this reward interface have schema `interception_maddpg_2`.
+
+The airbase-interception paper lists both MAPPO and MADDPG as using global plus local rewards, but does not specify how its MAPPO baseline aggregates the local components. The scalar team value above is the conditional value of the shared team reward given the common centralized state; duplicating that same state and target five times would not create distinct agent credit assignment.
 
 ## Dual-critic shared policy
 

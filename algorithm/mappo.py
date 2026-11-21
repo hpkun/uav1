@@ -14,6 +14,49 @@ from .state import (validate_model_state,validate_optimizer_state,validate_count
     validate_torch_rng,validate_generator_rng,loading_transaction)
 
 
+class RunningValueNorm:
+    """Running scalar return statistics; critic outputs normalized values."""
+
+    def __init__(self):
+        self.count = 0
+        self.mean = 0.0
+        self.m2 = 0.0
+
+    @property
+    def std(self):
+        return max((self.m2 / self.count) ** 0.5, 1e-4) if self.count else 1.0
+
+    def update(self, values):
+        values = np.asarray(values, dtype=np.float64).reshape(-1)
+        if not len(values) or not np.isfinite(values).all():
+            raise ValueError('ValueNorm requires finite nonempty returns')
+        count = len(values)
+        mean = float(values.mean())
+        m2 = float(np.square(values - mean).sum())
+        total = self.count + count
+        delta = mean - self.mean
+        self.mean += delta * count / total
+        self.m2 += m2 + delta * delta * self.count * count / total
+        self.count = total
+
+    def normalize(self, values):
+        return (values - self.mean) / self.std
+
+    def denormalize(self, values):
+        return values * self.std + self.mean
+
+    def state_dict(self):
+        return dict(count=self.count, mean=self.mean, m2=self.m2)
+
+    def load_state_dict(self, state):
+        if (not isinstance(state, dict) or set(state) != {'count', 'mean', 'm2'} or
+                type(state['count']) is not int or state['count'] < 0 or
+                not all(isinstance(state[k], (int, float)) and np.isfinite(state[k]) for k in ('mean', 'm2')) or
+                state['m2'] < 0):
+            raise ValueError('Invalid MAPPO ValueNorm state')
+        self.count, self.mean, self.m2 = state['count'], float(state['mean']), float(state['m2'])
+
+
 class RolloutBuffer:
     """Aligned [time, worker, agent] records; old logp is a Normal latent density."""
 
@@ -158,6 +201,9 @@ class MAPPO:
         self.device = torch.device(device)
         self.n_agents = n_agents
         self.rng = np.random.default_rng(seed)
+        torch.manual_seed(seed)
+        self.value_normalizer = RunningValueNorm()
+        self.use_value_norm = True
         self.actor = ContinuousGaussianActor(observation_dim, config.hidden_size, action_dim,action_transform=self.action_transform,disk_radius=self.disk_radius).to(self.device)
         self.critic = CentralizedCritic(state_dim, config.hidden_size).to(self.device)
         self.actor_optimizer = torch.optim.Adam(
@@ -190,6 +236,8 @@ class MAPPO:
         actions = actions * masks_t[..., None]
         log_probabilities = log_probabilities * masks_t
         values = self.critic(states_t)
+        if self.use_value_norm:
+            values = self.value_normalizer.denormalize(values)
         return (
             actions.cpu().numpy(),
             log_probabilities.cpu().numpy(),
@@ -212,8 +260,11 @@ class MAPPO:
         actions, raw_actions, logp = self.actor.sample_rollout(observations_t, deterministic)
         actions = actions * masks_t[..., None]
         logp = logp * masks_t
+        values = self.critic(states_t)
+        if self.use_value_norm:
+            values = self.value_normalizer.denormalize(values)
         return (actions.cpu().numpy(), logp.cpu().numpy(),
-                self.critic(states_t).cpu().numpy(), raw_actions.cpu().numpy())
+                values.cpu().numpy(), raw_actions.cpu().numpy())
 
     @torch.no_grad()
     def policy_actions(
@@ -235,7 +286,10 @@ class MAPPO:
     @torch.no_grad()
     def values(self, states: np.ndarray) -> np.ndarray:
         states_t = torch.as_tensor(states, device=self.device, dtype=torch.float32)
-        return self.critic(states_t).cpu().numpy()
+        values = self.critic(states_t)
+        if self.use_value_norm:
+            values = self.value_normalizer.denormalize(values)
+        return values.cpu().numpy()
 
     def update(self, buffer: RolloutBuffer) -> dict[str, float]:
         if (buffer.action_probability_version != self.action_probability_version or buffer.action_transform!=self.action_transform
@@ -251,6 +305,12 @@ class MAPPO:
         old_log_probabilities = to_tensor(buffer.old_log_probabilities)
         old_values = to_tensor(buffer.values)
         returns = to_tensor(buffer.returns)
+        if self.use_value_norm:
+            # Rollout values were recorded with the previous running statistics.
+            # Value clipping must compare against that original normalized output.
+            old_values = self.value_normalizer.normalize(old_values)
+            self.value_normalizer.update(buffer.returns)
+            returns = self.value_normalizer.normalize(returns)
         active_masks = to_tensor(buffer.active_masks)
         team_advantages = to_tensor(buffer.advantages)
 
@@ -361,17 +421,24 @@ class MAPPO:
 
         with torch.no_grad():
             new_values = self.critic(states)
-            return_variance = torch.var(returns, unbiased=False)
+            if self.use_value_norm:
+                new_values = self.value_normalizer.denormalize(new_values)
+            raw_returns = to_tensor(buffer.returns).reshape(transition_count)
+            return_variance = torch.var(raw_returns, unbiased=False)
             if float(return_variance) < 1e-8:
                 explained_variance = torch.zeros((), device=self.device)
             else:
                 explained_variance = 1.0 - torch.var(
-                    returns - new_values, unbiased=False
+                    raw_returns - new_values, unbiased=False
                 ) / return_variance
         metrics = {
             key: float(np.mean([row[key] for row in rows])) for key in rows[0]
         }
         metrics["explained_variance"] = float(explained_variance.cpu())
+        if self.use_value_norm:
+            metrics['value_norm_mean'] = self.value_normalizer.mean
+            metrics['value_norm_std'] = self.value_normalizer.std
+        metrics['policy_log_std_mean'] = float(self.actor.log_std.detach().mean().cpu())
         if not np.all(np.isfinite(list(metrics.values()))):
             raise FloatingPointError(f"Non-finite MAPPO metrics: {metrics}")
         return metrics
@@ -390,7 +457,9 @@ class MAPPO:
             from dataclasses import asdict
             extra = dict(extra or {}, environment_contract=self.environment_contract,
                 environment_snapshot=self.environment_snapshot, algorithm_config=asdict(self.config),
-                learner_rng_state=self.rng.bit_generator.state, torch_rng_state=torch.random.get_rng_state())
+                learner_rng_state=self.rng.bit_generator.state, torch_rng_state=torch.random.get_rng_state(),
+                cuda_rng_states=torch.cuda.get_rng_state_all() if self.device.type=='cuda' else [],
+                value_norm_state=self.value_normalizer.state_dict() if self.use_value_norm else None)
         output = Path(path)
         output.parent.mkdir(parents=True, exist_ok=True)
         torch.save(
@@ -407,7 +476,7 @@ class MAPPO:
 
     def load(self, path: str | Path, *, load_optimizers: bool = True) -> dict[str, Any]:
         with loading_transaction((self.actor,self.critic),(self.actor_optimizer,self.critic_optimizer),
-                owner=self,counters=('global_step',),generator_attr='rng',inference=not load_optimizers):
+                owner=self,counters=('global_step','value_normalizer','use_value_norm'),generator_attr='rng',inference=not load_optimizers):
             checkpoint=torch.load(Path(path),map_location=self.device,weights_only=False)
             if not isinstance(checkpoint,dict) or not {'global_step','actor','critic','extra'}<=checkpoint.keys():
                 raise ValueError('Invalid MAPPO checkpoint structure')
@@ -426,6 +495,12 @@ class MAPPO:
                     raise ValueError('MAPPO checkpoint environment/configuration mismatch')
             validate_model_state(self.actor,checkpoint['actor'])
             validate_model_state(self.critic,checkpoint['critic'])
+            norm_state = extra.get('value_norm_state')
+            if norm_state is not None:
+                validated_norm = RunningValueNorm()
+                validated_norm.load_state_dict(norm_state)
+            else:
+                validated_norm = RunningValueNorm()  # Historical unnormalized checkpoints.
             if load_optimizers:
                 if not {'actor_optimizer','critic_optimizer'}<=checkpoint.keys():raise ValueError('Missing MAPPO optimizer states')
                 validate_optimizer_state(self.actor_optimizer,checkpoint['actor_optimizer'])
@@ -434,12 +509,21 @@ class MAPPO:
                     if not {'learner_rng_state','torch_rng_state'}<=extra.keys():raise ValueError('Missing MAPPO training RNG states')
                     validate_generator_rng(self.rng,extra['learner_rng_state'])
                     validate_torch_rng(extra['torch_rng_state'])
+                    if norm_state is not None and 'cuda_rng_states' not in extra:
+                        raise ValueError('Missing MAPPO CUDA RNG states')
+                    if 'cuda_rng_states' in extra:
+                        from .state import validate_cuda_rng
+                        validate_cuda_rng(extra['cuda_rng_states'],self.device)
             self.actor.load_state_dict(checkpoint['actor'])
             self.critic.load_state_dict(checkpoint['critic'])
+            self.value_normalizer = validated_norm
+            self.use_value_norm = norm_state is not None
             if load_optimizers:
                 self.actor_optimizer.load_state_dict(checkpoint['actor_optimizer'])
                 self.critic_optimizer.load_state_dict(checkpoint['critic_optimizer'])
                 if self.environment_snapshot is not None:
                     self.rng.bit_generator.state=extra['learner_rng_state']
                     torch.random.set_rng_state(extra['torch_rng_state'].cpu())
+                    if extra.get('cuda_rng_states') and self.device.type=='cuda':
+                        torch.cuda.set_rng_state_all([state.cpu() for state in extra['cuda_rng_states']])
             return checkpoint
