@@ -33,6 +33,7 @@ class InterceptionConfig:
     observation_layout: str = 'absolute_no_base'
     spawn_min_spacing: float = 8.0
     attack_mode: str = 'direct_rush'
+    episode_protocol: str = 'resolve_all_one_penalty_trade'
     split_waypoint_x: float = 70.0
     split_waypoint_y: float = 5.0
     split_switch_radius: float = 12.0
@@ -54,6 +55,8 @@ class InterceptionConfig:
             raise ValueError('Historical relative observations require a communication radius')
         if self.attack_mode not in ('direct_rush', 'split_attack'):
             raise ValueError('Unknown attack mode')
+        if self.episode_protocol not in ('resolve_all_one_penalty_trade', 'resolve_all_one_penalty', 'resolve_all', 'first_breach'):
+            raise ValueError('Unknown episode protocol')
         if type(self.episode_steps) is not int or self.episode_steps < 1:
             raise ValueError('episode_steps must be positive')
         names = ('arena_half_extent','breach_radius','danger_radius','capture_radius','dt',
@@ -94,6 +97,7 @@ class InterceptionEnv:
         self.positions = np.zeros((2, 5, 2), np.float64)  # 0 defenders, 1 attackers
         self.velocities = np.zeros_like(self.positions)
         self.attacker_alive = np.ones(5, bool)
+        self.defender_alive = np.ones(5, bool)
         self.rng = np.random.default_rng()
         self.finished = True
 
@@ -103,7 +107,11 @@ class InterceptionEnv:
                     n_attackers=5, observation_dim=self.observation_dim, state_dim=self.state_dim, action_dim=2,
                     action_schema='world_acceleration_disk_si',
                     max_acceleration=self.config.defender_acceleration_max,
-                    reward_schema='r_i=global+local_i; team=global+mean(local_i)',
+                    reward_schema=('shared_capture_and_first_breach+local_shaping; team=global+mean(local_i)'
+                                   if self.config.episode_protocol in ('resolve_all_one_penalty_trade','resolve_all_one_penalty') else
+                                   'shared_capture_and_breach+local_shaping; team=global+mean(local_i)'
+                                   if self.config.episode_protocol=='resolve_all' else
+                                   'r_i=global+local_i; team=global+mean(local_i)'),
                     observation_schema=('self_xy_vxy_base_relative_xy_nearest_3_defenders_nearest_3_attackers_relative_xy_vxy_valid'
                                         if self.observation_dim==36 else
                                         'self_xy_vxy_base_relative_xy_all_4_visible_defenders_all_5_visible_attackers_relative_xy_vxy_valid'
@@ -134,11 +142,13 @@ class InterceptionEnv:
         self.positions[1] = self._spawn(-30, 30, 75, 90)
         self.velocities.fill(0)
         self.attacker_alive.fill(True)
+        self.defender_alive.fill(True)
         self.split_flank = np.where(np.argsort(np.argsort(self.positions[1,:,0])) < 2, -1, 1)
         self.split_switched = np.zeros(5, bool)
         self.step_count = 0
         self.finished = False
         self.captured_count = 0
+        self.penetrated_count = 0
         self.defender_oob_count = 0
         self.first_capture_time_s = None
         self.global_return = 0.0
@@ -153,12 +163,15 @@ class InterceptionEnv:
         absolute=c.observation_layout=='absolute_no_base'
         own_features=4 if absolute else 6
         for i in range(5):
+            if not self.defender_alive[i]:
+                continue
             own = self.positions[0, i]
             out[i, :2] = own / c.arena_half_extent
             out[i, 2:4] = self.velocities[0, i] / (c.attacker_speed_max if absolute else c.defender_speed_max)
             if not absolute:
                 out[i, 4:6] = (self.base-own) / (2*c.arena_half_extent)
-            groups = (([(j, self.positions[0,j], self.velocities[0,j]) for j in range(5) if j != i],
+            groups = (([(j, self.positions[0,j], self.velocities[0,j]) for j in range(5)
+                        if j != i and self.defender_alive[j]],
                        c.sensing_radius if absolute else c.communication_radius, own_features, c.visible_neighbors),
                       ([(j, self.positions[1,j], self.velocities[1,j]) for j in range(5) if self.attacker_alive[j]],
                        c.sensing_radius, own_features+5*c.visible_neighbors, c.visible_attackers))
@@ -212,17 +225,21 @@ class InterceptionEnv:
             raise ValueError('Defender acceleration exceeds disk')
         before = self.positions.copy()
         alive_before = self.attacker_alive.copy()
+        defenders_before = self.defender_alive.copy()
+        actions = actions.copy()
+        actions[~defenders_before] = 0
         attacker_actions = self._attacker_actions()
         joint_actions = np.stack((actions,attacker_actions))
-        self.positions[0] += self.velocities[0]*c.dt
+        self.positions[0,defenders_before] += self.velocities[0,defenders_before]*c.dt
         self.positions[1,self.attacker_alive] += self.velocities[1,self.attacker_alive]*c.dt
-        self.velocities[0] = _limit(self.velocities[0]+actions*c.dt,c.defender_speed_max)
+        self.velocities[0,defenders_before] = _limit(
+            self.velocities[0,defenders_before]+actions[defenders_before]*c.dt,c.defender_speed_max)
         self.velocities[1,self.attacker_alive] = _limit(
             self.velocities[1,self.attacker_alive]+attacker_actions[self.attacker_alive]*c.dt,c.attacker_speed_max)
         self.step_count += 1
         time_s = self.step_count*c.dt
         events = []
-        boundary = np.any(np.abs(self.positions[0]) > c.arena_half_extent,axis=1)
+        boundary = defenders_before & np.any(np.abs(self.positions[0]) > c.arena_half_extent,axis=1)
         for i in np.flatnonzero(boundary):
             for axis in range(2):
                 if abs(self.positions[0,i,axis]) > c.arena_half_extent:
@@ -238,73 +255,123 @@ class InterceptionEnv:
                     self.positions[1,j,axis] = np.sign(self.positions[1,j,axis])*c.arena_half_extent
                     self.velocities[1,j,axis] = 0
         captured_by = np.zeros(5,np.int64)
-        for j in np.flatnonzero(self.attacker_alive):
-            distances = np.linalg.norm(self.positions[0]-self.positions[1,j],axis=1)
-            i = int(np.argmin(distances))
-            if distances[i] <= c.capture_radius:
-                self.attacker_alive[j] = False
-                self.velocities[1,j] = 0
-                captured_by[i] += 1
-                self.captured_count += 1
-                if self.first_capture_time_s is None:
-                    self.first_capture_time_s = time_s
-                events.append(dict(type='capture',step=self.step_count,time_s=time_s,defender=i,attacker=int(j),
-                                   position=self.positions[1,j].tolist()))
+        if c.episode_protocol == 'resolve_all_one_penalty_trade':
+            # Match simultaneous contacts once, by distance then stable agent IDs.
+            contacts = sorted((float(np.linalg.norm(self.positions[0,i]-self.positions[1,j])),int(i),int(j))
+                              for i in np.flatnonzero(self.defender_alive)
+                              for j in np.flatnonzero(self.attacker_alive))
+            matches = []
+            for distance,i,j in contacts:
+                if distance > c.capture_radius:
+                    break
+                if self.defender_alive[i] and self.attacker_alive[j]:
+                    self.defender_alive[i] = False
+                    self.attacker_alive[j] = False
+                    self.velocities[0,i] = 0
+                    self.velocities[1,j] = 0
+                    matches.append((i,j))
+        else:
+            matches = []
+            for j in np.flatnonzero(self.attacker_alive):
+                distances = np.linalg.norm(self.positions[0]-self.positions[1,j],axis=1)
+                i = int(np.argmin(distances))
+                if distances[i] <= c.capture_radius:
+                    self.attacker_alive[j] = False
+                    self.velocities[1,j] = 0
+                    matches.append((i,int(j)))
+        for i,j in matches:
+            captured_by[i] += 1
+            self.captured_count += 1
+            if self.first_capture_time_s is None:
+                self.first_capture_time_s = time_s
+            events.append(dict(type='capture',step=self.step_count,time_s=time_s,defender=i,attacker=j,
+                               position=self.positions[1,j].tolist()))
         breached = []
         for j in np.flatnonzero(self.attacker_alive):
             if np.linalg.norm(self.positions[1,j]-self.base) <= c.breach_radius:
                 breached.append(int(j))
                 events.append(dict(type='penetration',step=self.step_count,time_s=time_s,attacker=int(j),
                                    position=self.positions[1,j].tolist()))
-        outcome = ('penetrated' if breached else 'all_captured' if not self.attacker_alive.any() else
-                   'time_limit' if self.step_count >= c.episode_steps else None)
+        if c.episode_protocol!='first_breach':
+            if self.step_count >= c.episode_steps and self.attacker_alive.sum() > len(breached):
+                events.append(dict(type='time_limit',step=self.step_count,time_s=time_s))
+                for j in np.flatnonzero(self.attacker_alive):
+                    if j not in breached:
+                        breached.append(int(j))
+                        events.append(dict(type='penetration',step=self.step_count,time_s=time_s,
+                                           attacker=int(j),position=self.positions[1,j].tolist(),reason='time_limit'))
+            first_breach=bool(breached) and self.penetrated_count==0
+            self.attacker_alive[breached] = False
+            self.velocities[1,breached] = 0
+            self.penetrated_count += len(breached)
+            outcome = ('penetrated' if self.penetrated_count else 'all_captured') if not self.attacker_alive.any() else None
+        else:
+            first_breach=bool(breached)
+            outcome = ('penetrated' if breached else 'all_captured' if not self.attacker_alive.any() else
+                       'time_limit' if self.step_count >= c.episode_steps else None)
         self.finished = outcome is not None
-        if outcome == 'time_limit':
+        if outcome == 'time_limit' and c.episode_protocol=='first_breach':
             events.append(dict(type='time_limit',step=self.step_count,time_s=time_s))
         # Legacy reward definitions are retained for historical run configurations.
         approach = np.zeros(5)
         for i in range(5):
+            if not defenders_before[i]:
+                continue
             candidates = [j for j in np.flatnonzero(alive_before)
                           if c.danger_weight or np.linalg.norm(before[0,i]-before[1,j]) <= c.sensing_radius]
             if len(candidates):
                 target = min(candidates,key=lambda j:(np.linalg.norm(before[0,i]-before[1,j]),int(j)))
-                target_after = self.positions[1,target] if c.danger_weight else before[1,target]
+                target_after = (self.positions[1,target] if c.episode_protocol!='first_breach' or c.danger_weight
+                                else before[1,target])
                 approach[i] = np.linalg.norm(before[0,i]-before[1,target])-np.linalg.norm(self.positions[0,i]-target_after)
         # Legacy configurations retain their original reward for historical checkpoints.
         global_reward = 0.0
-        if c.danger_weight:
+        if c.episode_protocol in ('resolve_all_one_penalty_trade','resolve_all_one_penalty'):
+            global_reward = c.capture_reward*int(captured_by.sum())-c.penetration_penalty*first_breach
+        elif c.episode_protocol=='resolve_all':
+            global_reward = c.capture_reward*int(captured_by.sum())-c.penetration_penalty*len(breached)
+        elif c.danger_weight:
             active_distance = np.linalg.norm(self.positions[1,self.attacker_alive]-self.base,axis=1)
             global_reward = -c.danger_weight*float(np.exp(-np.square(active_distance/c.danger_radius)).sum())
-        local = (c.capture_reward*captured_by-c.boundary_penalty*boundary.astype(float)
-                 -c.penetration_penalty*bool(breached)+c.approach_weight*approach)
+        local = (-c.boundary_penalty*boundary.astype(float)+c.approach_weight*approach)
+        if c.episode_protocol=='first_breach':
+            local += c.capture_reward*captured_by-c.penetration_penalty*bool(breached)
         self.global_return += global_reward
         self.mean_local_return += float(local.mean())
         self.team_return += global_reward+float(local.mean())
         self.event_history.extend(events)
-        info = self._info(events,global_reward,local,outcome)
+        info = self._info(events,global_reward,local,outcome,first_breach=first_breach)
         info['reward_components']['approach'] = float(c.approach_weight*approach.mean())
         if not np.isclose(sum(info['reward_components'].values()), info['team_reward'],rtol=0,atol=1e-10):
             raise AssertionError('Interception reward ledger mismatch')
         info['executed_actions'] = joint_actions.copy()
         return self.observations(), (global_reward+local).astype(np.float32), outcome in ('penetrated','all_captured'), outcome=='time_limit', info
 
-    def _info(self, events, global_reward, local_rewards, outcome):
+    def _info(self, events, global_reward, local_rewards, outcome, *, first_breach=False):
         info = dict(version='interception_1', step=self.step_count, time_s=self.step_count*self.config.dt,
                     attack_mode=self.config.attack_mode, central_state=self.central_state(),
-                    active_masks=np.ones(5,dtype=np.float32), attacker_alive=self.attacker_alive.copy(),
+                    active_masks=self.defender_alive.astype(np.float32),
+                    defender_alive=self.defender_alive.copy(), attacker_alive=self.attacker_alive.copy(),
                     global_reward=float(global_reward), local_rewards=np.asarray(local_rewards,dtype=np.float64).copy(),
                     individual_rewards=(global_reward+local_rewards).copy(),
                     team_reward=float(global_reward+np.mean(local_rewards)), events=list(events),
-                    reward_components=dict(capture=float(self.config.capture_reward*sum(e['type']=='capture' for e in events))/5,
+                    reward_components=dict(capture=float(self.config.capture_reward*sum(e['type']=='capture' for e in events))
+                                           /(5 if self.config.episode_protocol=='first_breach' else 1),
                                            boundary=-float(self.config.boundary_penalty*sum(e['type']=='defender_oob' for e in events))/5,
-                                           penetration=-float(self.config.penetration_penalty*any(e['type']=='penetration' for e in events))))
-        if self.config.danger_weight:
+                                           penetration=-float(self.config.penetration_penalty*(
+                                               int(first_breach) if self.config.episode_protocol in
+                                               ('resolve_all_one_penalty_trade','resolve_all_one_penalty') else
+                                               int(any(e['type']=='penetration' for e in events)) if self.config.episode_protocol=='first_breach'
+                                               else sum(e['type']=='penetration' for e in events)))))
+        if self.config.danger_weight and self.config.episode_protocol=='first_breach':
             info['reward_components']['danger'] = float(global_reward)
         if outcome is not None:
             info['episode_summary'] = dict(attack_mode=self.config.attack_mode,outcome=outcome,
                 seed=self.seed,steps=self.step_count,duration_s=info['time_s'],captured_count=self.captured_count,
-                penetrated_count=sum(e['type']=='penetration' for e in events),
+                penetrated_count=(self.penetrated_count if self.config.episode_protocol!='first_breach' else
+                                  sum(e['type']=='penetration' for e in events)),
                 first_capture_time_s=self.first_capture_time_s,defender_oob_count=self.defender_oob_count,
+                defender_retired_count=int((~self.defender_alive).sum()),
                 global_return=self.global_return,mean_local_return=self.mean_local_return,team_return=self.team_return)
         return info
 

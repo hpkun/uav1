@@ -77,8 +77,11 @@ def load_run(checkpoint,label='Best',device='cpu'):
     if settings.get('attack_mode') not in ('direct_rush','split_attack'):
         raise ValueError('Checkpoint training attack mode is unsupported')
     saved_environment=settings['environment']
-    config=replace(InterceptionConfig(**(saved_environment if 'observation_layout' in saved_environment else
-                                 dict(saved_environment,observation_layout='relative_with_base'))),
+    restored_environment=dict(saved_environment)
+    if 'observation_layout' not in restored_environment:
+        restored_environment['observation_layout']='relative_with_base'
+    restored_environment.setdefault('episode_protocol','first_breach')
+    config=replace(InterceptionConfig(**restored_environment),
                    attack_mode=settings['attack_mode'])
     name=settings['algorithm']
     parameters={'mappo':MAPPOConfig,'maddpg':MADDPGConfig,'dual_critic':DualCriticConfig}[name](**settings['parameters'])
@@ -107,13 +110,19 @@ def evaluate_policy(config,policy,mode,episodes,seed_start):
         seed=seed_start+offset
         env=InterceptionEnv(replace(config,attack_mode=mode))
         obs,info=env.reset(seed=seed)
+        reward_components={}
         while True:
             actions=policy.policy_actions(obs[None],np.ones((1,5),np.float32),deterministic=True)[0]
             obs,_,term,trunc,info=env.step(actions)
+            for component,value in info['reward_components'].items():
+                reward_components[component]=reward_components.get(component,0.0)+value
             if term or trunc:
                 row=dict(info['episode_summary'])
                 if row['seed']!=seed:
                     raise AssertionError('Evaluation episode seed mismatch')
+                if not np.isclose(sum(reward_components.values()),row['team_return'],rtol=0,atol=1e-6):
+                    raise AssertionError('Evaluation reward ledger mismatch')
+                row['reward_components']=reward_components
                 rows.append(row)
                 break
         env.close()
@@ -125,6 +134,9 @@ def summarize(rows):
     if not count:raise ValueError('No evaluation episodes')
     outcomes={key:sum(row['outcome']==key for row in rows) for key in ('all_captured','penetrated','time_limit')}
     first=[row['first_capture_time_s'] for row in rows if row['first_capture_time_s'] is not None]
+    component_names=sorted({name for row in rows for name in row.get('reward_components',{})})
+    mean_reward_components={name:float(np.mean([row.get('reward_components',{}).get(name,0.0) for row in rows]))
+                            for name in component_names}
     def interval(successes):
         z=1.96
         p=successes/count
@@ -139,6 +151,8 @@ def summarize(rows):
                 mean_first_capture_time_s=float(np.mean(first)) if first else None,
                 mean_duration_s=float(np.mean([row['duration_s'] for row in rows])),
                 mean_defender_oob_count=float(np.mean([row['defender_oob_count'] for row in rows])),
+                mean_penetrated_count=float(np.mean([row['penetrated_count'] for row in rows])),
+                mean_reward_components=mean_reward_components,
                 mean_team_return=float(np.mean([row['team_return'] for row in rows])))
 
 
@@ -163,10 +177,21 @@ class ReplayBuffer:
         return {key:np.stack([self.rows[i][key] for i in chosen]) for key in self.rows[0]}
 
 
+def evaluation_interval_for_budget(steps,num_envs):
+    if steps<1 or num_envs<1 or steps%num_envs:
+        raise ValueError('Invalid sampled-step budget')
+    five_percent=(steps+19)//20
+    return ((five_percent+num_envs-1)//num_envs)*num_envs
+
+
 def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mode,output,
-          eval_interval=0,eval_episodes=10,log_every_steps=10000):
+          eval_interval=None,eval_episodes=10,log_every_steps=10000):
     if num_envs<1 or steps<1 or steps%num_envs or log_every_steps<1 or attack_mode not in ('direct_rush','split_attack'):
         raise ValueError('Invalid training budget or attack mode')
+    if eval_interval is None:
+        eval_interval=evaluation_interval_for_budget(steps,num_envs)
+    if eval_interval<0 or eval_episodes<1:
+        raise ValueError('Invalid evaluation schedule')
     config=replace(config,attack_mode=attack_mode)
     root=Path(output)
     environment=InterceptionEnv(config)
@@ -176,7 +201,7 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                   algorithm=name,parameters=asdict(parameters),rollout_length=rollout,seed=seed,
                   attack_mode=attack_mode,checkpoint_selection_mode=attack_mode,
                   total_sampled_steps=steps,num_envs=num_envs,
-                  log_every_steps=log_every_steps,
+                  log_every_steps=log_every_steps,eval_interval=eval_interval,eval_episodes=eval_episodes,
                   learner_reward_interface=('team_scalar' if name=='mappo' else 'per_defender_vector' if name=='maddpg'
                                             else 'global_scalar_and_mean_local_scalar'))
     write_json(root/'settings.json',settings)
@@ -194,9 +219,24 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
     episodes=0
     reward_component_totals=[{} for _ in range(num_envs)]
     updates=0
+    def record_evaluation(step):
+        nonlocal best_score,best_entry
+        summaries={attack_mode:summarize(evaluate_policy(config,policy,attack_mode,eval_episodes,600000))}
+        evaluation_log.write(json.dumps(dict(step=step,modes=summaries),allow_nan=False)+'\n')
+        evaluation_log.flush()
+        print(ProgressLogger.evaluation(step,summaries),flush=True)
+        own=summaries[attack_mode]
+        score=(own['all_capture_rate'],own['capture_efficiency'],-own['penetration_rate'])
+        if best_score is None or score>best_score:
+            model=root/'checkpoints'/'best.pt'
+            save_policy(policy,name,model,step,config)
+            best_entry=dict(path='checkpoints/best.pt',sha256=digest(model),step=step,
+                            selection='periodic_evaluation',selection_mode=attack_mode)
+            best_score=score
     try:
         print(f'[train {name}] attack={attack_mode} workers={num_envs} device={device} '
-              f'budget={steps:,} log_every={log_every_steps:,}',flush=True)
+              f'budget={steps:,} log_every={log_every_steps:,} eval_every={eval_interval:,} '
+              f'eval_episodes={eval_episodes}',flush=True)
         with ParallelInterceptionEnvs(num_envs,config,seed=seed,attack_mode=attack_mode) as sampler:
             obs,states,masks,_=sampler.reset()
             while sampled<steps:
@@ -241,24 +281,16 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                             metrics=policy.update(replay.sample(parameters.batch_size));updates+=1
                             update_log.write(json.dumps(dict(step=sampled,update=updates,**metrics),allow_nan=False)+'\n')
                             progress.update(metrics)
+                    if eval_interval and sampled>=next_eval and sampled<steps:
+                        record_evaluation(sampled)
+                        next_eval=(sampled//eval_interval+1)*eval_interval
                 if buffer is not None:
                     buffer.compute_returns_and_advantages(policy.values(states),parameters.gamma,parameters.gae_lambda)
                     metrics=policy.update(buffer);updates+=1
                     update_log.write(json.dumps(dict(step=sampled,update=updates,**metrics),allow_nan=False)+'\n')
                     progress.update(metrics)
-                if eval_interval and (sampled>=next_eval or sampled==steps):
-                    summaries={attack_mode:summarize(evaluate_policy(config,policy,attack_mode,eval_episodes,600000))}
-                    evaluation_log.write(json.dumps(dict(step=sampled,modes=summaries),allow_nan=False)+'\n')
-                    print(ProgressLogger.evaluation(sampled,summaries),flush=True)
-                    own=summaries[attack_mode]
-                    score=(own['all_capture_rate'],own['capture_efficiency'],-own['penetration_rate'])
-                    if best_score is None or score>best_score:
-                        model=root/'checkpoints'/'best.pt'
-                        save_policy(policy,name,model,sampled,config)
-                        best_entry=dict(path='checkpoints/best.pt',sha256=digest(model),step=sampled,
-                                        selection='periodic_evaluation',selection_mode=attack_mode)
-                        best_score=score
-                    next_eval=(sampled//eval_interval+1)*eval_interval
+                if eval_interval and sampled==steps:
+                    record_evaluation(sampled)
                 if progress.ready(sampled,final=sampled==steps):
                     status=progress.snapshot(sampled,episodes,updates,
                                              replay_size=len(replay) if replay is not None else None,

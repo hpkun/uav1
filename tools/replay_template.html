@@ -37,11 +37,12 @@
     <div class="board">
       <canvas id="view" width="1000" height="1000" aria-label="拦截场景地图"></canvas>
       <div class="controls"><button id="play" type="button">播放</button><input id="slider" type="range" min="0" value="0" aria-label="回放进度"><span id="time"></span></div>
-      <div class="toggles"><label><input id="show-sensing" type="checkbox" checked> 感知范围</label><label><input id="show-capture" type="checkbox" checked> 拦截范围</label><label><input id="show-trails" type="checkbox" checked> 最近轨迹</label><label>查看 <select id="focus-defender"><option value="0">D0</option><option value="1">D1</option><option value="2">D2</option><option value="3">D3</option><option value="4">D4</option></select> 的感知目标</label></div>
+      <div class="toggles"><label><input id="show-sensing" type="checkbox" checked> 感知范围</label><label><input id="show-capture" type="checkbox" checked> 拦截范围</label><label><input id="show-trails" type="checkbox" checked> 最近轨迹</label><label><input id="show-links" type="checkbox" checked> 感知连线</label><label>查看 <select id="focus-defender"><option value="0">D0</option><option value="1">D1</option><option value="2">D2</option><option value="3">D3</option><option value="4">D4</option></select> 的感知目标</label></div>
       <div class="legend">
         <span><i class="swatch red"></i>防御方 D0–D4</span><span><i class="swatch blue"></i>进攻方 A0–A4</span>
         <span><i class="line"></i><span id="sensing-label">双方感知半径</span> <b id="sensing-value"></b></span><span><i class="line solid"></i>拦截半径 <b id="capture-value"></b></span>
         <span><i class="swatch purple"></i>目标区入侵范围</span>
+        <span>红色细线：防御方轨迹或友方感知连线</span><span>蓝色细线：进攻方轨迹或敌方感知连线</span>
       </div>
     </div>
   </main>
@@ -57,6 +58,7 @@
   const showSensing=document.getElementById('show-sensing');
   const showCapture=document.getElementById('show-capture');
   const showTrails=document.getElementById('show-trails');
+  const showLinks=document.getElementById('show-links');
   const focus=document.getElementById('focus-defender');
   const play=document.getElementById('play');
   const W=canvas.width, H=canvas.height;
@@ -92,9 +94,12 @@
     if(!showTrails.checked)return;
     const begin=Math.max(0,index-75);
     for(let side=0;side<2;side++)for(let agent=0;agent<5;agent++){
+      const current=frames[index];
+      if(side===0&&current.defender_alive&&!current.defender_alive[agent]||side===1&&!current.attacker_alive[agent])continue;
       g.beginPath();let started=false;
       for(let k=begin;k<=index;k++){
-        const row=frames[k];if(side===1&&!row.attacker_alive[agent]){started=false;continue}
+        const row=frames[k];
+        if(side===0&&row.defender_alive&&!row.defender_alive[agent]||side===1&&!row.attacker_alive[agent]){started=false;continue}
         const p=row.positions[side][agent];
         if(started)g.lineTo(sx(p[0]),sy(p[1]));else g.moveTo(sx(p[0]),sy(p[1]));
         started=true;
@@ -104,26 +109,33 @@
   }
   function sensingLinks(row){
     const selected=Number(focus.value), own=row.positions[0][selected];
+    if(row.defender_alive&&!row.defender_alive[selected]){
+      document.getElementById('sensor-count').textContent=`D${selected} 已退出对局`;
+      return;
+    }
     const friendRadius=cfg.observation_layout==='absolute_no_base'?cfg.sensing_radius:cfg.communication_radius;
     let friends=0,attackers=0;
     for(let side=0;side<2;side++)for(let i=0;i<5;i++){
-      if(side===0&&i===selected||side===1&&!row.attacker_alive[i])continue;
+      if(side===0&&(i===selected||row.defender_alive&&!row.defender_alive[i])||side===1&&!row.attacker_alive[i])continue;
       const p=row.positions[side][i],radius=side===0?friendRadius:cfg.sensing_radius;
       if(Math.hypot(p[0]-own[0],p[1]-own[1])>radius)continue;
       if(side===0)friends++;else attackers++;
-      g.beginPath();g.moveTo(sx(own[0]),sy(own[1]));g.lineTo(sx(p[0]),sy(p[1]));
-      g.strokeStyle=side===0?'rgba(220,65,75,.55)':'rgba(44,120,212,.65)';g.lineWidth=2;g.stroke();
+      if(showLinks.checked){
+        g.beginPath();g.moveTo(sx(own[0]),sy(own[1]));g.lineTo(sx(p[0]),sy(p[1]));
+        g.strokeStyle=side===0?'rgba(220,65,75,.55)':'rgba(44,120,212,.65)';g.lineWidth=2;g.stroke();
+      }
     }
     document.getElementById('sensor-count').textContent=`D${selected}：友方 ${friends}/4 · 进攻方 ${attackers}/5`;
   }
   function vehicles(row){
     for(let i=0;i<5;i++){
+      if(row.defender_alive&&!row.defender_alive[i])continue;
       const p=row.positions[0][i];
       if(showSensing.checked)circle(p[0],p[1],cfg.sensing_radius,'rgba(220,65,75,.47)','rgba(220,65,75,.018)',1.4,[8,6]);
       if(showCapture.checked)circle(p[0],p[1],cfg.capture_radius,'rgba(220,65,75,.85)','rgba(220,65,75,.09)',1.8);
     }
     for(let side=0;side<2;side++)for(let i=0;i<5;i++){
-      if(side===1&&!row.attacker_alive[i])continue;
+      if(side===0&&row.defender_alive&&!row.defender_alive[i]||side===1&&!row.attacker_alive[i])continue;
       const p=row.positions[side][i],x=sx(p[0]),y=sy(p[1]);
       g.beginPath();g.arc(x,y,side===0?8:7,0,Math.PI*2);
       g.fillStyle=colors[side];g.fill();g.lineWidth=2;g.strokeStyle='white';g.stroke();
@@ -141,14 +153,14 @@
   }
   function stop(){if(timer)clearInterval(timer);timer=null;play.textContent='播放'}
   slider.addEventListener('input',()=>{index=Number(slider.value);draw()});
-  for(const toggle of [showSensing,showCapture,showTrails,focus])toggle.addEventListener('change',draw);
+  for(const toggle of [showSensing,showCapture,showTrails,showLinks,focus])toggle.addEventListener('change',draw);
   play.addEventListener('click',()=>{
     if(timer){stop();return}if(index===frames.length-1)index=0;
     play.textContent='暂停';draw();
     timer=setInterval(()=>{index=Math.min(index+1,frames.length-1);draw();if(index===frames.length-1)stop()},70);
   });
   const summary=d.summary;
-  document.getElementById('summary').textContent=`${summary.outcome} · 拦截 ${summary.captured_count}/5 · ${summary.duration_s.toFixed(1)} s`;
+  document.getElementById('summary').textContent=`${summary.outcome} · 拦截 ${summary.captured_count}/5 · 突防 ${summary.penetrated_count}/5 · ${summary.duration_s.toFixed(1)} s`;
   const list=document.getElementById('events');
   for(const event of d.events){
     const li=document.createElement('li');

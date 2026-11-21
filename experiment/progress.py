@@ -8,6 +8,10 @@ def _number(value,digits=3):
     return '--' if value is None or not math.isfinite(value) else f'{value:.{digits}f}'
 
 
+def _signed(value,digits=2):
+    return '--' if value is None or not math.isfinite(value) else f'{value:+.{digits}f}'
+
+
 def _percent(value):
     return '--' if value is None else f'{100*value:.1f}%'
 
@@ -100,8 +104,15 @@ class ProgressLogger:
 
     @staticmethod
     def evaluation(step,summaries):
+        if len(summaries)!=1:
+            raise ValueError('Periodic evaluation must contain only the training attack mode')
         mode,row=next(iter(summaries.items()))
         label='direct' if mode=='direct_rush' else 'split'
-        return (f'[eval {step:,}] {label}: all={_percent(row["all_capture_rate"])}'
+        status=(f'[eval {step:,}] {label}: all={_percent(row["all_capture_rate"])}'
                 f' breach={_percent(row["penetration_rate"])}'
                 f' cap={_percent(row["capture_efficiency"])} ({row["episodes"]} eps)')
+        components=row.get('mean_reward_components',{})
+        names=('capture','penetration','approach','boundary','danger')
+        detail=' '.join(f'{name}={_signed(components[name])}' for name in names if name in components)
+        return (f'{status}\n  reward/ep (undiscounted): {detail}'
+                f' total={_signed(row.get("mean_team_return"))}')

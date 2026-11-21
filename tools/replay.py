@@ -22,11 +22,12 @@ def collect(config,policy,mode,seed):
     def frame(step,actions=None):
         return dict(step=step,time_s=step*config.dt,positions=env.positions.tolist(),
                     velocities=env.velocities.tolist(),attacker_alive=env.attacker_alive.tolist(),
+                    defender_alive=env.defender_alive.tolist(),
                     defender_actions=None if actions is None else np.asarray(actions).tolist())
 
     frames.append(frame(0))
     while True:
-        actions=policy.policy_actions(obs[None],np.ones((1,5),np.float32),deterministic=True)[0]
+        actions=policy.policy_actions(obs[None],info['active_masks'][None],deterministic=True)[0]
         obs,_,terminated,truncated,info=env.step(actions)
         frames.append(frame(env.step_count,actions))
         events.extend(info['events'])
@@ -52,6 +53,15 @@ def validate_trace(trace):
         raise ValueError('Penetration outcome has no event')
     if summary['outcome']=='all_captured' and summary['captured_count']!=5:
         raise ValueError('All-capture outcome has incomplete captures')
+    if trace['config'].get('episode_protocol') in ('resolve_all','resolve_all_one_penalty','resolve_all_one_penalty_trade') and summary['captured_count']+summary['penetrated_count']!=5:
+        raise ValueError('Resolved episode does not account for all attackers')
+    if trace['config'].get('episode_protocol')=='resolve_all_one_penalty_trade':
+        if any(len(row['defender_alive'])!=5 for row in frames):
+            raise ValueError('Replay defender status is incomplete')
+        if len({event['defender'] for event in events if event['type']=='capture'})!=summary['captured_count']:
+            raise ValueError('A defender captured more than one attacker')
+        if 5-sum(frames[-1]['defender_alive'])!=summary['captured_count']:
+            raise ValueError('Retired defenders disagree with captures')
     return trace
 
 

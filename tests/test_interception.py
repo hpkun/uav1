@@ -71,6 +71,8 @@ def test_capture_precedes_breach_and_reward_balances():
     assert not terminated
     assert not any(event['type']=='penetration' and event['attacker']==0 for event in info['events'])
     assert any(event['type']=='capture' and event['attacker']==0 for event in info['events'])
+    assert not env.defender_alive[0]
+    assert info['active_masks'][0]==0
     assert np.isclose(info['team_reward'],np.mean(info['individual_rewards']))
     assert np.isclose(info['team_reward'],sum(info['reward_components'].values()))
 
@@ -78,14 +80,16 @@ def test_capture_precedes_breach_and_reward_balances():
 def test_all_capture_ends_episode_once():
     env=InterceptionEnv()
     env.reset(seed=5)
-    env.positions[0,0]=[0,-65]
-    env.positions[1]=[0,-65]
+    env.positions[0]=[[x,-65] for x in (-40,-20,0,20,40)]
+    env.positions[1]=env.positions[0].copy()
     env.velocities.fill(0)
     _,_,terminated,truncated,info=env.step(np.zeros((5,2)))
     assert terminated and not truncated
     assert info['episode_summary']['outcome']=='all_captured'
     assert info['episode_summary']['captured_count']==5
     assert len([event for event in info['events'] if event['type']=='capture'])==5
+    assert not env.defender_alive.any()
+    assert not info['active_masks'].any()
     assert not any(event['type']=='penetration' for event in info['events'])
 
 
@@ -95,11 +99,13 @@ def test_parallel_sampler_preserves_terminal_state():
         obs,states,masks,_=sampler.reset()
         result=sampler.step(np.zeros((2,5,2)))
     assert result.dones.tolist()==[1,1]
-    assert result.truncated.tolist()==[True,True]
+    assert result.terminated.tolist()==[True,True]
+    assert result.truncated.tolist()==[False,False]
     assert result.rewards.shape==(2,)
     assert result.individual_rewards.shape==(2,5)
     np.testing.assert_allclose(result.rewards,result.individual_rewards.mean(axis=1),atol=1e-5)
-    assert all(info['episode_summary']['outcome']=='time_limit' for info in result.infos)
+    assert all(info['episode_summary']['outcome']=='penetrated' for info in result.infos)
+    assert all(info['episode_summary']['penetrated_count']==5 for info in result.infos)
     assert np.any(result.observations!=result.transition_observations)
 
 
@@ -155,10 +161,10 @@ def test_evaluation_rows_use_environment_seed_once():
     rows=evaluate_policy(InterceptionConfig(episode_steps=2),StationaryPolicy(),
                          'direct_rush',episodes=2,seed_start=600000)
     assert [row['seed'] for row in rows]==[600000,600001]
-    assert all(row['outcome']=='time_limit' for row in rows)
+    assert all(row['outcome']=='penetrated' for row in rows)
 
 
-def test_approach_rewards_defender_motion_only_with_visible_target():
+def test_approach_rewards_use_actual_distance_change_with_visible_target():
     config=InterceptionConfig()
     env=InterceptionEnv(config)
     env.reset(seed=7)
@@ -176,11 +182,140 @@ def test_approach_rewards_defender_motion_only_with_visible_target():
     _,_,_,_,info=env.step(np.zeros((5,2)))
     assert info['global_reward']==0
     assert 'danger' not in info['reward_components']
-    assert info['local_rewards'][0]==pytest.approx(0,abs=1e-12)
+    assert info['local_rewards'][0]==pytest.approx(config.approach_weight*0.8)
     before=np.hypot(20,50)
-    after=np.hypot(20,49.5)
+    after=np.hypot(20,48.7)
     assert info['local_rewards'][1]==pytest.approx(config.approach_weight*(before-after))
     assert info['local_rewards'][2]==pytest.approx(0,abs=1e-12)
+
+
+def test_breach_removes_only_that_attacker_and_shared_events_sum_to_minus_twenty():
+    env=InterceptionEnv()
+    env.reset(seed=7)
+    env.positions[0]=[[0,-65],[40,-80],[50,-80],[60,-80],[70,-80]]
+    env.positions[1]=[[0,-80],[-30,80],[0,80],[20,80],[30,80]]
+    env.velocities.fill(0)
+    _,rewards,terminated,truncated,info=env.step(np.zeros((5,2)))
+    assert not terminated and not truncated
+    assert info['reward_components']['penetration']==-100
+    assert not env.attacker_alive[0] and env.attacker_alive[1:].all()
+    assert info['team_reward']==pytest.approx(-100)
+    np.testing.assert_allclose(rewards,-100)
+    env.positions[1,1:]=env.positions[0,1:].copy()
+    _,rewards,terminated,truncated,info=env.step(np.zeros((5,2)))
+    assert terminated and not truncated
+    assert info['episode_summary']['outcome']=='penetrated'
+    assert info['episode_summary']['captured_count']==4
+    assert info['episode_summary']['penetrated_count']==1
+    assert info['episode_summary']['global_return']==-20
+    assert info['reward_components']['capture']==80
+    assert info['episode_summary']['defender_retired_count']==4
+    assert info['active_masks'].tolist()==[1,0,0,0,0]
+    np.testing.assert_allclose(rewards,80,atol=1)
+
+
+def test_capture_retires_one_defender_and_cannot_capture_again():
+    env=InterceptionEnv()
+    env.reset(seed=7)
+    env.positions[0]=[[0,0],[30,0],[60,0],[-30,0],[-60,0]]
+    env.positions[1]=[[0,0],[0,0],[0,80],[20,80],[-20,80]]
+    env.velocities.fill(0)
+    _,_,terminated,_,info=env.step(np.zeros((5,2)))
+    assert not terminated
+    assert len([event for event in info['events'] if event['type']=='capture'])==1
+    assert info['events'][0]['defender']==0
+    assert not env.defender_alive[0] and not env.attacker_alive[0] and env.attacker_alive[1]
+    assert not env.observations()[0].any()
+    assert env.observations()[1,[8,13,18,23]].tolist()==[1,1,0,0]
+    before=env.positions[0,0].copy()
+    _,_,_,_,info=env.step(np.full((5,2),[2,0]))
+    np.testing.assert_array_equal(env.positions[0,0],before)
+    np.testing.assert_array_equal(env.velocities[0,0],[0,0])
+    np.testing.assert_array_equal(info['executed_actions'][0,0],[0,0])
+    assert env.attacker_alive[1]
+    assert not any(event['type']=='capture' and event['defender']==0 for event in info['events'])
+
+
+def test_legacy_capture_keeps_defender_active():
+    env=InterceptionEnv(InterceptionConfig(episode_protocol='resolve_all_one_penalty'))
+    env.reset(seed=7)
+    env.positions[0,0]=[0,0]
+    env.positions[1]=[0,0]
+    env.velocities.fill(0)
+    _,_,_,_,info=env.step(np.zeros((5,2)))
+    assert env.defender_alive.all()
+    assert info['active_masks'].tolist()==[1]*5
+    assert info['episode_summary']['captured_count']==5
+
+
+def test_replay_records_retirement_and_checks_one_to_one_capture():
+    from tools.replay import html,validate_trace
+
+    env=InterceptionEnv()
+    env.reset(seed=7)
+    env.positions[0]=[[x,-65] for x in (-40,-20,0,20,40)]
+    env.positions[1]=env.positions[0].copy()
+    env.velocities.fill(0)
+    first=dict(step=0,defender_alive=env.defender_alive.tolist())
+    _,_,_,_,info=env.step(np.zeros((5,2)))
+    last=dict(step=1,defender_alive=env.defender_alive.tolist())
+    trace=dict(frames=[first,last],events=info['events'],summary=info['episode_summary'],
+               config=dict(episode_protocol=env.config.episode_protocol),mode='direct_rush',seed=7)
+    assert validate_trace(trace) is trace
+    page=html(trace,1)
+    assert 'show-links' in page and 'defender_alive' in page
+    assert first['defender_alive']==[True]*5 and last['defender_alive']==[False]*5
+    trace['events'][1]['defender']=trace['events'][0]['defender']
+    with pytest.raises(ValueError,match='more than one attacker'):
+        validate_trace(trace)
+
+
+def test_new_breach_penalty_is_once_per_episode_including_time_limit():
+    env=InterceptionEnv(InterceptionConfig(episode_steps=3))
+    env.reset(seed=7)
+    env.positions[0]=[[50,-90],[60,-90],[70,-90],[80,-90],[90,-90]]
+    env.positions[1,0]=[0,-80]
+    env.velocities.fill(0)
+    _,_,terminated,_,first=env.step(np.zeros((5,2)))
+    assert not terminated
+    assert first['reward_components']['penetration']==-100
+    env.positions[1,1]=[0,-80]
+    _,_,terminated,_,second=env.step(np.zeros((5,2)))
+    assert not terminated
+    assert second['reward_components']['penetration']==0
+    _,_,terminated,_,last=env.step(np.zeros((5,2)))
+    assert terminated
+    assert last['reward_components']['penetration']==0
+    assert last['episode_summary']['penetrated_count']==5
+    assert last['episode_summary']['global_return']==-100
+
+    expired=InterceptionEnv(InterceptionConfig(episode_steps=1))
+    expired.reset(seed=7)
+    _,_,terminated,_,info=expired.step(np.zeros((5,2)))
+    assert terminated
+    assert info['episode_summary']['penetrated_count']==5
+    assert info['reward_components']['penetration']==-100
+
+
+def test_prior_resolve_all_protocol_retains_per_attacker_penalty():
+    env=InterceptionEnv(InterceptionConfig(episode_steps=1,episode_protocol='resolve_all'))
+    env.reset(seed=7)
+    _,_,terminated,_,info=env.step(np.zeros((5,2)))
+    assert terminated
+    assert info['episode_summary']['penetrated_count']==5
+    assert info['reward_components']['penetration']==-500
+
+
+def test_historical_first_breach_protocol_retains_original_reward_and_termination():
+    env=InterceptionEnv(InterceptionConfig(episode_protocol='first_breach'))
+    env.reset(seed=7)
+    env.positions[1,0]=[0,-80]
+    env.velocities.fill(0)
+    _,rewards,terminated,truncated,info=env.step(np.zeros((5,2)))
+    assert terminated and not truncated
+    assert info['episode_summary']['outcome']=='penetrated'
+    assert info['team_reward']==pytest.approx(-100)
+    np.testing.assert_allclose(rewards,-100)
 
 
 @pytest.mark.parametrize('algorithm',('mappo','maddpg'))
@@ -212,7 +347,7 @@ def test_visible_attacker_reaches_actor_input(algorithm):
 
 
 @pytest.mark.parametrize('algorithm',('mappo','maddpg'))
-@pytest.mark.parametrize('eval_interval',(0,4))
+@pytest.mark.parametrize('eval_interval',(0,2,4))
 @pytest.mark.parametrize('attack_mode',('direct_rush','split_attack'))
 def test_training_writes_compact_episode_rewards(tmp_path,algorithm,eval_interval,attack_mode):
     import json
@@ -242,6 +377,7 @@ def test_training_writes_compact_episode_rewards(tmp_path,algorithm,eval_interva
     index=json.loads((output/'checkpoints'/'index.json').read_text(encoding='utf-8'))
     assert settings['attack_mode']==attack_mode
     assert settings['environment']['attack_mode']==attack_mode
+    assert settings['environment']['episode_protocol']=='resolve_all_one_penalty_trade'
     assert summary['best_selection']==expected_selection
     assert summary['best_selection_mode']==attack_mode
     assert index['checkpoints']['Best']['selection']==expected_selection
@@ -249,7 +385,14 @@ def test_training_writes_compact_episode_rewards(tmp_path,algorithm,eval_interva
     assert (summary['best_score'] is not None)==bool(eval_interval)
     evaluations=[json.loads(line) for line in (output/'evaluations.jsonl').read_text(encoding='utf-8').splitlines()]
     if eval_interval:
+        assert [row['step'] for row in evaluations]==list(range(eval_interval,5,eval_interval))
         assert all(set(row['modes'])=={attack_mode} for row in evaluations)
+        for evaluation in evaluations:
+            result=evaluation['modes'][attack_mode]
+            components=result['mean_reward_components']
+            assert set(components)=={'capture','boundary','penetration','approach'}
+            assert np.isclose(sum(components.values()),result['mean_team_return'],atol=1e-6)
+            assert components['penetration']==-100
     else:
         assert evaluations==[]
     if algorithm=='mappo' and eval_interval==0 and attack_mode=='direct_rush':

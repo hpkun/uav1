@@ -7,7 +7,7 @@ import yaml
 
 from env.interception import InterceptionEnv
 
-from .interception import (evaluate_policy,load_run,read_config,require_matching_attack_mode,
+from .interception import (evaluate_policy,evaluation_interval_for_budget,load_run,read_config,require_matching_attack_mode,
                            summarize,train,write_json)
 
 
@@ -24,7 +24,8 @@ def parser():
         p.add_argument('--num-envs',type=int,default=1)
         p.add_argument('--seed',type=int,default=7)
         p.add_argument('--device',choices=('cpu','cuda'),default='cpu')
-        p.add_argument('--eval-interval',type=int,default=0)
+        p.add_argument('--eval-interval',type=int,default=None,
+                       help='Sampled steps between evaluations; default is 5%% of the training budget')
         p.add_argument('--eval-episodes',type=int,default=10)
         p.add_argument('--log-every-steps',type=int,default=10000)
         p.add_argument('--output-dir',type=Path,required=True)
@@ -52,8 +53,11 @@ def main(argv=None):
         if data['algorithm']!=args.algorithm:raise ValueError('Algorithm config mismatch')
         if args.total_sampled_steps<1 or args.num_envs<1 or args.total_sampled_steps%args.num_envs:
             raise ValueError('Sampled steps must be positive and divisible by num-envs')
-        if args.eval_interval<0 or args.eval_episodes<1 or args.seed<0 or args.log_every_steps<1:
+        if (args.eval_interval is not None and args.eval_interval<0 or
+                args.eval_episodes<1 or args.seed<0 or args.log_every_steps<1):
             raise ValueError('Invalid evaluation interval, count, log cadence or seed')
+        eval_interval=(evaluation_interval_for_budget(args.total_sampled_steps,args.num_envs)
+                       if args.eval_interval is None else args.eval_interval)
         if args.output_dir.exists():raise FileExistsError(args.output_dir)
         if args.device=='cuda':
             import torch
@@ -61,13 +65,14 @@ def main(argv=None):
         plan=dict(status='supported',environment_contract=InterceptionEnv(config).contract,
                   algorithm=args.algorithm,attack_mode=args.attack_mode,sampled_steps=args.total_sampled_steps,
                   num_envs=args.num_envs,rollout_length=rollout,log_every_steps=args.log_every_steps,
+                  eval_interval=eval_interval,eval_episodes=args.eval_episodes,
                   output=str(args.output_dir.resolve()))
         if args.command=='preflight':
             print(json.dumps(plan,ensure_ascii=False,indent=2))
             return plan
         return train(config,parameters,rollout,args.algorithm,steps=args.total_sampled_steps,num_envs=args.num_envs,
                      seed=args.seed,device=args.device,attack_mode=args.attack_mode,output=args.output_dir,
-                     eval_interval=args.eval_interval,eval_episodes=args.eval_episodes,
+                     eval_interval=eval_interval,eval_episodes=args.eval_episodes,
                      log_every_steps=args.log_every_steps)
     if args.command=='evaluate':
         if args.output_dir.exists():raise FileExistsError(args.output_dir)
