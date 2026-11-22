@@ -34,21 +34,21 @@ def test_all_in_range_agents_have_fixed_relative_slots():
     assert observation[25:49:5].tolist()==pytest.approx([.25,.3,.35,.4,.45])
     assert observation[8:24:5].tolist()==[1]*4
     assert observation[28:49:5].tolist()==[1]*5
-    env.positions[1,4]=[0,90]
+    env.positions[1,4]=[100,100]
     assert not env.observations()[0,44:49].any()
     env.positions[0,0]=[10,0]
     env.velocities[0,0]=[1,2]
     env.velocities[0,2]=[3,4]
     absolute=env.observations()[0]
-    np.testing.assert_allclose(absolute[:4],[.1,0,.125,.25])
-    np.testing.assert_allclose(absolute[4:9],[.1,0,.375,.5,1])
+    np.testing.assert_allclose(absolute[:4],[.1,0,1/env.config.attacker_speed_max,2/env.config.attacker_speed_max])
+    np.testing.assert_allclose(absolute[4:9],[.1,0,3/env.config.attacker_speed_max,4/env.config.attacker_speed_max,1])
     legacy=InterceptionEnv(InterceptionConfig(visible_neighbors=3,visible_attackers=3,
                                                observation_layout='relative_with_base',communication_radius=60))
     assert legacy.reset(seed=11)[0].shape==(5,36)
 
 
 def test_one_sensing_radius_applies_to_both_sides():
-    env=InterceptionEnv()
+    env=InterceptionEnv(InterceptionConfig(sensing_radius=80))
     env.reset(seed=3)
     env.positions[0]=[[0,0],[70,0],[90,0],[0,90],[-90,0]]
     env.positions[1]=[[0,70],[90,10],[90,20],[90,30],[90,40]]
@@ -173,7 +173,7 @@ def test_approach_rewards_use_actual_distance_change_with_visible_target():
     env.positions[1,0]=[0,0]
     env.positions[0]=[[0,-50],[20,-50],[100,-90],[-100,-90],[100,-80]]
     env.velocities.fill(0)
-    env.velocities[1,0]=[0,-8]
+    env.velocities[1,0]=[0,-config.attacker_speed_max]
     env.velocities[0,1]=[0,5]
     observations=env.observations()
     start=4+5*config.visible_neighbors
@@ -182,9 +182,9 @@ def test_approach_rewards_use_actual_distance_change_with_visible_target():
     _,_,_,_,info=env.step(np.zeros((5,2)))
     assert info['global_reward']==0
     assert 'danger' not in info['reward_components']
-    assert info['local_rewards'][0]==pytest.approx(config.approach_weight*0.8)
+    assert info['local_rewards'][0]==pytest.approx(config.approach_weight*0.5)
     before=np.hypot(20,50)
-    after=np.hypot(20,48.7)
+    after=np.hypot(20,49)
     assert info['local_rewards'][1]==pytest.approx(config.approach_weight*(before-after))
     assert info['local_rewards'][2]==pytest.approx(0,abs=1e-12)
 
@@ -226,7 +226,7 @@ def test_capture_retires_one_defender_and_cannot_capture_again():
     assert info['events'][0]['defender']==0
     assert not env.defender_alive[0] and not env.attacker_alive[0] and env.attacker_alive[1]
     assert not env.observations()[0].any()
-    assert env.observations()[1,[8,13,18,23]].tolist()==[1,1,0,0]
+    assert env.observations()[1,[8,13,18,23]].tolist()==[1,1,1,0]
     before=env.positions[0,0].copy()
     _,_,_,_,info=env.step(np.full((5,2),[2,0]))
     np.testing.assert_array_equal(env.positions[0,0],before)

@@ -40,7 +40,7 @@
       <div class="toggles"><label><input id="show-sensing" type="checkbox" checked> 感知范围</label><label><input id="show-capture" type="checkbox" checked> 拦截范围</label><label><input id="show-trails" type="checkbox" checked> 最近轨迹</label><label><input id="show-links" type="checkbox" checked> 感知连线</label><label>查看 <select id="focus-defender"><option value="0">D0</option><option value="1">D1</option><option value="2">D2</option><option value="3">D3</option><option value="4">D4</option></select> 的感知目标</label></div>
       <div class="legend">
         <span><i class="swatch red"></i>防御方 D0–D4</span><span><i class="swatch blue"></i>进攻方 A0–A4</span>
-        <span><i class="line"></i><span id="sensing-label">双方感知半径</span> <b id="sensing-value"></b></span><span><i class="line solid"></i>拦截半径 <b id="capture-value"></b></span>
+        <span><i class="line"></i><span id="sensing-label">防御方感知半径</span> <b id="sensing-value"></b></span><span><i class="line solid"></i>拦截半径 <b id="capture-value"></b></span>
         <span><i class="swatch purple"></i>目标区入侵范围</span>
         <span>红色细线：防御方轨迹或友方感知连线</span><span>蓝色细线：进攻方轨迹或敌方感知连线</span><span>绿色点线：当前分配目标</span>
       </div>
@@ -69,7 +69,7 @@
   let index=0,timer=null;
   slider.max=frames.length-1;
   document.getElementById('sensing-value').textContent=`${cfg.sensing_radius} m`;
-  if(cfg.observation_layout==='relative_with_base')document.getElementById('sensing-label').textContent='进攻方感知半径';
+  if(cfg.observation_layout==='relative_with_base')document.getElementById('sensing-label').textContent='防御方对进攻方的感知半径';
   document.getElementById('capture-value').textContent=`${cfg.capture_radius} m`;
 
   function circle(x,y,r,stroke,fill=null,width=2,dash=[]){

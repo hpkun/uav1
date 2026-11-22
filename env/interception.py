@@ -25,9 +25,11 @@ class InterceptionConfig:
     episode_steps: int = 5000
     defender_speed_max: float = 5.0
     defender_acceleration_max: float = 2.0
-    attacker_speed_max: float = 8.0
-    attacker_acceleration_max: float = 3.0
-    sensing_radius: float = 80.0
+    attacker_speed_max: float = 5.0
+    attacker_acceleration_max: float = 2.0
+    defender_initial_speed: float = 0.0
+    attacker_initial_speed: float = 0.0
+    sensing_radius: float = 100.0
     communication_radius: float | None = None  # Historical relative-observation runs only.
     visible_attackers: int = 5
     visible_neighbors: int = 4
@@ -44,7 +46,7 @@ class InterceptionConfig:
     capture_reward: float = 20.0
     boundary_penalty: float = 2.0
     penetration_penalty: float = 100.0
-    approach_weight: float = 0.05
+    approach_weight: float | None = None
 
     def __post_init__(self):
         if ((self.n_defenders,self.n_attackers)!=(5,5) or
@@ -52,6 +54,9 @@ class InterceptionConfig:
             raise ValueError('Interception requires five agents per side and a supported observation layout')
         if self.observation_layout not in ('relative_with_base','absolute_no_base','relative_assignment'):
             raise ValueError('Unsupported observation layout')
+        if self.approach_weight is None:
+            object.__setattr__(self, 'approach_weight',
+                               0.5 if self.observation_layout == 'relative_assignment' else 0.05)
         if self.observation_layout=='relative_assignment' and (
                 (self.visible_neighbors,self.visible_attackers)!=(4,5) or
                 self.episode_protocol!='resolve_all_one_penalty_trade'):
@@ -76,6 +81,10 @@ class InterceptionConfig:
                  'split_switch_radius')
         if any(not math.isfinite(getattr(self, name)) or getattr(self, name) <= 0 for name in names):
             raise ValueError('Physical scales must be finite and positive')
+        if (not math.isfinite(self.defender_initial_speed) or not math.isfinite(self.attacker_initial_speed)
+                or not 0 <= self.defender_initial_speed <= self.defender_speed_max
+                or not 0 <= self.attacker_initial_speed <= self.attacker_speed_max):
+            raise ValueError('Initial speeds must be finite and within each side\'s speed limit')
         if any(not math.isfinite(getattr(self, name)) for name in
                ('base_x','base_y','split_waypoint_x','split_waypoint_y','danger_weight',
                 'capture_reward','boundary_penalty','penetration_penalty','approach_weight')):
@@ -173,6 +182,15 @@ class InterceptionEnv:
         self.defender_alive.fill(True)
         self.split_flank = np.where(np.argsort(np.argsort(self.positions[1,:,0])) < 2, -1, 1)
         self.split_switched = np.zeros(5, bool)
+        self.velocities[0,:,1] = self.config.defender_initial_speed
+        if self.config.attack_mode == 'split_attack':
+            targets = np.column_stack((self.split_flank*self.config.split_waypoint_x,
+                                       np.full(5,self.config.split_waypoint_y)))
+        else:
+            targets = np.broadcast_to(self.base,(5,2))
+        directions = targets-self.positions[1]
+        self.velocities[1] = (self.config.attacker_initial_speed*directions
+                              /np.linalg.norm(directions,axis=1,keepdims=True))
         self.step_count = 0
         self.finished = False
         self.captured_count = 0

@@ -1,5 +1,7 @@
 """The new assignment interface and historical interception interface coexist."""
 
+from dataclasses import asdict, replace
+
 import numpy as np
 import pytest
 
@@ -83,16 +85,17 @@ def test_relative_actor_and_global_critic_state():
     env.positions[1,1:]=[90,90]
     env.velocities.fill(0)
     env.velocities[0,0]=[1,0]
-    env.velocities[1,0]=[0,-8]
+    env.velocities[1,0]=[0,-config.attacker_speed_max]
     env.assignment.update(env.positions[0],env.positions[1],env.defender_alive,
                           env.attacker_alive,config.sensing_radius,0)
     obs=env.observations()
     state=env.central_state()
     assert env.contract['version']=='interception_2'
     assert obs.shape==(5,54) and state.shape==(75,)
-    np.testing.assert_allclose(obs[0,4:9],[.125,0,-1/13,0,1])
-    np.testing.assert_allclose(obs[0,24:29],[0,.375,-1/13,-8/13,1])
-    np.testing.assert_allclose(obs[0,-5:],[0,.375,-1/13,-8/13,1])
+    speed_sum=config.defender_speed_max+config.attacker_speed_max
+    np.testing.assert_allclose(obs[0,4:9],[10/config.sensing_radius,0,-1/speed_sum,0,1])
+    np.testing.assert_allclose(obs[0,24:29],[0,30/config.sensing_radius,-1/speed_sum,-config.attacker_speed_max/speed_sum,1])
+    np.testing.assert_allclose(obs[0,-5:],[0,30/config.sensing_radius,-1/speed_sum,-config.attacker_speed_max/speed_sum,1])
     assert state[25+5:25+7].tolist()==pytest.approx([.9,.9])
     assert state[50]==1
     env.attacker_alive[0]=False
@@ -112,7 +115,7 @@ def test_out_of_range_assignment_is_held_without_actor_position_leak():
     env.assignment.update(env.positions[0],env.positions[1],env.defender_alive,
                           env.attacker_alive,config.sensing_radius,0)
     assert env.assignment.targets[0]==0
-    env.positions[1,0]=[0,90]
+    env.positions[1,0]=[100,90]
     _,replanned=env.assignment.update(env.positions[0],env.positions[1],env.defender_alive,
                                       env.attacker_alive,config.sensing_radius,1)
     assert not replanned and env.assignment.targets[0]==0
@@ -122,6 +125,8 @@ def test_out_of_range_assignment_is_held_without_actor_position_leak():
 
 def test_action_effect_on_distance_reward_is_delayed():
     config=InterceptionConfig(observation_layout='relative_assignment')
+    assert config.approach_weight==0.5
+    assert InterceptionConfig().approach_weight==0.05
     env=InterceptionEnv(config)
     env.reset(seed=7)
     env.positions[0,0]=[0,0]
@@ -134,9 +139,97 @@ def test_action_effect_on_distance_reward_is_delayed():
     _,_,_,_,first=env.step(actions)
     assert first['reward_target_ids'][0]==0
     assert first['local_rewards'][0]==pytest.approx(0)
+    distance_before=np.linalg.norm(env.positions[0,0]-env.positions[1,0])
     _,_,_,_,second=env.step(np.zeros((5,2)))
     assert second['reward_target_ids'][0]==0
+    distance_after=np.linalg.norm(env.positions[0,0]-env.positions[1,0])
+    assert second['local_rewards'][0]==pytest.approx(0.5*(distance_before-distance_after))
     assert second['local_rewards'][0]>0
+
+
+def test_new_assignment_configs_use_the_same_approach_weight():
+    for path in ('configs/interception_assignment.yaml','configs/interception_assignment_nearest.yaml',
+                 'configs/interception_assignment_speed_parity.yaml'):
+        config,_,_=read_config(path)
+        assert config.approach_weight==0.5
+        assert config.attacker_speed_max==config.defender_speed_max==5.0
+        assert config.attacker_acceleration_max==config.defender_acceleration_max==2.0
+        assert config.attacker_initial_speed==config.defender_initial_speed==2.0
+        assert config.sensing_radius==100.0
+        env=InterceptionEnv(config)
+        env.reset(seed=7)
+        np.testing.assert_allclose(env.velocities[0],np.tile([0,2.0],(5,1)))
+        np.testing.assert_allclose(np.linalg.norm(env.velocities[1],axis=1),2.0)
+        assert np.all(env.velocities[1,:,1]<0)
+    old,_,_=read_config('configs/interception.yaml')
+    assert old.approach_weight==0.05
+    assert old.attacker_speed_max==8.0
+    assert old.attacker_acceleration_max==3.0
+    assert old.attacker_initial_speed==old.defender_initial_speed==0.0
+    assert old.sensing_radius==80.0
+
+
+def test_100m_sensing_boundary_controls_observation_and_assignment():
+    config,_,_=read_config('configs/interception_assignment.yaml')
+    env=InterceptionEnv(config)
+    env.reset(seed=7)
+    env.defender_alive[:]=False
+    env.defender_alive[:3]=True
+    env.attacker_alive[:]=False
+    env.attacker_alive[:2]=True
+    env.positions[0,:3]=[[0,0],[60,80],[60,80.01]]
+    env.positions[1,:2]=[[80,60],[80,60.01]]
+    env.velocities.fill(0)
+    obs=env.observations()[0]
+    np.testing.assert_allclose(obs[4:9],[.6,.8,0,0,1])
+    assert not obs[9:24].any()
+    np.testing.assert_allclose(obs[24:29],[.8,.6,0,0,1])
+    assert not obs[29:49].any()
+    env.defender_alive[1:]=False
+    targets,_=env.assignment.update(env.positions[0],env.positions[1],
+                                    env.defender_alive,env.attacker_alive,config.sensing_radius,0)
+    assert targets[0]==0
+    assert env.assignment.detected_targets[:2].tolist()==[True,False]
+
+
+@pytest.mark.parametrize('mode',('direct_rush','split_attack'))
+def test_initial_velocity_follows_attack_mode_and_moves_on_first_step(mode):
+    config,_,_=read_config('configs/interception_assignment.yaml')
+    env=InterceptionEnv(replace(config,attack_mode=mode))
+    observations,info=env.reset(seed=7)
+    if mode=='direct_rush':
+        targets=np.broadcast_to(env.base,(5,2))
+    else:
+        targets=np.column_stack((env.split_flank*config.split_waypoint_x,
+                                 np.full(5,config.split_waypoint_y)))
+    directions=targets-env.positions[1]
+    expected=config.attacker_initial_speed*directions/np.linalg.norm(directions,axis=1,keepdims=True)
+    np.testing.assert_allclose(env.velocities[1],expected)
+    np.testing.assert_allclose(observations[:,2:4],np.tile([0,2.0/config.defender_speed_max],(5,1)))
+    np.testing.assert_allclose(info['central_state'][:25].reshape(5,5)[:,2:4],
+                               np.tile([0,2.0/config.defender_speed_max],(5,1)))
+    before=env.positions.copy()
+    velocity=env.velocities.copy()
+    env.step(np.zeros((5,2)))
+    np.testing.assert_allclose(env.positions,before+velocity*config.dt)
+
+
+@pytest.mark.parametrize('initial_speed',(-0.1,5.1,float('inf')))
+def test_initial_speed_respects_speed_limit(initial_speed):
+    with pytest.raises(ValueError,match='Initial speeds'):
+        InterceptionConfig(defender_initial_speed=initial_speed)
+
+
+def test_checkpoint_environment_without_initial_speed_fields_starts_at_rest():
+    config,_,_=read_config('configs/interception_assignment.yaml')
+    historical=asdict(config)
+    historical.pop('defender_initial_speed')
+    historical.pop('attacker_initial_speed')
+    restored=InterceptionConfig(**historical)
+    env=InterceptionEnv(restored)
+    env.reset(seed=7)
+    assert not env.velocities.any()
+    assert env.contract['version']=='interception_2'
 
 
 @pytest.mark.parametrize('name',('mappo','maddpg'))
@@ -165,7 +258,8 @@ def test_dual_critic_is_explicitly_legacy_only():
 
 
 @pytest.mark.parametrize('name',('mappo','maddpg'))
-def test_new_interface_short_training_and_checkpoint(tmp_path,name):
+@pytest.mark.parametrize('attack_mode',('direct_rush','split_attack'))
+def test_new_interface_short_training_and_checkpoint(tmp_path,name,attack_mode):
     import json
     from algorithm.mappo_config import MAPPOConfig
     from algorithm.maddpg_config import MADDPGConfig
@@ -177,12 +271,13 @@ def test_new_interface_short_training_and_checkpoint(tmp_path,name):
                                   learning_starts=2,update_interval_steps=2,updates_per_interval=1))
     output=tmp_path/name
     train(config,parameters,2,name,steps=4,num_envs=2,seed=7,device='cpu',
-          attack_mode='direct_rush',output=output,eval_interval=0,log_every_steps=4)
+          attack_mode=attack_mode,output=output,eval_interval=0,log_every_steps=4)
     settings=json.loads((output/'settings.json').read_text(encoding='utf-8'))
     assert settings['environment_contract']['version']=='interception_2'
     assert json.loads((output/'summary.json').read_text(encoding='utf-8'))['updates']>0
     restored,policy,algorithm,_,_=load_run(output,'Best','cpu')
     assert algorithm==name and restored.observation_layout=='relative_assignment'
+    assert restored.attack_mode==attack_mode
     env=InterceptionEnv(restored)
     obs,info=env.reset(seed=7)
     assert policy.policy_actions(obs[None],info['active_masks'][None]).shape==(1,5,2)
