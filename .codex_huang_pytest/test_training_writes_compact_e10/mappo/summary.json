@@ -1,0 +1,15 @@
+{
+  "sampled_steps": 4,
+  "completed_episodes": 2,
+  "episodes_by_attack_mode": {
+    "split_attack": 2
+  },
+  "updates": 1,
+  "best_score": [
+    0.0,
+    0.0,
+    -1.0
+  ],
+  "best_selection": "periodic_evaluation",
+  "best_selection_mode": "split_attack"
+}

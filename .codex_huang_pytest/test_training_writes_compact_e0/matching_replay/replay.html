@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>无人机拦截回放</title>
+<style>
+  :root{font:15px system-ui,sans-serif;color:#e8eef7;background:#0e1622}
+  *{box-sizing:border-box}
+  body{margin:0}
+  .layout{max-width:1510px;margin:auto;min-height:100vh;display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:20px;padding:20px}
+  main,aside{background:#182537;border:1px solid #304156;border-radius:16px;padding:20px}
+  h1{font-size:25px;margin:0 0 5px}h2{font-size:18px;margin:0 0 12px}
+  .muted{color:#aabbd0}.subtitle{margin:0 0 15px}
+  .board{max-width:850px;margin:auto}
+  canvas{display:block;width:100%;height:auto;aspect-ratio:1;background:#f4f7fb;border-radius:10px}
+  .controls{display:flex;align-items:center;gap:12px;margin-top:15px}
+  button{border:1px solid #5c7896;background:#29435e;color:white;border-radius:7px;padding:9px 16px;cursor:pointer}
+  button:hover{background:#3c5875}input[type=range]{flex:1;accent-color:#78c6ff}
+  select{background:#29435e;color:white;border:1px solid #5c7896;border-radius:6px;padding:5px}
+  .toggles{display:flex;flex-wrap:wrap;gap:12px;margin:14px 0}.toggles label{white-space:nowrap;cursor:pointer}
+  .legend{display:flex;flex-wrap:wrap;gap:10px 18px;margin-top:12px;font-size:13px}
+  .swatch{display:inline-block;width:13px;height:13px;border-radius:50%;vertical-align:-2px;margin-right:5px}
+  .red{background:#dc414b}.blue{background:#2c78d4}.purple{background:#8656bd}
+  .line{display:inline-block;width:17px;border-top:2px dashed #d65c64;vertical-align:4px;margin-right:5px}
+  .line.solid{border-style:solid}
+  .stat{padding:10px 0;border-bottom:1px solid #304156}
+  ol{padding-left:24px}li{padding:5px 0;cursor:pointer}li:hover{color:#87c9ff}
+  @media(max-width:900px){.layout{grid-template-columns:1fr;padding:10px}main,aside{padding:15px}aside{order:2}}
+</style>
+</head>
+<body>
+<div class="layout">
+  <main>
+    <h1>无人机拦截回放</h1>
+    <p class="subtitle muted" id="status"></p>
+    <div class="board">
+      <canvas id="view" width="1000" height="1000" aria-label="拦截场景地图"></canvas>
+      <div class="controls"><button id="play" type="button">播放</button><input id="slider" type="range" min="0" value="0" aria-label="回放进度"><span id="time"></span></div>
+      <div class="toggles"><label><input id="show-sensing" type="checkbox" checked> 感知范围</label><label><input id="show-capture" type="checkbox" checked> 拦截范围</label><label><input id="show-trails" type="checkbox" checked> 最近轨迹</label><label><input id="show-links" type="checkbox" checked> 感知连线</label><label>查看 <select id="focus-defender"><option value="0">D0</option><option value="1">D1</option><option value="2">D2</option><option value="3">D3</option><option value="4">D4</option></select> 的感知目标</label></div>
+      <div class="legend">
+        <span><i class="swatch red"></i>防御方 D0–D4</span><span><i class="swatch blue"></i>进攻方 A0–A4</span>
+        <span><i class="line"></i><span id="sensing-label">防御方感知半径</span> <b id="sensing-value"></b></span><span><i class="line solid"></i>拦截半径 <b id="capture-value"></b></span>
+        <span><i class="swatch purple"></i>目标区入侵范围</span>
+        <span>红色细线：防御方轨迹或友方感知连线</span><span>蓝色细线：进攻方轨迹或敌方感知连线</span><span>绿色点线：当前分配目标</span>
+      </div>
+    </div>
+  </main>
+  <aside><h2>对局结果</h2><div id="summary" class="stat"></div><h2 style="margin-top:22px">感知目标</h2><div id="sensor-count" class="stat"></div><h2 style="margin-top:22px">事件</h2><ol id="events"></ol></aside>
+</div>
+<script id="trace" type="application/json">{"frames":[{"step":0,"time_s":0.0,"positions":[[[19.58950029243079,-94.26598474708264],[1.3054662225353653,-86.37452150552853],[23.133435516405342,-80.38143114206613],[-1.761507936440772,-78.22016308629159],[-26.93842424627615,-88.54868176748738]],[[11.075199285715726,88.96193929140628],[-21.524631994545622,83.7082131851178],[29.836905268079278,77.46155007063062],[-12.440621941640618,79.3609221686725],[11.322294234473858,78.75962423098606]]],"velocities":[[[0.0,0.0],[0.0,0.0],[0.0,0.0],[0.0,0.0],[0.0,0.0]],[[-0.0,-0.0],[0.0,-0.0],[-0.0,-0.0],[0.0,-0.0],[-0.0,-0.0]]],"attacker_alive":[true,true,true,true,true],"defender_alive":[true,true,true,true,true],"assigned_target_ids":null,"defender_actions":null},{"step":2,"time_s":0.2,"positions":[[[19.589604743638237,-94.26586889616092],[1.3055781076713586,-86.37439947055042],[23.13352997754836,-80.38130500437924],[-1.7614061932213516,-78.22004041207228],[-26.938266694398948,-88.5485756184137]],[[11.073355488223184,88.94202446248896],[-21.52012788194712,83.6887269599908],[29.831136883409126,77.44239998607996],[-12.437772085779592,79.34112625188213],[11.320239837100592,78.73973002450697]]],"velocities":[[[0.0020890269428491593,0.0023173920810222624],[0.002237717062234879,0.00244105588644743],[0.001889211218804121,0.0025231019593775273],[0.0020348886027932167,0.002453825064003468],[0.003150971978902817,0.0021233499981462957]],[[0.0,0.0],[0.0,0.0],[0.0,0.0],[0.0,0.0],[0.0,0.0]]],"attacker_alive":[false,false,false,false,false],"defender_alive":[true,true,true,true,true],"assigned_target_ids":null,"defender_actions":[[0.010445148684084415,0.011588828638195992],[0.011188657023012638,0.012207061052322388],[0.009445997886359692,0.01261725090444088],[0.010174564085900784,0.01227082870900631],[0.01575453206896782,0.010618592612445354]]}],"events":[{"type":"time_limit","step":2,"time_s":0.2},{"type":"penetration","step":2,"time_s":0.2,"attacker":0,"position":[11.073355488223184,88.94202446248896],"reason":"time_limit"},{"type":"penetration","step":2,"time_s":0.2,"attacker":1,"position":[-21.52012788194712,83.6887269599908],"reason":"time_limit"},{"type":"penetration","step":2,"time_s":0.2,"attacker":2,"position":[29.831136883409126,77.44239998607996],"reason":"time_limit"},{"type":"penetration","step":2,"time_s":0.2,"attacker":3,"position":[-12.437772085779592,79.34112625188213],"reason":"time_limit"},{"type":"penetration","step":2,"time_s":0.2,"attacker":4,"position":[11.320239837100592,78.73973002450697],"reason":"time_limit"}],"summary":{"attack_mode":"direct_rush","outcome":"penetrated","seed":900001,"steps":2,"duration_s":0.2,"captured_count":0,"penetrated_count":5,"first_capture_time_s":null,"defender_oob_count":0,"defender_retired_count":0,"global_return":-100.0,"mean_local_return":0.0,"team_return":-100.0},"config":{"n_defenders":5,"n_attackers":5,"arena_half_extent":100.0,"base_x":0.0,"base_y":-80.0,"breach_radius":15.0,"danger_radius":30.0,"capture_radius":5.0,"dt":0.1,"episode_steps":2,"defender_speed_max":5.0,"defender_acceleration_max":2.0,"attacker_speed_max":5.0,"attacker_acceleration_max":2.0,"defender_initial_speed":0.0,"attacker_initial_speed":0.0,"sensing_radius":100.0,"communication_radius":null,"visible_attackers":5,"visible_neighbors":4,"observation_layout":"absolute_no_base","assignment_period":20,"assignment_method":"distance_matching","assignment_safety_factor":1.1,"spawn_min_spacing":8.0,"attack_mode":"direct_rush","episode_protocol":"resolve_all_one_penalty_trade","split_waypoint_x":70.0,"split_waypoint_y":5.0,"split_switch_radius":12.0,"danger_weight":0.0,"capture_reward":20.0,"boundary_penalty":2.0,"penetration_penalty":100.0,"approach_weight":0.05},"mode":"direct_rush","seed":900001}</script>
+<script>
+(() => {
+  'use strict';
+  const d=JSON.parse(document.getElementById('trace').textContent);
+  const frames=d.frames, cfg=d.config, canvas=document.getElementById('view');
+  const g=canvas.getContext('2d'), slider=document.getElementById('slider');
+  const showSensing=document.getElementById('show-sensing');
+  const showCapture=document.getElementById('show-capture');
+  const showTrails=document.getElementById('show-trails');
+  const showLinks=document.getElementById('show-links');
+  const focus=document.getElementById('focus-defender');
+  const play=document.getElementById('play');
+  const W=canvas.width, H=canvas.height;
+  const half=cfg.arena_half_extent;
+  const extent=Math.max(half,Math.abs(cfg.base_x)+cfg.breach_radius,Math.abs(cfg.base_y)+cfg.breach_radius)+5;
+  const unit=W/(2*extent), sx=x=>W/2+x*unit, sy=y=>H/2-y*unit;
+  const colors=['#dc414b','#2c78d4'];
+  let index=0,timer=null;
+  slider.max=frames.length-1;
+  document.getElementById('sensing-value').textContent=`${cfg.sensing_radius} m`;
+  if(cfg.observation_layout==='relative_with_base')document.getElementById('sensing-label').textContent='防御方对进攻方的感知半径';
+  document.getElementById('capture-value').textContent=`${cfg.capture_radius} m`;
+
+  function circle(x,y,r,stroke,fill=null,width=2,dash=[]){
+    g.beginPath();g.arc(sx(x),sy(y),r*unit,0,Math.PI*2);
+    if(fill){g.fillStyle=fill;g.fill()}
+    if(stroke){g.strokeStyle=stroke;g.lineWidth=width;g.setLineDash(dash);g.stroke();g.setLineDash([])}
+  }
+  function background(){
+    g.fillStyle='#f4f7fb';g.fillRect(0,0,W,H);
+    g.strokeStyle='#dce4ed';g.lineWidth=1;
+    for(let n=-Math.floor(half/20)*20;n<=half;n+=20){
+      g.beginPath();g.moveTo(sx(n),sy(-half));g.lineTo(sx(n),sy(half));g.stroke();
+      g.beginPath();g.moveTo(sx(-half),sy(n));g.lineTo(sx(half),sy(n));g.stroke();
+    }
+    g.strokeStyle='#8a9cad';g.lineWidth=2;g.strokeRect(sx(-half),sy(half),2*half*unit,2*half*unit);
+    g.font='13px system-ui';g.fillStyle='#546578';g.fillText('进攻方向 ↓',sx(-half)+9,sy(half)+19);
+    circle(cfg.base_x,cfg.base_y,cfg.breach_radius,'#8656bd','rgba(134,86,189,.08)',2);
+    circle(cfg.base_x,cfg.base_y,2.4,null,'#172638');
+    g.fillStyle='#172638';g.fillText('目标区',sx(cfg.base_x)+12,sy(cfg.base_y)+5);
+  }
+  function trails(){
+    if(!showTrails.checked)return;
+    const begin=Math.max(0,index-75);
+    for(let side=0;side<2;side++)for(let agent=0;agent<5;agent++){
+      const current=frames[index];
+      if(side===0&&current.defender_alive&&!current.defender_alive[agent]||side===1&&!current.attacker_alive[agent])continue;
+      g.beginPath();let started=false;
+      for(let k=begin;k<=index;k++){
+        const row=frames[k];
+        if(side===0&&row.defender_alive&&!row.defender_alive[agent]||side===1&&!row.attacker_alive[agent]){started=false;continue}
+        const p=row.positions[side][agent];
+        if(started)g.lineTo(sx(p[0]),sy(p[1]));else g.moveTo(sx(p[0]),sy(p[1]));
+        started=true;
+      }
+      g.strokeStyle=side===0?'rgba(220,65,75,.48)':'rgba(44,120,212,.48)';g.lineWidth=2;g.stroke();
+    }
+  }
+  function sensingLinks(row){
+    const selected=Number(focus.value), own=row.positions[0][selected];
+    if(row.defender_alive&&!row.defender_alive[selected]){
+      document.getElementById('sensor-count').textContent=`D${selected} 已退出对局`;
+      return;
+    }
+    const friendRadius=cfg.observation_layout==='relative_with_base'?cfg.communication_radius:cfg.sensing_radius;
+    let friends=0,attackers=0;
+    for(let side=0;side<2;side++)for(let i=0;i<5;i++){
+      if(side===0&&(i===selected||row.defender_alive&&!row.defender_alive[i])||side===1&&!row.attacker_alive[i])continue;
+      const p=row.positions[side][i],radius=side===0?friendRadius:cfg.sensing_radius;
+      if(Math.hypot(p[0]-own[0],p[1]-own[1])>radius)continue;
+      if(side===0)friends++;else attackers++;
+      if(showLinks.checked){
+        g.beginPath();g.moveTo(sx(own[0]),sy(own[1]));g.lineTo(sx(p[0]),sy(p[1]));
+        g.strokeStyle=side===0?'rgba(220,65,75,.55)':'rgba(44,120,212,.65)';g.lineWidth=2;g.stroke();
+      }
+    }
+    document.getElementById('sensor-count').textContent=`D${selected}：友方 ${friends}/4 · 进攻方 ${attackers}/5`;
+  }
+  function vehicles(row){
+    for(let i=0;i<5;i++){
+      if(row.defender_alive&&!row.defender_alive[i])continue;
+      const p=row.positions[0][i];
+      if(showSensing.checked)circle(p[0],p[1],cfg.sensing_radius,'rgba(220,65,75,.47)','rgba(220,65,75,.018)',1.4,[8,6]);
+      if(showCapture.checked)circle(p[0],p[1],cfg.capture_radius,'rgba(220,65,75,.85)','rgba(220,65,75,.09)',1.8);
+    }
+    for(let side=0;side<2;side++)for(let i=0;i<5;i++){
+      if(side===0&&row.defender_alive&&!row.defender_alive[i]||side===1&&!row.attacker_alive[i])continue;
+      const p=row.positions[side][i],x=sx(p[0]),y=sy(p[1]);
+      g.beginPath();g.arc(x,y,side===0?8:7,0,Math.PI*2);
+      g.fillStyle=colors[side];g.fill();g.lineWidth=2;g.strokeStyle='white';g.stroke();
+      const angle=(i*2.4)+(side?0.8:0),dx=Math.cos(angle)*16,dy=Math.sin(angle)*16;
+      g.font='bold 14px system-ui';g.textAlign=dx<0?'right':'left';
+      g.lineWidth=4;g.strokeStyle='white';g.strokeText((side===0?'D':'A')+i,x+dx,y+dy);
+      g.fillStyle='#172638';g.fillText((side===0?'D':'A')+i,x+dx,y+dy);
+    }
+  }
+  function assignmentLinks(row){
+    if(!row.assigned_target_ids)return;
+    for(let i=0;i<5;i++){
+      const j=row.assigned_target_ids[i];
+      if(j<0||!row.defender_alive[i]||!row.attacker_alive[j])continue;
+      const a=row.positions[0][i],b=row.positions[1][j];
+      g.beginPath();g.moveTo(sx(a[0]),sy(a[1]));g.lineTo(sx(b[0]),sy(b[1]));
+      g.strokeStyle='rgba(20,155,105,.8)';g.lineWidth=2.5;g.setLineDash([4,5]);g.stroke();g.setLineDash([]);
+    }
+  }
+  function draw(){
+    const row=frames[index];background();trails();sensingLinks(row);assignmentLinks(row);vehicles(row);
+    document.getElementById('status').textContent=`${d.mode} · seed ${d.seed} · 第 ${row.step}/${d.summary.steps} 步`;
+    document.getElementById('time').textContent=`${row.time_s.toFixed(1)} s`;
+    slider.value=index;
+  }
+  function stop(){if(timer)clearInterval(timer);timer=null;play.textContent='播放'}
+  slider.addEventListener('input',()=>{index=Number(slider.value);draw()});
+  for(const toggle of [showSensing,showCapture,showTrails,showLinks,focus])toggle.addEventListener('change',draw);
+  play.addEventListener('click',()=>{
+    if(timer){stop();return}if(index===frames.length-1)index=0;
+    play.textContent='暂停';draw();
+    timer=setInterval(()=>{index=Math.min(index+1,frames.length-1);draw();if(index===frames.length-1)stop()},70);
+  });
+  const summary=d.summary;
+  document.getElementById('summary').textContent=`${summary.outcome} · 拦截 ${summary.captured_count}/5 · 突防 ${summary.penetrated_count}/5 · ${summary.duration_s.toFixed(1)} s`;
+  const list=document.getElementById('events');
+  for(const event of d.events){
+    const li=document.createElement('li');
+    li.textContent=`${event.time_s.toFixed(1)} s · ${event.type}${event.defender===undefined?'':` D${event.defender}`}${event.attacker===undefined?'':` A${event.attacker}`}`;
+    li.addEventListener('click',()=>{const at=frames.findIndex(row=>row.step>=event.step);if(at>=0){index=at;draw()}});
+    list.append(li);
+  }
+  draw();
+})();
+</script>
+</body>
+</html>

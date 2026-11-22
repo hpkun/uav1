@@ -1,0 +1,1 @@
+{"step": 1100, "update": 1, "actor_loss": -0.06677631172351539, "critic_loss": 4.614549160003662, "actor_grad_norm": 0.02676711045205593, "critic_grad_norm": 0.6327005624771118, "td_abs": 0.3865366280078888, "actor_updates": 1, "critic_updates": 1, "target_updates": 1, "actor_optimizer_steps": 5}

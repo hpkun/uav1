@@ -1,0 +1,28 @@
+schema: Interception/2
+environment:
+  arena_half_extent: 100.0
+  base_x: 0.0
+  base_y: -80.0
+  breach_radius: 15.0
+  danger_radius: 30.0
+  capture_radius: 5.0
+  dt: 0.1
+  episode_steps: 5000
+  episode_protocol: resolve_all_one_penalty_trade
+  defender_speed_max: 5.0
+  defender_acceleration_max: 2.0
+  attacker_speed_max: 5.0
+  attacker_acceleration_max: 2.0
+  defender_initial_speed: 2.0
+  attacker_initial_speed: 2.0
+  sensing_radius: 100.0
+  visible_neighbors: 4
+  visible_attackers: 5
+  observation_layout: relative_assignment
+  assignment_period: 20
+  assignment_method: huang_boundary_distance
+  assignment_safety_factor: 1.1
+  capture_reward: 20.0
+  boundary_penalty: 2.0
+  penetration_penalty: 100.0
+  approach_weight: 0.5

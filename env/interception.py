@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 from gymnasium import spaces
-from assignment import DistanceAssignment, NearestVisibleAssignment
+from assignment import DistanceAssignment, HuangGlobalAssignment, NearestVisibleAssignment
 
 
 @dataclass(frozen=True)
@@ -36,6 +36,7 @@ class InterceptionConfig:
     observation_layout: str = 'absolute_no_base'
     assignment_period: int = 20
     assignment_method: str = 'distance_matching'
+    assignment_safety_factor: float = 1.1
     spawn_min_spacing: float = 8.0
     attack_mode: str = 'direct_rush'
     episode_protocol: str = 'resolve_all_one_penalty_trade'
@@ -63,14 +64,21 @@ class InterceptionConfig:
             raise ValueError('Assignment layout requires the five-on-five one-to-one scenario')
         if type(self.assignment_period) is not int or self.assignment_period < 1:
             raise ValueError('assignment_period must be positive')
-        if self.assignment_method not in ('nearest_visible_legacy','independent_nearest','distance_matching'):
+        if self.assignment_method not in ('nearest_visible_legacy','independent_nearest','distance_matching',
+                                          'huang_boundary_distance','huang_intercept_time'):
             raise ValueError('Unsupported assignment method')
+        if not math.isfinite(self.assignment_safety_factor) or self.assignment_safety_factor < 1:
+            raise ValueError('assignment_safety_factor must be finite and at least one')
         if self.observation_layout=='relative_with_base' and (
                 self.communication_radius is None or not math.isfinite(self.communication_radius)
                 or self.communication_radius<=0):
             raise ValueError('Historical relative observations require a communication radius')
         if self.attack_mode not in ('direct_rush', 'split_attack'):
             raise ValueError('Unknown attack mode')
+        if self.assignment_method.startswith('huang_') and self.attack_mode != 'direct_rush':
+            raise ValueError('Huang global assignment currently supports direct_rush only')
+        if self.assignment_method.startswith('huang_') and self.observation_layout != 'relative_assignment':
+            raise ValueError('Huang global assignment requires relative_assignment observations')
         if self.episode_protocol not in ('resolve_all_one_penalty_trade', 'resolve_all_one_penalty', 'resolve_all', 'first_breach'):
             raise ValueError('Unknown episode protocol')
         if type(self.episode_steps) is not int or self.episode_steps < 1:
@@ -168,7 +176,21 @@ class InterceptionEnv:
     def _make_assignment(self):
         if self.config.assignment_method == 'nearest_visible_legacy':
             return NearestVisibleAssignment(self.config.assignment_period)
+        if self.config.assignment_method.startswith('huang_'):
+            c = self.config
+            return HuangGlobalAssignment(c.assignment_period, c.assignment_method, self.base,
+                                         c.breach_radius, c.defender_acceleration_max,
+                                         c.defender_speed_max, c.attacker_acceleration_max,
+                                         c.attacker_speed_max, c.assignment_safety_factor)
         return DistanceAssignment(self.config.assignment_period, self.config.assignment_method)
+
+    def _update_assignment(self, step, events=()):
+        args = (self.positions[0], self.positions[1], self.defender_alive,
+                self.attacker_alive, self.config.sensing_radius, step, events)
+        if isinstance(self.assignment, HuangGlobalAssignment):
+            return self.assignment.update(*args, defender_velocities=self.velocities[0],
+                                          attacker_velocities=self.velocities[1])
+        return self.assignment.update(*args)
 
     def reset(self, *, seed=None, options=None):
         if options:
@@ -203,8 +225,7 @@ class InterceptionEnv:
         self.event_history = []
         if self.assignment is not None:
             self.assignment = self._make_assignment()
-            self.assignment.update(self.positions[0],self.positions[1],self.defender_alive,
-                                   self.attacker_alive,self.config.sensing_radius,0)
+            self._update_assignment(0)
         return self.observations(), self._info([], 0.0, np.zeros(5), None)
 
     def observations(self):
@@ -414,8 +435,7 @@ class InterceptionEnv:
         self.team_return += global_reward+float(local.mean())
         self.event_history.extend(events)
         if self.assignment is not None:
-            self.assignment.update(self.positions[0],self.positions[1],self.defender_alive,
-                                   self.attacker_alive,c.sensing_radius,self.step_count,events)
+            self._update_assignment(self.step_count, events)
         info = self._info(events,global_reward,local,outcome,first_breach=first_breach)
         if assigned_before is not None:info['reward_target_ids']=assigned_before.copy()
         info['reward_components']['approach'] = float(c.approach_weight*approach.mean())

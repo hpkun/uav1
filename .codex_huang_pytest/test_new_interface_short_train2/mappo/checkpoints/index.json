@@ -1,0 +1,17 @@
+{
+  "schema": "InterceptionCheckpoints/1",
+  "checkpoints": {
+    "Best": {
+      "path": "checkpoints/best.pt",
+      "sha256": "6896a5f95eaff10e1248c2f035a50c8150daed0bc4a60c0a53716a2ff2874a29",
+      "step": 4,
+      "selection": "final_unvalidated",
+      "selection_mode": "split_attack"
+    },
+    "Last": {
+      "path": "checkpoints/last.pt",
+      "sha256": "c6a3950bbb29d4afaa4e42456622f449140113698690d8d2fc2c5dcf763c1a24",
+      "step": 4
+    }
+  }
+}

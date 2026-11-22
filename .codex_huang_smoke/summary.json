@@ -1,0 +1,11 @@
+{
+  "sampled_steps": 1100,
+  "completed_episodes": 0,
+  "episodes_by_attack_mode": {
+    "direct_rush": 0
+  },
+  "updates": 1,
+  "best_score": null,
+  "best_selection": "final_unvalidated",
+  "best_selection_mode": "direct_rush"
+}

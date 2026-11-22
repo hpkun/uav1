@@ -1,0 +1,15 @@
+{
+  "attack_mode": "direct_rush",
+  "outcome": "penetrated",
+  "seed": 900001,
+  "steps": 319,
+  "duration_s": 31.900000000000002,
+  "captured_count": 1,
+  "penetrated_count": 4,
+  "first_capture_time_s": 22.0,
+  "defender_oob_count": 0,
+  "defender_retired_count": 1,
+  "global_return": -80.0,
+  "mean_local_return": 36.17704947819294,
+  "team_return": -43.82295052180706
+}
