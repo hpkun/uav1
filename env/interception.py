@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 from gymnasium import spaces
-from assignment import NearestVisibleAssignment
+from assignment import DistanceAssignment, NearestVisibleAssignment
 
 
 @dataclass(frozen=True)
@@ -33,6 +33,7 @@ class InterceptionConfig:
     visible_neighbors: int = 4
     observation_layout: str = 'absolute_no_base'
     assignment_period: int = 20
+    assignment_method: str = 'distance_matching'
     spawn_min_spacing: float = 8.0
     attack_mode: str = 'direct_rush'
     episode_protocol: str = 'resolve_all_one_penalty_trade'
@@ -57,6 +58,8 @@ class InterceptionConfig:
             raise ValueError('Assignment layout requires the five-on-five one-to-one scenario')
         if type(self.assignment_period) is not int or self.assignment_period < 1:
             raise ValueError('assignment_period must be positive')
+        if self.assignment_method not in ('nearest_visible_legacy','independent_nearest','distance_matching'):
+            raise ValueError('Unsupported assignment method')
         if self.observation_layout=='relative_with_base' and (
                 self.communication_radius is None or not math.isfinite(self.communication_radius)
                 or self.communication_radius<=0):
@@ -107,7 +110,7 @@ class InterceptionEnv:
         self.velocities = np.zeros_like(self.positions)
         self.attacker_alive = np.ones(5, bool)
         self.defender_alive = np.ones(5, bool)
-        self.assignment = NearestVisibleAssignment(self.config.assignment_period) if self.assigned_layout else None
+        self.assignment = self._make_assignment() if self.assigned_layout else None
         self.rng = np.random.default_rng()
         self.finished = True
 
@@ -134,7 +137,9 @@ class InterceptionEnv:
                                         'self_xy_vxy_all_4_visible_defenders_all_5_visible_attackers_absolute_xy_vxy_valid'),
                     state_schema=('all_defender_and_attacker_xy_vxy_alive_assignment_matrix'
                                   if self.assigned_layout else 'five_defender_observations_in_agent_order'),
-                    assignment_schema=(f'nearest_visible_periodic_or_event_{self.config.assignment_period}'
+                    assignment_schema=(f'{self.config.assignment_method}_period_{self.config.assignment_period}'
+                                       if self.assigned_layout and self.config.assignment_method!='nearest_visible_legacy'
+                                       else f'nearest_visible_periodic_or_event_{self.config.assignment_period}'
                                        if self.assigned_layout else None),
                     implementation_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                     config=asdict(self.config))
@@ -150,6 +155,11 @@ class InterceptionEnv:
             else:
                 raise RuntimeError('Could not sample a spaced deployment')
         return np.asarray(result)
+
+    def _make_assignment(self):
+        if self.config.assignment_method == 'nearest_visible_legacy':
+            return NearestVisibleAssignment(self.config.assignment_period)
+        return DistanceAssignment(self.config.assignment_period, self.config.assignment_method)
 
     def reset(self, *, seed=None, options=None):
         if options:
@@ -174,7 +184,7 @@ class InterceptionEnv:
         self.team_return = 0.0
         self.event_history = []
         if self.assignment is not None:
-            self.assignment = NearestVisibleAssignment(self.config.assignment_period)
+            self.assignment = self._make_assignment()
             self.assignment.update(self.positions[0],self.positions[1],self.defender_alive,
                                    self.attacker_alive,self.config.sensing_radius,0)
         return self.observations(), self._info([], 0.0, np.zeros(5), None)
@@ -209,7 +219,8 @@ class InterceptionEnv:
                     out[i,k+4] = 1.0
             if self.assignment is not None:
                 target = self.assignment.targets[i]
-                if target >= 0:
+                if target >= 0 and (self.config.assignment_method == 'nearest_visible_legacy' or
+                                    np.linalg.norm(self.positions[1,target]-own) <= c.sensing_radius):
                     out[i,-5:-3] = (self.positions[1,target]-own)/c.sensing_radius
                     out[i,-3:-1] = (self.velocities[1,target]-self.velocities[0,i])/(c.defender_speed_max+c.attacker_speed_max)
                     out[i,-1] = 1.0

@@ -18,6 +18,7 @@ environment:
   visible_attackers: 5
   observation_layout: relative_assignment
   assignment_period: 20
+  assignment_method: distance_matching
   capture_reward: 20.0
   boundary_penalty: 2.0
   penetration_penalty: 100.0

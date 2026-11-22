@@ -86,6 +86,8 @@ def load_run(checkpoint,label='Best',device='cpu'):
     restored_environment=dict(saved_environment)
     if 'observation_layout' not in restored_environment:
         restored_environment['observation_layout']='relative_with_base'
+    if restored_environment['observation_layout']=='relative_assignment':
+        restored_environment.setdefault('assignment_method','nearest_visible_legacy')
     restored_environment.setdefault('episode_protocol','first_breach')
     config=replace(InterceptionConfig(**restored_environment),
                    attack_mode=settings['attack_mode'])

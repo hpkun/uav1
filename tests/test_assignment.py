@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from assignment import NearestVisibleAssignment
+from assignment import DistanceAssignment, NearestVisibleAssignment
 from env.interception import InterceptionConfig, InterceptionEnv
 from experiment.interception import make_policy, read_config
 
@@ -25,6 +25,52 @@ def test_periodic_and_event_reassignment():
     targets,changed=allocator.update(defenders,attackers,np.ones(5,bool),alive,80,21,
                                      [{'type':'capture'}])
     assert changed and targets[0]==0
+
+
+def test_distance_matching_covers_targets_without_duplicate_assignments():
+    defenders=np.array([[0.,0.],[1,0],[10,0],[20,0],[30,0]])
+    attackers=np.array([[0.,1.],[2,1],[10,1],[20,1],[30,1]])
+    alive=np.ones(5,bool)
+    matching=DistanceAssignment(20,'distance_matching')
+    nearest=DistanceAssignment(20,'independent_nearest')
+    targets,replanned=matching.update(defenders,attackers,alive,alive,50,0)
+    assert replanned and targets.tolist()==[0,1,2,3,4]
+    assert len(set(targets))==5
+    assert nearest.update(defenders,attackers,alive,alive,50,0)[0].tolist()==[0,0,2,3,4]
+
+
+def test_matching_maximizes_feasible_pairs_before_distance():
+    defenders=np.array([[0.,0.],[0,2],[90,90],[90,91],[90,92]])
+    attackers=np.array([[0.,1.],[2,0],[90,93],[90,94],[90,95]])
+    alive=np.ones(5,bool)
+    targets,_=DistanceAssignment(20).update(defenders,attackers,alive,alive,3,0)
+    assert sorted(targets)==list(range(5))
+    assert targets[0]==1 and targets[1]==0
+
+
+@pytest.mark.parametrize('method',('distance_matching','independent_nearest'))
+def test_only_system_first_detection_period_and_resolution_trigger(method):
+    allocator=DistanceAssignment(20,method)
+    defenders=np.array([[0.,0.],[60,0],[60,1],[60,2],[60,3]])
+    attackers=np.array([[0.,10.],[0,100],[200,200],[210,210],[220,220]])
+    alive=np.ones(5,bool)
+    assert allocator.update(defenders,attackers,alive,alive,20,0)[1]
+    assert allocator.detected_targets.tolist()==[True,False,False,False,False]
+    attackers[1]=[0,12]
+    assert allocator.update(defenders,attackers,alive,alive,20,1)[1]
+    assert allocator.detected_targets.tolist()==[True,True,False,False,False]
+    targets=allocator.targets.copy()
+    defenders[1]=[0,14]  # A second defender sees an already known target.
+    _,replanned=allocator.update(defenders,attackers,alive,alive,20,2)
+    assert not replanned and np.array_equal(allocator.targets,targets)
+    defenders[0]=[60,0]  # The old edge disappears; retain the assignment until a trigger.
+    _,replanned=allocator.update(defenders,attackers,alive,alive,20,3)
+    assert not replanned and np.array_equal(allocator.targets,targets)
+    assert allocator.update(defenders,attackers,alive,alive,20,20)[1]
+    attacker_alive=alive.copy(); attacker_alive[0]=False
+    assert allocator.update(defenders,attackers,alive,attacker_alive,20,21,
+                            [{'type':'penetration'}])[1]
+    assert 0 not in allocator.targets
 
 
 def test_relative_actor_and_global_critic_state():
@@ -53,6 +99,25 @@ def test_relative_actor_and_global_critic_state():
     env.assignment.update(env.positions[0],env.positions[1],env.defender_alive,
                           env.attacker_alive,config.sensing_radius,1,[{'type':'capture'}])
     assert env.assignment.targets[0]==-1 and not env.observations()[0,-5:].any()
+
+
+def test_out_of_range_assignment_is_held_without_actor_position_leak():
+    config=InterceptionConfig(observation_layout='relative_assignment',
+                              assignment_method='distance_matching')
+    env=InterceptionEnv(config)
+    env.reset(seed=7)
+    env.positions[0,0]=[0,0]
+    env.positions[1,0]=[0,20]
+    env.positions[1,1:]=[90,90]
+    env.assignment.update(env.positions[0],env.positions[1],env.defender_alive,
+                          env.attacker_alive,config.sensing_radius,0)
+    assert env.assignment.targets[0]==0
+    env.positions[1,0]=[0,90]
+    _,replanned=env.assignment.update(env.positions[0],env.positions[1],env.defender_alive,
+                                      env.attacker_alive,config.sensing_radius,1)
+    assert not replanned and env.assignment.targets[0]==0
+    assert not env.observations()[0,-5:].any()
+    assert env.central_state()[50]==1
 
 
 def test_action_effect_on_distance_reward_is_delayed():
