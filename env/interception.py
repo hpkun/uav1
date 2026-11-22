@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 from gymnasium import spaces
+from assignment import NearestVisibleAssignment
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,7 @@ class InterceptionConfig:
     visible_attackers: int = 5
     visible_neighbors: int = 4
     observation_layout: str = 'absolute_no_base'
+    assignment_period: int = 20
     spawn_min_spacing: float = 8.0
     attack_mode: str = 'direct_rush'
     episode_protocol: str = 'resolve_all_one_penalty_trade'
@@ -47,8 +49,14 @@ class InterceptionConfig:
         if ((self.n_defenders,self.n_attackers)!=(5,5) or
                 (self.visible_neighbors,self.visible_attackers) not in ((3,3),(4,5))):
             raise ValueError('Interception requires five agents per side and a supported observation layout')
-        if self.observation_layout not in ('relative_with_base','absolute_no_base'):
+        if self.observation_layout not in ('relative_with_base','absolute_no_base','relative_assignment'):
             raise ValueError('Unsupported observation layout')
+        if self.observation_layout=='relative_assignment' and (
+                (self.visible_neighbors,self.visible_attackers)!=(4,5) or
+                self.episode_protocol!='resolve_all_one_penalty_trade'):
+            raise ValueError('Assignment layout requires the five-on-five one-to-one scenario')
+        if type(self.assignment_period) is not int or self.assignment_period < 1:
+            raise ValueError('assignment_period must be positive')
         if self.observation_layout=='relative_with_base' and (
                 self.communication_radius is None or not math.isfinite(self.communication_radius)
                 or self.communication_radius<=0):
@@ -86,9 +94,10 @@ class InterceptionEnv:
     """Five controlled defenders against five scripted attackers."""
     def __init__(self, config: InterceptionConfig | None = None):
         self.config = config or InterceptionConfig()
-        own_features=4 if self.config.observation_layout=='absolute_no_base' else 6
-        self.observation_dim = own_features+5*(self.config.visible_neighbors+self.config.visible_attackers)
-        self.state_dim = 5*self.observation_dim
+        self.assigned_layout = self.config.observation_layout == 'relative_assignment'
+        own_features=4 if self.config.observation_layout!='relative_with_base' else 6
+        self.observation_dim = own_features+5*(self.config.visible_neighbors+self.config.visible_attackers)+(5 if self.assigned_layout else 0)
+        self.state_dim = 75 if self.assigned_layout else 5*self.observation_dim
         self.observation_space = spaces.Box(-np.inf, np.inf, (5, self.observation_dim), np.float32)
         self.action_space = spaces.Box(-self.config.defender_acceleration_max,
                                        self.config.defender_acceleration_max, (5, 2), np.float32)
@@ -98,26 +107,35 @@ class InterceptionEnv:
         self.velocities = np.zeros_like(self.positions)
         self.attacker_alive = np.ones(5, bool)
         self.defender_alive = np.ones(5, bool)
+        self.assignment = NearestVisibleAssignment(self.config.assignment_period) if self.assigned_layout else None
         self.rng = np.random.default_rng()
         self.finished = True
 
     @property
     def contract(self):
-        return dict(schema='Interception/1', version='interception_1', n_agents=5,
+        return dict(schema='Interception/2' if self.assigned_layout else 'Interception/1',
+                    version='interception_2' if self.assigned_layout else 'interception_1', n_agents=5,
                     n_attackers=5, observation_dim=self.observation_dim, state_dim=self.state_dim, action_dim=2,
                     action_schema='world_acceleration_disk_si',
                     max_acceleration=self.config.defender_acceleration_max,
-                    reward_schema=('shared_capture_and_first_breach+local_shaping; team=global+mean(local_i)'
+                    reward_schema=('shared_capture_and_first_breach+assigned_target_approach+boundary; team=global+mean(local_i)'
+                                   if self.assigned_layout else
+                                   'shared_capture_and_first_breach+local_shaping; team=global+mean(local_i)'
                                    if self.config.episode_protocol in ('resolve_all_one_penalty_trade','resolve_all_one_penalty') else
                                    'shared_capture_and_breach+local_shaping; team=global+mean(local_i)'
                                    if self.config.episode_protocol=='resolve_all' else
                                    'r_i=global+local_i; team=global+mean(local_i)'),
-                    observation_schema=('self_xy_vxy_base_relative_xy_nearest_3_defenders_nearest_3_attackers_relative_xy_vxy_valid'
+                    observation_schema=('self_xy_vxy_visible_friend_and_attacker_relative_xy_relative_vxy_valid_assigned_target_relative_xy_relative_vxy_valid'
+                                        if self.assigned_layout else
+                                        'self_xy_vxy_base_relative_xy_nearest_3_defenders_nearest_3_attackers_relative_xy_vxy_valid'
                                         if self.observation_dim==36 else
                                         'self_xy_vxy_base_relative_xy_all_4_visible_defenders_all_5_visible_attackers_relative_xy_vxy_valid'
                                         if self.observation_dim==51 else
                                         'self_xy_vxy_all_4_visible_defenders_all_5_visible_attackers_absolute_xy_vxy_valid'),
-                    state_schema='five_defender_observations_in_agent_order',
+                    state_schema=('all_defender_and_attacker_xy_vxy_alive_assignment_matrix'
+                                  if self.assigned_layout else 'five_defender_observations_in_agent_order'),
+                    assignment_schema=(f'nearest_visible_periodic_or_event_{self.config.assignment_period}'
+                                       if self.assigned_layout else None),
                     implementation_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                     config=asdict(self.config))
 
@@ -155,24 +173,28 @@ class InterceptionEnv:
         self.mean_local_return = 0.0
         self.team_return = 0.0
         self.event_history = []
+        if self.assignment is not None:
+            self.assignment = NearestVisibleAssignment(self.config.assignment_period)
+            self.assignment.update(self.positions[0],self.positions[1],self.defender_alive,
+                                   self.attacker_alive,self.config.sensing_radius,0)
         return self.observations(), self._info([], 0.0, np.zeros(5), None)
 
     def observations(self):
         c = self.config
         out = np.zeros((5,self.observation_dim),dtype=np.float32)
         absolute=c.observation_layout=='absolute_no_base'
-        own_features=4 if absolute else 6
+        own_features=4 if c.observation_layout!='relative_with_base' else 6
         for i in range(5):
             if not self.defender_alive[i]:
                 continue
             own = self.positions[0, i]
             out[i, :2] = own / c.arena_half_extent
-            out[i, 2:4] = self.velocities[0, i] / (c.attacker_speed_max if absolute else c.defender_speed_max)
-            if not absolute:
+            out[i, 2:4] = self.velocities[0, i] / (c.defender_speed_max if self.assigned_layout else c.attacker_speed_max if absolute else c.defender_speed_max)
+            if c.observation_layout=='relative_with_base':
                 out[i, 4:6] = (self.base-own) / (2*c.arena_half_extent)
             groups = (([(j, self.positions[0,j], self.velocities[0,j]) for j in range(5)
                         if j != i and self.defender_alive[j]],
-                       c.sensing_radius if absolute else c.communication_radius, own_features, c.visible_neighbors),
+                       c.sensing_radius if c.observation_layout!='relative_with_base' else c.communication_radius, own_features, c.visible_neighbors),
                       ([(j, self.positions[1,j], self.velocities[1,j]) for j in range(5) if self.attacker_alive[j]],
                        c.sensing_radius, own_features+5*c.visible_neighbors, c.visible_attackers))
             for candidates, radius, start, slots in groups:
@@ -182,12 +204,31 @@ class InterceptionEnv:
                     if slot == slots:
                         break
                     k = start + slot*5
-                    out[i,k:k+2] = pos/c.arena_half_extent if absolute else (pos-own)/(2*c.arena_half_extent)
-                    out[i,k+2:k+4] = vel/c.attacker_speed_max if absolute else (vel-self.velocities[0,i])/c.attacker_speed_max
+                    out[i,k:k+2] = pos/c.arena_half_extent if absolute else (pos-own)/(c.sensing_radius if self.assigned_layout else 2*c.arena_half_extent)
+                    out[i,k+2:k+4] = (vel-self.velocities[0,i])/(c.defender_speed_max+c.attacker_speed_max) if self.assigned_layout else vel/c.attacker_speed_max if absolute else (vel-self.velocities[0,i])/c.attacker_speed_max
                     out[i,k+4] = 1.0
+            if self.assignment is not None:
+                target = self.assignment.targets[i]
+                if target >= 0:
+                    out[i,-5:-3] = (self.positions[1,target]-own)/c.sensing_radius
+                    out[i,-3:-1] = (self.velocities[1,target]-self.velocities[0,i])/(c.defender_speed_max+c.attacker_speed_max)
+                    out[i,-1] = 1.0
         return out
 
     def central_state(self):
+        if self.assignment is not None:
+            physical = []
+            for side,maximum,alive in ((0,self.config.defender_speed_max,self.defender_alive),
+                                       (1,self.config.attacker_speed_max,self.attacker_alive)):
+                rows=np.zeros((5,5),np.float32)
+                rows[alive,:2]=self.positions[side,alive]/self.config.arena_half_extent
+                rows[alive,2:4]=self.velocities[side,alive]/maximum
+                rows[:,4]=alive
+                physical.append(rows.ravel())
+            matrix=np.zeros((5,5),np.float32)
+            for i,j in enumerate(self.assignment.targets):
+                if self.defender_alive[i] and j>=0:matrix[i,j]=1
+            return np.concatenate((*physical,matrix.ravel()))
         return self.observations().reshape(self.state_dim).copy()
 
     def _attacker_actions(self):
@@ -226,6 +267,7 @@ class InterceptionEnv:
         before = self.positions.copy()
         alive_before = self.attacker_alive.copy()
         defenders_before = self.defender_alive.copy()
+        assigned_before = self.assignment.targets.copy() if self.assignment is not None else None
         actions = actions.copy()
         actions[~defenders_before] = 0
         attacker_actions = self._attacker_actions()
@@ -317,8 +359,10 @@ class InterceptionEnv:
         for i in range(5):
             if not defenders_before[i]:
                 continue
-            candidates = [j for j in np.flatnonzero(alive_before)
-                          if c.danger_weight or np.linalg.norm(before[0,i]-before[1,j]) <= c.sensing_radius]
+            candidates = ([int(assigned_before[i])] if assigned_before is not None and assigned_before[i]>=0 else
+                          [] if assigned_before is not None else
+                          [j for j in np.flatnonzero(alive_before)
+                           if c.danger_weight or np.linalg.norm(before[0,i]-before[1,j]) <= c.sensing_radius])
             if len(candidates):
                 target = min(candidates,key=lambda j:(np.linalg.norm(before[0,i]-before[1,j]),int(j)))
                 target_after = (self.positions[1,target] if c.episode_protocol!='first_breach' or c.danger_weight
@@ -340,7 +384,11 @@ class InterceptionEnv:
         self.mean_local_return += float(local.mean())
         self.team_return += global_reward+float(local.mean())
         self.event_history.extend(events)
+        if self.assignment is not None:
+            self.assignment.update(self.positions[0],self.positions[1],self.defender_alive,
+                                   self.attacker_alive,c.sensing_radius,self.step_count,events)
         info = self._info(events,global_reward,local,outcome,first_breach=first_breach)
+        if assigned_before is not None:info['reward_target_ids']=assigned_before.copy()
         info['reward_components']['approach'] = float(c.approach_weight*approach.mean())
         if not np.isclose(sum(info['reward_components'].values()), info['team_reward'],rtol=0,atol=1e-10):
             raise AssertionError('Interception reward ledger mismatch')
@@ -348,10 +396,12 @@ class InterceptionEnv:
         return self.observations(), (global_reward+local).astype(np.float32), outcome in ('penetrated','all_captured'), outcome=='time_limit', info
 
     def _info(self, events, global_reward, local_rewards, outcome, *, first_breach=False):
-        info = dict(version='interception_1', step=self.step_count, time_s=self.step_count*self.config.dt,
+        info = dict(version='interception_2' if self.assigned_layout else 'interception_1',
+                    step=self.step_count, time_s=self.step_count*self.config.dt,
                     attack_mode=self.config.attack_mode, central_state=self.central_state(),
                     active_masks=self.defender_alive.astype(np.float32),
                     defender_alive=self.defender_alive.copy(), attacker_alive=self.attacker_alive.copy(),
+                    assigned_target_ids=(self.assignment.targets.copy() if self.assignment is not None else None),
                     global_reward=float(global_reward), local_rewards=np.asarray(local_rewards,dtype=np.float64).copy(),
                     individual_rewards=(global_reward+local_rewards).copy(),
                     team_reward=float(global_reward+np.mean(local_rewards)), events=list(events),

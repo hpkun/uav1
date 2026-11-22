@@ -36,9 +36,11 @@ def digest(path):
 
 def read_config(env_path, algorithm_path=None):
     raw=yaml.safe_load(Path(env_path).read_text(encoding='utf-8'))
-    if not isinstance(raw,dict) or set(raw)!={'schema','environment'} or raw['schema']!='Interception/1':
-        raise ValueError('Expected Interception/1 environment configuration')
+    if not isinstance(raw,dict) or set(raw)!={'schema','environment'} or raw['schema'] not in ('Interception/1','Interception/2'):
+        raise ValueError('Expected supported interception environment configuration')
     config=InterceptionConfig(**raw['environment'])
+    if InterceptionEnv(config).contract['schema']!=raw['schema']:
+        raise ValueError('Configuration schema and observation layout disagree')
     if algorithm_path is None:return config,None,None
     learner=yaml.safe_load(Path(algorithm_path).read_text(encoding='utf-8'))
     if not isinstance(learner,dict) or set(learner)!={'algorithm','parameters','training'}:
@@ -46,6 +48,8 @@ def read_config(env_path, algorithm_path=None):
     name=learner['algorithm']
     if name not in ('mappo','maddpg','dual_critic'):
         raise ValueError('Unsupported interception algorithm')
+    if name=='dual_critic' and InterceptionEnv(config).contract['version']!='interception_1':
+        raise ValueError('Dual critic supports only Interception/1')
     parameters={'mappo':MAPPOConfig,'maddpg':MADDPGConfig,'dual_critic':DualCriticConfig}[name](**learner['parameters'])
     rollout=int(learner['training']['rollout_length'])
     if rollout<1:raise ValueError('rollout_length must be positive')
@@ -61,6 +65,8 @@ def make_policy(name,config,parameters,device,seed,environment_contract=None,env
     if name=='maddpg':
         return MADDPG(parameters,device,seed,environment_config=snapshot,environment_contract=contract)
     if name=='dual_critic':
+        if environment.contract['version']!='interception_1':
+            raise ValueError('Dual critic supports only Interception/1')
         return DualCritic(parameters,device,seed,environment_config=snapshot,environment_contract=contract)
     raise ValueError(name)
 
@@ -112,7 +118,7 @@ def evaluate_policy(config,policy,mode,episodes,seed_start):
         obs,info=env.reset(seed=seed)
         reward_components={}
         while True:
-            actions=policy.policy_actions(obs[None],np.ones((1,5),np.float32),deterministic=True)[0]
+            actions=policy.policy_actions(obs[None],info['active_masks'][None],deterministic=True)[0]
             obs,_,term,trunc,info=env.step(actions)
             for component,value in info['reward_components'].items():
                 reward_components[component]=reward_components.get(component,0.0)+value
@@ -195,6 +201,8 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
     config=replace(config,attack_mode=attack_mode)
     root=Path(output)
     environment=InterceptionEnv(config)
+    if name=='dual_critic' and environment.contract['version']!='interception_1':
+        raise ValueError('Dual critic supports only Interception/1')
     root.mkdir(parents=True,exist_ok=False)
     (root/'checkpoints').mkdir()
     settings=dict(schema='InterceptionRun/1',environment=asdict(config),environment_contract=InterceptionEnv(config).contract,

@@ -191,9 +191,12 @@ class MAPPO:
                 dict(observation_dim=observation_dim,state_dim=state_dim,n_agents=n_agents,action_dim=action_dim).items()):
             raise ValueError('MAPPO supplied environment dimensions mismatch')
         self.config = config
-        if (self.environment_contract.get('version')!='interception_1' or
+        version=self.environment_contract.get('version')
+        dims=(observation_dim,state_dim)
+        if (version not in ('interception_1','interception_2') or
+                (version=='interception_2' and dims!=(54,75)) or
                 self.environment_contract.get('action_schema')!='world_acceleration_disk_si'):
-            raise ValueError('MAPPO requires the Interception/1 action contract')
+            raise ValueError('MAPPO requires a supported interception action contract')
         self.action_transform=DISK_ACTION
         self.disk_radius=float(self.environment_contract['max_acceleration'])
         if not np.isfinite(self.disk_radius) or self.disk_radius<=0:

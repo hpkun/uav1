@@ -42,7 +42,7 @@
         <span><i class="swatch red"></i>防御方 D0–D4</span><span><i class="swatch blue"></i>进攻方 A0–A4</span>
         <span><i class="line"></i><span id="sensing-label">双方感知半径</span> <b id="sensing-value"></b></span><span><i class="line solid"></i>拦截半径 <b id="capture-value"></b></span>
         <span><i class="swatch purple"></i>目标区入侵范围</span>
-        <span>红色细线：防御方轨迹或友方感知连线</span><span>蓝色细线：进攻方轨迹或敌方感知连线</span>
+        <span>红色细线：防御方轨迹或友方感知连线</span><span>蓝色细线：进攻方轨迹或敌方感知连线</span><span>绿色点线：当前分配目标</span>
       </div>
     </div>
   </main>
@@ -69,7 +69,7 @@
   let index=0,timer=null;
   slider.max=frames.length-1;
   document.getElementById('sensing-value').textContent=`${cfg.sensing_radius} m`;
-  if(cfg.observation_layout!=='absolute_no_base')document.getElementById('sensing-label').textContent='进攻方感知半径';
+  if(cfg.observation_layout==='relative_with_base')document.getElementById('sensing-label').textContent='进攻方感知半径';
   document.getElementById('capture-value').textContent=`${cfg.capture_radius} m`;
 
   function circle(x,y,r,stroke,fill=null,width=2,dash=[]){
@@ -113,7 +113,7 @@
       document.getElementById('sensor-count').textContent=`D${selected} 已退出对局`;
       return;
     }
-    const friendRadius=cfg.observation_layout==='absolute_no_base'?cfg.sensing_radius:cfg.communication_radius;
+    const friendRadius=cfg.observation_layout==='relative_with_base'?cfg.communication_radius:cfg.sensing_radius;
     let friends=0,attackers=0;
     for(let side=0;side<2;side++)for(let i=0;i<5;i++){
       if(side===0&&(i===selected||row.defender_alive&&!row.defender_alive[i])||side===1&&!row.attacker_alive[i])continue;
@@ -145,8 +145,18 @@
       g.fillStyle='#172638';g.fillText((side===0?'D':'A')+i,x+dx,y+dy);
     }
   }
+  function assignmentLinks(row){
+    if(!row.assigned_target_ids)return;
+    for(let i=0;i<5;i++){
+      const j=row.assigned_target_ids[i];
+      if(j<0||!row.defender_alive[i]||!row.attacker_alive[j])continue;
+      const a=row.positions[0][i],b=row.positions[1][j];
+      g.beginPath();g.moveTo(sx(a[0]),sy(a[1]));g.lineTo(sx(b[0]),sy(b[1]));
+      g.strokeStyle='rgba(20,155,105,.8)';g.lineWidth=2.5;g.setLineDash([4,5]);g.stroke();g.setLineDash([]);
+    }
+  }
   function draw(){
-    const row=frames[index];background();trails();sensingLinks(row);vehicles(row);
+    const row=frames[index];background();trails();sensingLinks(row);assignmentLinks(row);vehicles(row);
     document.getElementById('status').textContent=`${d.mode} · seed ${d.seed} · 第 ${row.step}/${d.summary.steps} 步`;
     document.getElementById('time').textContent=`${row.time_s.toFixed(1)} s`;
     slider.value=index;

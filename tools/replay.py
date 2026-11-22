@@ -23,6 +23,7 @@ def collect(config,policy,mode,seed):
         return dict(step=step,time_s=step*config.dt,positions=env.positions.tolist(),
                     velocities=env.velocities.tolist(),attacker_alive=env.attacker_alive.tolist(),
                     defender_alive=env.defender_alive.tolist(),
+                    assigned_target_ids=(env.assignment.targets.tolist() if env.assignment is not None else None),
                     defender_actions=None if actions is None else np.asarray(actions).tolist())
 
     frames.append(frame(0))

@@ -2,11 +2,11 @@
 
 This project trains five defender UAVs to intercept five scripted attacker UAVs before they enter a protected area. Attackers spawn at the top of a 200 m square. Defenders spawn at the bottom; the protected circle is centered at `(0, -80)` m. Train `direct_rush` and `split_attack` in separate runs. Each attacker is resolved by capture or penetration; a new episode ends only after all five are resolved. A single penetration still makes the episode a defensive failure.
 
-The environment uses two-dimensional point-mass dynamics, continuous acceleration actions, local defender observations, and a centralized state assembled from those observations. Capture, penetration, boundary and timeout events are recorded explicitly. Reward coefficients in `configs/interception.yaml` are initial project choices; the cited paper does not publish their numerical values.
+The environment uses two-dimensional point-mass dynamics, continuous acceleration actions, local defender observations, and a centralized training state. Capture, penetration, boundary and timeout events are recorded explicitly. Reward coefficients in the environment configurations are initial project choices; the cited paper does not publish their numerical values.
 
-New actor observations include all four teammates and all five active attackers within the same 80 m sensing radius, with fixed zero-filled slots for out-of-range agents. Every observed UAV uses absolute world position and velocity; the base is not an actor input. The paper uses separate 60 m communication and 80 m sensing ranges and only the nearest three teammates and three attackers. The unified sensing radius and larger observation layout are project choices.
+`configs/interception_assignment.yaml` enables the `Interception/2` assignment interface. Each defender observes its own world position and velocity, the relative positions and relative velocities of all visible teammates and attackers, and the relative position and velocity of its selected target. All other positions/velocities have validity bits; the base is absent from the actor input. A nearest-visible allocator keeps each defender's target until a 20-step boundary or a visibility, capture, or penetration event requires replanning. Its first version permits multiple defenders to select the same attacker. The centralized critic receives physical state for all ten UAVs and the 5×5 assignment matrix. `configs/interception.yaml` retains the `Interception/1` absolute observation interface for historical runs.
 
-New training runs use one-to-one capture: the matched defender and attacker both leave the episode immediately. A defender can capture at most one attacker. Every defender receives the same task reward: `+20` for each attacker captured and `-100` once, at the first penetration in the episode. Later penetrations add no further penalty. Individual shaping is `-2` per defender boundary violation plus `+0.05` per metre of actual distance reduction to the nearest attacker visible before the step. That distance compares both UAV positions before and after the step, as in the cited papers. The MAPPO team reward is the shared task reward plus the mean of the five shaping rewards; each MADDPG critic uses the shared task reward plus its defender's shaping reward. Ignoring shaping and discounting, five captures yield `+100`, while four captures and one penetration yield `-20`; zero captures and five penetrations yield `-100`. Attackers unresolved at the 5000-step limit are counted as penetrations. Historical checkpoints keep their saved episode protocols, including the earlier `resolve_all_one_penalty` rule where defenders remained after capture, `resolve_all` with per-attacker penalties, and older first-breach termination.
+New training runs use one-to-one capture: the matched defender and attacker both leave the episode immediately. A defender can capture at most one attacker. Every defender receives the same task reward: `+20` for each attacker captured and `-100` once, at the first penetration in the episode. Later penetrations add no further penalty. Individual shaping is `-2` per defender boundary violation plus `+0.05` per metre of actual distance reduction. In `Interception/2`, distance is measured to the assigned target held before the step; `Interception/1` measures it to the nearest attacker visible before the step. Both UAVs' positions are compared before and after movement. Positions advance with the previous velocity and acceleration updates the next velocity, so the current action influences this distance reward from the following step. The MAPPO team reward is the shared task reward plus the mean of the five shaping rewards; each MADDPG critic uses the shared task reward plus its defender's shaping reward. Ignoring shaping and discounting, five captures yield `+100`, while four captures and one penetration yield `-20`; zero captures and five penetrations yield `-100`. Attackers unresolved at the 5000-step limit are counted as penetrations. Historical checkpoints keep their saved episode protocols, including the earlier `resolve_all_one_penalty` rule where defenders remained after capture, `resolve_all` with per-attacker penalties, and older first-breach termination.
 
 ## Commands
 
@@ -15,14 +15,14 @@ Run commands in PowerShell after activating the existing `uav` Conda environment
 ```powershell
 conda activate uav
 python -m experiment.cli preflight `
-  --env-config configs/interception.yaml `
+  --env-config configs/interception_assignment.yaml `
   --algorithm-config configs/mappo_interception.yaml `
   --algorithm mappo --attack-mode direct_rush `
   --total-sampled-steps 10000 --num-envs 4 `
   --output-dir runs/interception_plan
 
 python -m experiment.cli train `
-  --env-config configs/interception.yaml `
+  --env-config configs/interception_assignment.yaml `
   --algorithm-config configs/mappo_interception.yaml `
   --algorithm mappo --attack-mode direct_rush `
   --total-sampled-steps 10000 --num-envs 4 `
@@ -46,7 +46,7 @@ python -m experiment.cli report `
   --plot outputs/interception_example_curve.svg
 ```
 
-MAPPO and MADDPG are also available using `configs/mappo_interception.yaml` and `configs/maddpg_interception.yaml`. `configs/interception_smoke.yaml` limits episodes to 40 steps for interface checks only. Its checkpoint contract differs from the full scenario.
+MAPPO and MADDPG use `configs/mappo_interception.yaml` and `configs/maddpg_interception.yaml`. The dual-critic baseline currently supports `Interception/1` only. `configs/interception_smoke.yaml` limits episodes to 40 steps for interface checks only.
 
 Run each algorithm once with `--attack-mode direct_rush` and again with `--attack-mode split_attack`, using a new output directory each time. Periodic and independent evaluation, as well as replay, use the checkpoint's training mode. A mismatched or unsupported mode is rejected before any output is written.
 
