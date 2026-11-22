@@ -10,15 +10,27 @@ from .distance import DistanceAssignment
 
 
 def minimum_travel_time(distance, projected_speed, acceleration, speed_limit):
-    """Continuous accelerate-then-cruise lower bound along a fixed direction."""
+    """Continuous accelerate-then-cruise estimate along a fixed direction."""
     if distance <= 0:
         return 0.0
-    speed = min(speed_limit, max(0.0, projected_speed))
+    speed = float(np.clip(projected_speed, -speed_limit, speed_limit))
     acceleration_time = (speed_limit - speed) / acceleration
     acceleration_distance = speed * acceleration_time + .5 * acceleration * acceleration_time**2
     if distance <= acceleration_distance:
-        return 2 * distance / (np.sqrt(speed * speed + 2 * acceleration * distance) + speed)
+        root = np.sqrt(speed * speed + 2 * acceleration * distance)
+        return ((root - speed) / acceleration if speed < 0
+                else 2 * distance / (root + speed))
     return acceleration_time + (distance - acceleration_distance) / speed_limit
+
+
+def predict_boundary_point(attacker, base, breach_radius):
+    """Nominal entry point for a direct flight towards the protected center."""
+    toward_base = base - attacker
+    range_to_base = np.linalg.norm(toward_base)
+    if range_to_base <= breach_radius:
+        return None
+    direction = toward_base / range_to_base
+    return base - breach_radius * direction, range_to_base - breach_radius, direction
 
 
 class HuangGlobalAssignment(DistanceAssignment):
@@ -50,13 +62,10 @@ class HuangGlobalAssignment(DistanceAssignment):
         if replan:
             costs = np.full((5, 5), np.inf, dtype=np.float64)
             for j in np.flatnonzero(attacker_alive & detected_now):
-                toward_base = self.base - attackers[j]
-                range_to_base = np.linalg.norm(toward_base)
-                if range_to_base <= self.breach_radius:
+                prediction = predict_boundary_point(attackers[j], self.base, self.breach_radius)
+                if prediction is None:
                     continue
-                direction = toward_base / range_to_base
-                intercept = self.base - self.breach_radius * direction
-                attacker_distance = range_to_base - self.breach_radius
+                intercept, attacker_distance, direction = prediction
                 attacker_time = minimum_travel_time(
                     attacker_distance, np.dot(attacker_velocities[j], direction),
                     self.attacker_acceleration, self.attacker_speed)

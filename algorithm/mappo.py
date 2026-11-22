@@ -319,6 +319,9 @@ class MAPPO:
 
         actor_advantages = team_advantages[..., None].expand(-1, -1, self.n_agents)
         valid_advantages = actor_advantages[active_masks > 0.5]
+        advantage_raw_mean = float(valid_advantages.mean().cpu()) if valid_advantages.numel() else 0.0
+        advantage_raw_std = (float(valid_advantages.std(unbiased=False).cpu())
+                             if valid_advantages.numel() else 0.0)
         if valid_advantages.numel():
             actor_advantages = (
                 actor_advantages - valid_advantages.mean()
@@ -442,6 +445,9 @@ class MAPPO:
             metrics['value_norm_mean'] = self.value_normalizer.mean
             metrics['value_norm_std'] = self.value_normalizer.std
         metrics['policy_log_std_mean'] = float(self.actor.log_std.detach().mean().cpu())
+        metrics['policy_std_mean'] = float(self.actor.log_std.detach().clamp(-5.0, 1.0).exp().mean().cpu())
+        metrics['advantage_raw_mean'] = advantage_raw_mean
+        metrics['advantage_raw_std'] = advantage_raw_std
         if not np.all(np.isfinite(list(metrics.values()))):
             raise FloatingPointError(f"Non-finite MAPPO metrics: {metrics}")
         return metrics

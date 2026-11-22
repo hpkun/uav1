@@ -275,6 +275,14 @@ def test_new_interface_short_training_and_checkpoint(tmp_path,name,attack_mode):
     settings=json.loads((output/'settings.json').read_text(encoding='utf-8'))
     assert settings['environment_contract']['version']=='interception_2'
     assert json.loads((output/'summary.json').read_text(encoding='utf-8'))['updates']>0
+    update=json.loads((output/'updates.jsonl').read_text(encoding='utf-8').splitlines()[0])
+    assert {'actor_grad_norm','critic_grad_norm'} <= update.keys()
+    if name=='mappo':
+        assert {'policy_log_std_mean','policy_std_mean','advantage_raw_mean','advantage_raw_std'} <= update.keys()
+        assert update['policy_std_mean']>0
+    else:
+        assert {'q_mean','q_std','target_q_mean'} <= update.keys()
+        assert update['q_std']>=0
     restored,policy,algorithm,_,_=load_run(output,'Best','cpu')
     assert algorithm==name and restored.observation_layout=='relative_assignment'
     assert restored.attack_mode==attack_mode

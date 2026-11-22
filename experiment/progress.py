@@ -65,7 +65,10 @@ class ProgressLogger:
                 time_limit_rate=sum(row['outcome']=='time_limit' for row in rows)/n if n else None,
                 capture_efficiency=sum(row['captured_count'] for row in rows)/(5*n) if n else None,
                 mean_team_return=sum(row['team_return'] for row in rows)/n if n else None)}
-        keys=('actor_loss','critic_loss','entropy','approx_kl','td_abs')
+        keys=('actor_loss','critic_loss','entropy','approx_kl','td_abs',
+              'actor_grad_norm','critic_grad_norm','policy_log_std_mean','policy_std_mean',
+              'advantage_raw_mean','advantage_raw_std','q_mean','q_std','target_q_mean',
+              'explained_variance','clip_fraction','value_norm_std')
         learning={key:sum(values)/len(values) for key in keys
                   if (values:=[float(row[key]) for row in self.metrics
                                if row.get(key) is not None and math.isfinite(float(row[key]))])}
@@ -91,8 +94,7 @@ class ProgressLogger:
         learning=row['learning']
         if learning:
             detail='  learn: '+' '.join(f'{key}={_number(learning.get(key),4)}' for key in
-                ('actor_loss','critic_loss','entropy','approx_kl','explained_variance',
-                 'value_norm_std','policy_log_std_mean') if key in learning)
+                ('actor_loss','critic_loss','entropy','approx_kl','explained_variance') if key in learning)
             if 'td_abs' in learning:detail+=f" td_abs={_number(learning['td_abs'],4)}"
         else:
             detail='  learn: waiting for first update'
@@ -100,7 +102,11 @@ class ProgressLogger:
             detail+=f" | replay={row['replay_size']:,}"
             if row['warmup'] is not None and row['replay_size']<row['warmup']:
                 detail+=f"/{row['warmup']:,} warmup"
-        return header,recent,detail
+        diagnostics=('actor_grad_norm','critic_grad_norm','policy_log_std_mean','policy_std_mean',
+                     'advantage_raw_mean','advantage_raw_std','q_mean','q_std','target_q_mean',
+                     'clip_fraction','value_norm_std')
+        shown=[f'{key}={_number(learning[key],4)}' for key in diagnostics if key in learning]
+        return (header,recent,detail,'  diag: '+' '.join(shown)) if shown else (header,recent,detail)
 
     @staticmethod
     def evaluation(step,summaries):

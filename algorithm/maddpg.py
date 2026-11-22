@@ -105,6 +105,8 @@ class MADDPG:
             targets=torch.stack([b['rewards'][:,i]+self.config.gamma*(1-b['dones'])*b['next_active_masks'][:,i]*
                 critic(b['next_states'],next_actions) for i,critic in enumerate(self.target_critics)],1)
         q=torch.stack([critic(b['states'],b['actions']) for critic in self.critics],1)
+        active_q=q.detach()[mask.bool()]
+        active_targets=targets[mask.bool()]
         critic_loss=(((q-targets).square()*mask).sum()/mask.sum().clamp_min(1))
         if not torch.isfinite(critic_loss):raise FloatingPointError('Nonfinite MADDPG critic loss')
         self.critic_optimizer.zero_grad(set_to_none=True);critic_loss.backward()
@@ -134,6 +136,9 @@ class MADDPG:
         metrics=dict(actor_loss=float(np.mean(actor_losses)) if actor_losses else None,
             critic_loss=float(critic_loss.detach()),actor_grad_norm=float(np.mean(actor_grads)) if actor_grads else None,
             critic_grad_norm=float(critic_grad),td_abs=float(((q.detach()-targets).abs()*mask).sum()/mask.sum().clamp_min(1)),
+            q_mean=float(active_q.mean()) if active_q.numel() else 0.0,
+            q_std=float(active_q.std(unbiased=False)) if active_q.numel() else 0.0,
+            target_q_mean=float(active_targets.mean()) if active_targets.numel() else 0.0,
             actor_updates=self.actor_update_count,critic_updates=self.critic_update_count,
             target_updates=self.target_update_count,actor_optimizer_steps=sum(self.actor_optimizer_steps))
         if not np.isfinite([v for v in metrics.values() if v is not None]).all():raise FloatingPointError('Nonfinite MADDPG metrics')

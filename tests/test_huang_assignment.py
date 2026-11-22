@@ -1,12 +1,12 @@
 """Huang-style global matching without changing the existing controller."""
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 
 import numpy as np
 import pytest
 
 from assignment import HuangGlobalAssignment
-from assignment.huang import minimum_travel_time
+from assignment.huang import minimum_travel_time, predict_boundary_point
 from env.interception import InterceptionConfig, InterceptionEnv
 from experiment.interception import read_config
 
@@ -19,7 +19,48 @@ def test_travel_time_acceleration_and_cruise():
     assert minimum_travel_time(0, 0, 2, 5) == 0
     assert minimum_travel_time(1, 0, 2, 5) == pytest.approx(1)
     assert minimum_travel_time(10, 0, 2, 5) == pytest.approx(2.5 + (10 - 6.25) / 5)
-    assert minimum_travel_time(5, -3, 2, 5) == minimum_travel_time(5, 0, 2, 5)
+    assert minimum_travel_time(5, -3, 2, 5) > minimum_travel_time(5, 0, 2, 5)
+    assert minimum_travel_time(5, -3, 2, 5) == pytest.approx(4.2)
+
+
+def test_nominal_boundary_geometry():
+    point, distance, direction = predict_boundary_point(
+        np.array([0., 80]), np.array([0., -80]), 15)
+    np.testing.assert_allclose(point, [0, -65])
+    np.testing.assert_allclose(direction, [0, -1])
+    assert distance == pytest.approx(145)
+
+
+def test_safety_factor_accepts_equality_and_rejects_later_arrival():
+    defenders = np.array([[0., -30], [0, 0], [0, 0], [0, 0], [0, 0]])
+    attackers = np.array([[0., 50], [200, 200], [210, 210], [220, 220], [230, 230]])
+    defender_alive = np.array([True, False, False, False, False])
+    attacker_alive = np.array([True, False, False, False, False])
+    velocities = np.zeros((5, 2))
+    def assigned(factor):
+        targets, _ = allocator(factor=factor).update(
+            defenders, attackers, defender_alive, attacker_alive, 100, 0,
+            defender_velocities=velocities, attacker_velocities=velocities)
+        return targets[0]
+    assert assigned(1.0) == 0
+    assert assigned(1.001) == -1
+
+
+def test_reverse_velocity_changes_feasibility():
+    defenders = np.array([[0., -30], [0, 0], [0, 0], [0, 0], [0, 0]])
+    attackers = np.array([[0., 50], [200, 200], [210, 210], [220, 220], [230, 230]])
+    defender_alive = np.array([True, False, False, False, False])
+    attacker_alive = np.array([True, False, False, False, False])
+    velocities = np.zeros((5, 2))
+    reversed_velocities = velocities.copy()
+    reversed_velocities[0] = [0, -3]
+    def assigned(defender_velocities):
+        targets, _ = allocator(factor=1).update(
+            defenders, attackers, defender_alive, attacker_alive, 100, 0,
+            defender_velocities=defender_velocities, attacker_velocities=velocities)
+        return targets[0]
+    assert assigned(velocities) == 0
+    assert assigned(reversed_velocities) == -1
 
 
 @pytest.mark.parametrize('method', ('huang_boundary_distance', 'huang_intercept_time'))
@@ -90,3 +131,36 @@ def test_environment_and_checkpoint_contract_preserve_old_baseline():
     assert env.step(np.zeros((5, 2)))[0].shape == (5, 54)
     with pytest.raises(ValueError, match='direct_rush only'):
         replace(new, attack_mode='split_attack')
+
+
+def test_new_configs_only_change_assignment_choice():
+    configs = [read_config(path)[0] for path in (
+        'configs/interception_assignment.yaml',
+        'configs/interception_huang_global.yaml',
+        'configs/interception_huang_time.yaml')]
+    common = []
+    for config in configs:
+        values = asdict(config)
+        values.pop('assignment_method')
+        values.pop('assignment_safety_factor')
+        common.append(values)
+    assert common[0] == common[1] == common[2]
+
+
+def test_boundary_matching_differs_from_current_distance_matching():
+    from assignment import DistanceAssignment
+    defenders = np.array([[30.135, -15.853], [-6.723, -23.360], [39.446, -22.488],
+                          [21.710, -45.516], [-44.640, -34.236]])
+    attackers = np.array([[-12.920, 39.090], [42.676, 52.183], [14.387, 32.553],
+                          [32.276, 63.105], [-5.659, 55.267]])
+    defender_velocities = np.tile([0., 2], (5, 1))
+    attacker_velocities = np.tile([0., -2], (5, 1))
+    alive = np.ones(5, bool)
+    baseline, _ = DistanceAssignment(20).update(defenders, attackers, alive, alive, 100, 0)
+    huang, _ = HuangGlobalAssignment(
+        20, 'huang_boundary_distance', [0, -80], 15, 2, 5, 2, 5, 1.1).update(
+            defenders, attackers, alive, alive, 100, 0,
+            defender_velocities=defender_velocities,
+            attacker_velocities=attacker_velocities)
+    assert baseline.tolist() == [3, 4, 1, 2, 0]
+    assert huang.tolist() == [2, 4, 3, 1, 0]

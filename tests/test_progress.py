@@ -28,6 +28,28 @@ def test_single_mode_training_log_shows_only_its_mode():
     assert 'direct n=' not in line
 
 
+def test_network_diagnostics_survive_progress_aggregation():
+    for algorithm, metrics, expected in (
+        ('mappo', dict(actor_grad_norm=.2, critic_grad_norm=.3,
+                       policy_log_std_mean=-.5, policy_std_mean=.6,
+                       advantage_raw_mean=2., advantage_raw_std=3.,
+                       value_norm_std=4.), ('policy_std_mean=0.6000', 'advantage_raw_std=3.0000')),
+        ('maddpg', dict(actor_grad_norm=.4, critic_grad_norm=.5,
+                        q_mean=-2., q_std=1.5, target_q_mean=-1.),
+         ('q_mean=-2.0000', 'target_q_mean=-1.0000')),
+    ):
+        progress=ProgressLogger(algorithm,100,10,attack_mode='direct_rush',clock=lambda:1.0)
+        progress.update(metrics)
+        progress.update({key:value*2 for key,value in metrics.items()})
+        learning=progress.snapshot(10,0,2)['learning']
+        assert learning['actor_grad_norm']==pytest.approx(metrics['actor_grad_norm']*1.5)
+        diagnostics=ProgressLogger.lines(progress.snapshot(10,0,2))[3]
+        assert 'actor_grad_norm=' in diagnostics and 'critic_grad_norm=' in diagnostics
+        for label in expected:
+            key=label.split('=')[0]
+            assert key+'=' in diagnostics
+
+
 def test_five_percent_eval_schedule_and_reward_line_are_single_mode():
     assert evaluation_interval_for_budget(2_000_000,4)==100_000
     assert evaluation_interval_for_budget(101,1)==6
