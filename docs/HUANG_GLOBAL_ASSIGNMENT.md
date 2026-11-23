@@ -22,3 +22,7 @@ python -u -m experiment.cli train \
 ```
 
 建议将该结果标为 `Huang-inspired global matching + MADDPG`，并与 `distance_matching + MADDPG` 使用相同训练预算和评估种子比较。
+
+## 36 维 Actor 观测对照
+
+`configs/interception_huang_global_target_velocity.yaml` 使用独立的 `Interception/3` 合同。Actor 输入为自身位置和速度 4 维、4 个友机与 5 个进攻机各自的相对位置及有效位共 27 维、保持原样的分配目标相对位置/相对速度/有效位 5 维，总计 36 维。普通可见对象的速度不进入 Actor；分配器仍按真实速度计算到达时间。MAPPO 和 MADDPG 的 Critic 仍访问相同的 75 维全局状态（双方位置、速度、存活位和分配矩阵），MADDPG Critic 还接收联合动作。这遵循 CTDE：执行时的局部信息可以简化，而训练时的价值估计继续使用全局动力学信息。原 54 维 `Interception/2` 配置及 checkpoint 合同不变。新旧观测版本的模型不能互换加载。

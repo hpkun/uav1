@@ -36,7 +36,7 @@ def digest(path):
 
 def read_config(env_path, algorithm_path=None):
     raw=yaml.safe_load(Path(env_path).read_text(encoding='utf-8'))
-    if not isinstance(raw,dict) or set(raw)!={'schema','environment'} or raw['schema'] not in ('Interception/1','Interception/2'):
+    if not isinstance(raw,dict) or set(raw)!={'schema','environment'} or raw['schema'] not in ('Interception/1','Interception/2','Interception/3'):
         raise ValueError('Expected supported interception environment configuration')
     config=InterceptionConfig(**raw['environment'])
     if InterceptionEnv(config).contract['schema']!=raw['schema']:
@@ -86,7 +86,7 @@ def load_run(checkpoint,label='Best',device='cpu'):
     restored_environment=dict(saved_environment)
     if 'observation_layout' not in restored_environment:
         restored_environment['observation_layout']='relative_with_base'
-    if restored_environment['observation_layout']=='relative_assignment':
+    if restored_environment['observation_layout'] in ('relative_assignment','relative_assignment_target_velocity'):
         restored_environment.setdefault('assignment_method','nearest_visible_legacy')
     restored_environment.setdefault('episode_protocol','first_breach')
     config=replace(InterceptionConfig(**restored_environment),

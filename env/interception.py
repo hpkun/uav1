@@ -53,12 +53,13 @@ class InterceptionConfig:
         if ((self.n_defenders,self.n_attackers)!=(5,5) or
                 (self.visible_neighbors,self.visible_attackers) not in ((3,3),(4,5))):
             raise ValueError('Interception requires five agents per side and a supported observation layout')
-        if self.observation_layout not in ('relative_with_base','absolute_no_base','relative_assignment'):
+        if self.observation_layout not in ('relative_with_base','absolute_no_base','relative_assignment',
+                                           'relative_assignment_target_velocity'):
             raise ValueError('Unsupported observation layout')
         if self.approach_weight is None:
             object.__setattr__(self, 'approach_weight',
-                               0.5 if self.observation_layout == 'relative_assignment' else 0.05)
-        if self.observation_layout=='relative_assignment' and (
+                               0.5 if self.observation_layout in ('relative_assignment','relative_assignment_target_velocity') else 0.05)
+        if self.observation_layout in ('relative_assignment','relative_assignment_target_velocity') and (
                 (self.visible_neighbors,self.visible_attackers)!=(4,5) or
                 self.episode_protocol!='resolve_all_one_penalty_trade'):
             raise ValueError('Assignment layout requires the five-on-five one-to-one scenario')
@@ -77,7 +78,7 @@ class InterceptionConfig:
             raise ValueError('Unknown attack mode')
         if self.assignment_method.startswith('huang_') and self.attack_mode != 'direct_rush':
             raise ValueError('Huang global assignment currently supports direct_rush only')
-        if self.assignment_method.startswith('huang_') and self.observation_layout != 'relative_assignment':
+        if self.assignment_method.startswith('huang_') and self.observation_layout not in ('relative_assignment','relative_assignment_target_velocity'):
             raise ValueError('Huang global assignment requires relative_assignment observations')
         if self.episode_protocol not in ('resolve_all_one_penalty_trade', 'resolve_all_one_penalty', 'resolve_all', 'first_breach'):
             raise ValueError('Unknown episode protocol')
@@ -114,9 +115,12 @@ class InterceptionEnv:
     """Five controlled defenders against five scripted attackers."""
     def __init__(self, config: InterceptionConfig | None = None):
         self.config = config or InterceptionConfig()
-        self.assigned_layout = self.config.observation_layout == 'relative_assignment'
+        self.assigned_layout = self.config.observation_layout in ('relative_assignment','relative_assignment_target_velocity')
+        self.target_velocity_layout = self.config.observation_layout == 'relative_assignment_target_velocity'
         own_features=4 if self.config.observation_layout!='relative_with_base' else 6
-        self.observation_dim = own_features+5*(self.config.visible_neighbors+self.config.visible_attackers)+(5 if self.assigned_layout else 0)
+        self.observation_dim = (own_features+(3 if self.target_velocity_layout else 5)*
+                                (self.config.visible_neighbors+self.config.visible_attackers)+
+                                (5 if self.assigned_layout else 0))
         self.state_dim = 75 if self.assigned_layout else 5*self.observation_dim
         self.observation_space = spaces.Box(-np.inf, np.inf, (5, self.observation_dim), np.float32)
         self.action_space = spaces.Box(-self.config.defender_acceleration_max,
@@ -133,8 +137,8 @@ class InterceptionEnv:
 
     @property
     def contract(self):
-        return dict(schema='Interception/2' if self.assigned_layout else 'Interception/1',
-                    version='interception_2' if self.assigned_layout else 'interception_1', n_agents=5,
+        return dict(schema='Interception/3' if self.target_velocity_layout else 'Interception/2' if self.assigned_layout else 'Interception/1',
+                    version='interception_3' if self.target_velocity_layout else 'interception_2' if self.assigned_layout else 'interception_1', n_agents=5,
                     n_attackers=5, observation_dim=self.observation_dim, state_dim=self.state_dim, action_dim=2,
                     action_schema='world_acceleration_disk_si',
                     max_acceleration=self.config.defender_acceleration_max,
@@ -145,7 +149,9 @@ class InterceptionEnv:
                                    'shared_capture_and_breach+local_shaping; team=global+mean(local_i)'
                                    if self.config.episode_protocol=='resolve_all' else
                                    'r_i=global+local_i; team=global+mean(local_i)'),
-                    observation_schema=('self_xy_vxy_visible_friend_and_attacker_relative_xy_relative_vxy_valid_assigned_target_relative_xy_relative_vxy_valid'
+                    observation_schema=('self_xy_vxy_visible_friend_and_attacker_relative_xy_valid_assigned_target_relative_xy_relative_vxy_valid'
+                                        if self.target_velocity_layout else
+                                        'self_xy_vxy_visible_friend_and_attacker_relative_xy_relative_vxy_valid_assigned_target_relative_xy_relative_vxy_valid'
                                         if self.assigned_layout else
                                         'self_xy_vxy_base_relative_xy_nearest_3_defenders_nearest_3_attackers_relative_xy_vxy_valid'
                                         if self.observation_dim==36 else
@@ -241,21 +247,23 @@ class InterceptionEnv:
             out[i, 2:4] = self.velocities[0, i] / (c.defender_speed_max if self.assigned_layout else c.attacker_speed_max if absolute else c.defender_speed_max)
             if c.observation_layout=='relative_with_base':
                 out[i, 4:6] = (self.base-own) / (2*c.arena_half_extent)
+            slot_width=3 if self.target_velocity_layout else 5
             groups = (([(j, self.positions[0,j], self.velocities[0,j]) for j in range(5)
                         if j != i and self.defender_alive[j]],
                        c.sensing_radius if c.observation_layout!='relative_with_base' else c.communication_radius, own_features, c.visible_neighbors),
                       ([(j, self.positions[1,j], self.velocities[1,j]) for j in range(5) if self.attacker_alive[j]],
-                       c.sensing_radius, own_features+5*c.visible_neighbors, c.visible_attackers))
+                       c.sensing_radius, own_features+slot_width*c.visible_neighbors, c.visible_attackers))
             for candidates, radius, start, slots in groups:
                 nearest = sorted(((float(np.linalg.norm(p-own)),j,p,v) for j,p,v in candidates),
                                  key=lambda row:(row[0],row[1]))
                 for slot, (distance, _, pos, vel) in enumerate(row for row in nearest if row[0] <= radius):
                     if slot == slots:
                         break
-                    k = start + slot*5
+                    k = start + slot*slot_width
                     out[i,k:k+2] = pos/c.arena_half_extent if absolute else (pos-own)/(c.sensing_radius if self.assigned_layout else 2*c.arena_half_extent)
-                    out[i,k+2:k+4] = (vel-self.velocities[0,i])/(c.defender_speed_max+c.attacker_speed_max) if self.assigned_layout else vel/c.attacker_speed_max if absolute else (vel-self.velocities[0,i])/c.attacker_speed_max
-                    out[i,k+4] = 1.0
+                    if not self.target_velocity_layout:
+                        out[i,k+2:k+4] = (vel-self.velocities[0,i])/(c.defender_speed_max+c.attacker_speed_max) if self.assigned_layout else vel/c.attacker_speed_max if absolute else (vel-self.velocities[0,i])/c.attacker_speed_max
+                    out[i,k+slot_width-1] = 1.0
             if self.assignment is not None:
                 target = self.assignment.targets[i]
                 if target >= 0 and (self.config.assignment_method == 'nearest_visible_legacy' or
@@ -445,7 +453,7 @@ class InterceptionEnv:
         return self.observations(), (global_reward+local).astype(np.float32), outcome in ('penetrated','all_captured'), outcome=='time_limit', info
 
     def _info(self, events, global_reward, local_rewards, outcome, *, first_breach=False):
-        info = dict(version='interception_2' if self.assigned_layout else 'interception_1',
+        info = dict(version='interception_3' if self.target_velocity_layout else 'interception_2' if self.assigned_layout else 'interception_1',
                     step=self.step_count, time_s=self.step_count*self.config.dt,
                     attack_mode=self.config.attack_mode, central_state=self.central_state(),
                     active_masks=self.defender_alive.astype(np.float32),
