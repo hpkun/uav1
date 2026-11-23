@@ -68,7 +68,7 @@ def _worker(pipe,config,attack_mode):
 
 class ParallelInterceptionEnvs:
     def __init__(self,num_envs,config:InterceptionConfig,*,seed=0,attack_mode='direct_rush'):
-        if num_envs<1 or attack_mode not in ('direct_rush','split_attack'):
+        if num_envs<1 or attack_mode not in ('direct_rush','split_attack','jia_straight'):
             raise ValueError('Invalid sampler configuration')
         self.num_envs=num_envs
         self.seed=seed

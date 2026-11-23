@@ -61,7 +61,9 @@ class MADDPG:
                 (contract.get('version'),contract.get('observation_dim'),contract.get('state_dim')) not in
                 (('interception_1',36,180),('interception_1',51,255),('interception_1',49,245),
                  ('interception_2',54,75),('interception_3',36,75),
-                 ('interception_4',54,75),('interception_4',36,75)) or
+                 ('interception_4',54,75),('interception_4',36,75),
+                 ('interception_5',54,75),('interception_5',36,75),
+                 ('interception_6',36,75),('interception_7',36,75)) or
                 any(contract.get(k)!=v for k,v in dict(n_agents=5,action_dim=2).items()) or
                 contract.get('action_schema')!='world_acceleration_disk_si' or
                 not isinstance(contract.get('max_acceleration'),(int,float)) or contract['max_acceleration']<=0):

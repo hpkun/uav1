@@ -61,7 +61,9 @@ def validate_trace(trace):
             raise ValueError('Replay defender status is incomplete')
         if len({event['defender'] for event in events if event['type']=='capture'})!=summary['captured_count']:
             raise ValueError('A defender captured more than one attacker')
-        if 5-sum(frames[-1]['defender_alive'])!=summary['captured_count']:
+        expected_retired = summary['captured_count'] + (summary['defender_oob_count']
+                            if trace['config'].get('defender_oob_retire') else 0)
+        if 5-sum(frames[-1]['defender_alive'])!=expected_retired:
             raise ValueError('Retired defenders disagree with captures')
     return trace
 
@@ -82,7 +84,7 @@ def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--checkpoint',type=Path,required=True)
     p.add_argument('--label',choices=('Best','Last'),default='Best')
-    p.add_argument('--attack-mode',choices=('direct_rush','split_attack'),required=True)
+    p.add_argument('--attack-mode',choices=('direct_rush','split_attack','jia_straight'),required=True)
     p.add_argument('--seed',type=int,default=900001)
     p.add_argument('--device',choices=('cpu','cuda'),default='cpu')
     p.add_argument('--frame-stride',type=int,default=5)

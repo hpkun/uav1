@@ -37,7 +37,7 @@ def digest(path):
 
 def read_config(env_path, algorithm_path=None):
     raw=yaml.safe_load(Path(env_path).read_text(encoding='utf-8'))
-    if not isinstance(raw,dict) or set(raw)!={'schema','environment'} or raw['schema'] not in ('Interception/1','Interception/2','Interception/3','Interception/4'):
+    if not isinstance(raw,dict) or set(raw)!={'schema','environment'} or raw['schema'] not in ('Interception/1','Interception/2','Interception/3','Interception/4','Interception/5','Interception/6','Interception/7'):
         raise ValueError('Expected supported interception environment configuration')
     config=InterceptionConfig(**raw['environment'])
     if InterceptionEnv(config).contract['schema']!=raw['schema']:
@@ -86,7 +86,7 @@ def load_run(checkpoint,label='Best',device='cpu'):
     root=Path(checkpoint)
     if root.is_file():root=root.parent.parent if root.parent.name=='checkpoints' else root.parent
     settings=json.loads((root/'settings.json').read_text(encoding='utf-8'))
-    if settings.get('attack_mode') not in ('direct_rush','split_attack'):
+    if settings.get('attack_mode') not in ('direct_rush','split_attack','jia_straight'):
         raise ValueError('Checkpoint training attack mode is unsupported')
     saved_environment=settings['environment']
     restored_environment=dict(saved_environment)
@@ -112,7 +112,7 @@ def load_run(checkpoint,label='Best',device='cpu'):
 
 def require_matching_attack_mode(settings,requested):
     trained=settings.get('attack_mode')
-    if trained not in ('direct_rush','split_attack') or requested!=trained:
+    if trained not in ('direct_rush','split_attack','jia_straight') or requested!=trained:
         raise ValueError(f'Checkpoint trained for {trained}; requested attack mode {requested}')
 
 
@@ -200,7 +200,7 @@ def evaluation_interval_for_budget(steps,num_envs):
 
 def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mode,output,
           eval_interval=None,eval_episodes=10,log_every_steps=10000,replay_config=None):
-    if num_envs<1 or steps<1 or steps%num_envs or log_every_steps<1 or attack_mode not in ('direct_rush','split_attack'):
+    if num_envs<1 or steps<1 or steps%num_envs or log_every_steps<1 or attack_mode not in ('direct_rush','split_attack','jia_straight'):
         raise ValueError('Invalid training budget or attack mode')
     if eval_interval is None:
         eval_interval=evaluation_interval_for_budget(steps,num_envs)

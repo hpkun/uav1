@@ -170,7 +170,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--checkpoint', type=Path, required=True)
     parser.add_argument('--label', choices=('Best', 'Last'), default='Last')
-    parser.add_argument('--attack-mode', choices=('direct_rush', 'split_attack'), required=True)
+    parser.add_argument('--attack-mode', choices=('direct_rush', 'split_attack', 'jia_straight'), required=True)
     parser.add_argument('--seed', type=int, default=600000)
     parser.add_argument('--episodes', type=int, default=5)
     parser.add_argument('--device', choices=('cpu', 'cuda'), default='cpu')

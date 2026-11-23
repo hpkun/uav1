@@ -69,9 +69,16 @@ def test_heading_requires_assignment_layout():
         InterceptionConfig(heading_weight=0.3)
 
 
+def test_new_experiment_changes_only_approach_weight():
+    old, _, _ = read_config('configs/interception_huang_global_target_velocity_heading.yaml')
+    new, _, _ = read_config('configs/interception_huang_global_target_velocity_heading_approach005.yaml')
+    assert old.approach_weight == 0.5
+    assert new == replace(old, approach_weight=0.05)
+
+
 @pytest.mark.parametrize('replay_mode', ('uniform', 'critic_per_with_uniform'))
 def test_heading_training_and_checkpoint_with_both_replay_modes(tmp_path, replay_mode):
-    config, _, _ = read_config('configs/interception_huang_global_target_velocity_heading.yaml')
+    config, _, _ = read_config('configs/interception_huang_global_target_velocity_heading_approach005.yaml')
     config = replace(config, episode_steps=2)
     parameters = MADDPGConfig(hidden_dim=16, batch_size=2, buffer_capacity=8,
                               learning_starts=2, update_interval_steps=2,
@@ -86,7 +93,7 @@ def test_heading_training_and_checkpoint_with_both_replay_modes(tmp_path, replay
     evaluation = json.loads((output / 'evaluations.jsonl').read_text(encoding='utf-8').strip())
     assert 'heading' in evaluation['modes']['direct_rush']['mean_reward_components']
     restored, policy, name, _, _ = load_run(output, 'Last', 'cpu')
-    assert name == 'maddpg' and restored.heading_weight == 0.03
+    assert name == 'maddpg' and restored.heading_weight == 0.03 and restored.approach_weight == 0.05
     env = InterceptionEnv(restored)
     observations, info = env.reset(seed=8)
     assert policy.policy_actions(observations[None], info['active_masks'][None]).shape == (1, 5, 2)

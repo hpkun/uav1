@@ -26,7 +26,7 @@ def _duration(seconds):
 
 class ProgressLogger:
     def __init__(self,algorithm,total_steps,interval,*,attack_mode,window=100,clock=time.monotonic):
-        if interval<1 or attack_mode not in ('direct_rush','split_attack'):
+        if interval<1 or attack_mode not in ('direct_rush','split_attack','jia_straight'):
             raise ValueError('Invalid log interval or attack mode')
         self.algorithm=algorithm
         self.attack_mode=attack_mode
@@ -91,7 +91,7 @@ class ProgressLogger:
                 f" | episodes {row['episodes']} | updates {row['updates']}"
                 f" | {row['steps_per_s']:.0f} steps/s | ETA {_duration(row['eta_s'])}")
         mode=row['attack_mode']
-        label='direct' if mode=='direct_rush' else 'split'
+        label={'direct_rush':'direct','split_attack':'split','jia_straight':'jia'}[mode]
         value=row['recent'][mode]
         recent=(f"  recent {row['recent_window']}: {label} n={value['episodes']}"
                 f" all={_percent(value['all_capture_rate'])} breach={_percent(value['penetration_rate'])}"
@@ -131,7 +131,7 @@ class ProgressLogger:
         if len(summaries)!=1:
             raise ValueError('Periodic evaluation must contain only the training attack mode')
         mode,row=next(iter(summaries.items()))
-        label='direct' if mode=='direct_rush' else 'split'
+        label={'direct_rush':'direct','split_attack':'split','jia_straight':'jia'}[mode]
         status=(f'[eval {step:,}] {label}: all={_percent(row["all_capture_rate"])}'
                 f' breach={_percent(row["penetration_rate"])}'
                 f' cap={_percent(row["capture_efficiency"])} ({row["episodes"]} eps)')
