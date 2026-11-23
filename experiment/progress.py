@@ -68,7 +68,13 @@ class ProgressLogger:
         keys=('actor_loss','critic_loss','entropy','approx_kl','td_abs',
               'actor_grad_norm','critic_grad_norm','policy_log_std_mean','policy_std_mean',
               'advantage_raw_mean','advantage_raw_std','q_mean','q_std','target_q_mean',
-              'explained_variance','clip_fraction','value_norm_std')
+              'explained_variance','clip_fraction','value_norm_std',
+              'per_beta','per_is_weight_mean','per_is_weight_min','per_is_ess',
+              'per_priority_mean','per_priority_max','per_critic_grad_clipped',
+              'per_buffer_capture_fraction','per_sample_capture_fraction',
+              'per_buffer_first_breach_fraction','per_sample_first_breach_fraction',
+              'per_buffer_boundary_fraction','per_sample_boundary_fraction',
+              'per_buffer_ordinary_fraction','per_sample_ordinary_fraction')
         learning={key:sum(values)/len(values) for key in keys
                   if (values:=[float(row[key]) for row in self.metrics
                                if row.get(key) is not None and math.isfinite(float(row[key]))])}
@@ -106,7 +112,19 @@ class ProgressLogger:
                      'advantage_raw_mean','advantage_raw_std','q_mean','q_std','target_q_mean',
                      'clip_fraction','value_norm_std')
         shown=[f'{key}={_number(learning[key],4)}' for key in diagnostics if key in learning]
-        return (header,recent,detail,'  diag: '+' '.join(shown)) if shown else (header,recent,detail)
+        lines=[header,recent,detail]
+        if shown:lines.append('  diag: '+' '.join(shown))
+        if 'per_beta' in learning:
+            lines.append('  per: beta='+_number(learning['per_beta'],3)+
+                         ' is_ess='+_number(learning.get('per_is_ess'),3)+
+                         ' is_mean='+_number(learning.get('per_is_weight_mean'),3)+
+                         ' priority='+_number(learning.get('per_priority_mean'),3)+
+                         ' grad_clip='+_percent(learning.get('per_critic_grad_clipped')))
+            events=' '.join(name+'='+_percent(learning.get('per_sample_'+name+'_fraction'))+
+                            '/'+_percent(learning.get('per_buffer_'+name+'_fraction'))
+                            for name in ('capture','first_breach','boundary','ordinary'))
+            lines.append('  per samples/buffer: '+events)
+        return tuple(lines)
 
     @staticmethod
     def evaluation(step,summaries):

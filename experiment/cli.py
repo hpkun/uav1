@@ -9,6 +9,7 @@ from env.interception import InterceptionEnv
 
 from .interception import (evaluate_policy,evaluation_interval_for_budget,load_run,read_config,require_matching_attack_mode,
                            summarize,train,write_json)
+from .prioritized_replay import ReplayConfig
 
 
 def parser():
@@ -51,6 +52,12 @@ def main(argv=None):
         config=replace(config,attack_mode=args.attack_mode)
         data=yaml.safe_load(args.algorithm_config.read_text(encoding='utf-8'))
         if data['algorithm']!=args.algorithm:raise ValueError('Algorithm config mismatch')
+        replay_config=ReplayConfig.from_mapping(data['training'].get('replay'))
+        if args.algorithm!='maddpg' and replay_config.mode!='uniform':
+            raise ValueError('Prioritized replay supports MADDPG only')
+        if (replay_config.mode!='uniform' and not
+                0<round(parameters.batch_size*replay_config.prioritized_fraction)<parameters.batch_size):
+            raise ValueError('MADDPG replay batch needs both sampling components')
         if args.total_sampled_steps<1 or args.num_envs<1 or args.total_sampled_steps%args.num_envs:
             raise ValueError('Sampled steps must be positive and divisible by num-envs')
         if (args.eval_interval is not None and args.eval_interval<0 or
@@ -67,13 +74,14 @@ def main(argv=None):
                   num_envs=args.num_envs,rollout_length=rollout,log_every_steps=args.log_every_steps,
                   eval_interval=eval_interval,eval_episodes=args.eval_episodes,
                   output=str(args.output_dir.resolve()))
+        if replay_config.mode!='uniform':plan['replay']=vars(replay_config)
         if args.command=='preflight':
             print(json.dumps(plan,ensure_ascii=False,indent=2))
             return plan
         return train(config,parameters,rollout,args.algorithm,steps=args.total_sampled_steps,num_envs=args.num_envs,
                      seed=args.seed,device=args.device,attack_mode=args.attack_mode,output=args.output_dir,
                      eval_interval=eval_interval,eval_episodes=args.eval_episodes,
-                     log_every_steps=args.log_every_steps)
+                     log_every_steps=args.log_every_steps,replay_config=replay_config)
     if args.command=='evaluate':
         if args.output_dir.exists():raise FileExistsError(args.output_dir)
         if args.episodes_per_mode<1 or args.seed<0:raise ValueError('Invalid evaluation count or seed')

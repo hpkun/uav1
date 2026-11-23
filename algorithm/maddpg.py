@@ -99,8 +99,14 @@ class MADDPG:
             raise ValueError('MADDPG actions exceed physical disk')
         return b
 
-    def update(self,batch):
+    def update(self,batch,*,actor_batch=None,critic_weights=None,return_td_errors=False):
         b=self._batch(batch);mask=b['active_masks']
+        actor_data=b if actor_batch is None else self._batch(actor_batch)
+        actor_mask=actor_data['active_masks']
+        if critic_weights is not None:
+            weights=torch.as_tensor(critic_weights,dtype=torch.float32,device=self.device)
+            if weights.shape!=(len(mask),) or not torch.isfinite(weights).all() or (weights<=0).any():
+                raise ValueError('Invalid MADDPG importance weights')
         with torch.no_grad():
             next_actions=self._joint(b['next_observations'],b['next_active_masks'],target=True)
             targets=torch.stack([b['rewards'][:,i]+self.config.gamma*(1-b['dones'])*b['next_active_masks'][:,i]*
@@ -108,20 +114,24 @@ class MADDPG:
         q=torch.stack([critic(b['states'],b['actions']) for critic in self.critics],1)
         active_q=q.detach()[mask.bool()]
         active_targets=targets[mask.bool()]
-        critic_loss=(((q-targets).square()*mask).sum()/mask.sum().clamp_min(1))
+        td=q-targets
+        td_errors=(td.detach().abs()*mask).sum(dim=1)/mask.sum(dim=1).clamp_min(1)
+        squared=td.square()*mask
+        if critic_weights is not None:squared=squared*weights[:,None]
+        critic_loss=squared.sum()/mask.sum().clamp_min(1)
         if not torch.isfinite(critic_loss):raise FloatingPointError('Nonfinite MADDPG critic loss')
         self.critic_optimizer.zero_grad(set_to_none=True);critic_loss.backward()
         critic_grad=nn.utils.clip_grad_norm_(self.critics.parameters(),self.config.critic_max_grad_norm)
         self.critic_optimizer.step();self.critic_update_count+=1
-        with torch.no_grad():joint=self._joint(b['observations'],mask).detach()
+        with torch.no_grad():joint=self._joint(actor_data['observations'],actor_mask).detach()
         actor_losses=[];actor_grads=[]
         self.critics.requires_grad_(False)
         try:
             for i,(actor,opt) in enumerate(zip(self.actors,self.actor_optimizers)):
-                active=mask[:,i].bool()
+                active=actor_mask[:,i].bool()
                 if not active.any():continue
-                candidate=joint[active].clone();candidate[:,i]=actor(b['observations'][active,i])
-                loss=-self.critics[i](b['states'][active],candidate).mean()
+                candidate=joint[active].clone();candidate[:,i]=actor(actor_data['observations'][active,i])
+                loss=-self.critics[i](actor_data['states'][active],candidate).mean()
                 if not torch.isfinite(loss):raise FloatingPointError('Nonfinite MADDPG actor loss')
                 opt.zero_grad(set_to_none=True);loss.backward()
                 grad=nn.utils.clip_grad_norm_(actor.parameters(),self.config.actor_max_grad_norm)
@@ -143,7 +153,7 @@ class MADDPG:
             actor_updates=self.actor_update_count,critic_updates=self.critic_update_count,
             target_updates=self.target_update_count,actor_optimizer_steps=sum(self.actor_optimizer_steps))
         if not np.isfinite([v for v in metrics.values() if v is not None]).all():raise FloatingPointError('Nonfinite MADDPG metrics')
-        return metrics
+        return (metrics,td_errors.cpu().numpy()) if return_td_errors else metrics
 
     def save(self,path,*,global_step,environment_config):
         if environment_config!=self.environment_config:raise ValueError('MADDPG environment mismatch at save')

@@ -18,6 +18,7 @@ from algorithm.dual_critic import DualCritic, DualCriticConfig
 from env.interception import InterceptionConfig, InterceptionEnv
 from env.parallel import ParallelInterceptionEnvs
 from .progress import ProgressLogger
+from .prioritized_replay import PrioritizedReplayBuffer, ReplayConfig
 
 
 def write_json(path, value):
@@ -53,6 +54,11 @@ def read_config(env_path, algorithm_path=None):
     parameters={'mappo':MAPPOConfig,'maddpg':MADDPGConfig,'dual_critic':DualCriticConfig}[name](**learner['parameters'])
     rollout=int(learner['training']['rollout_length'])
     if rollout<1:raise ValueError('rollout_length must be positive')
+    replay_config=ReplayConfig.from_mapping(learner['training'].get('replay'))
+    if name!='maddpg' and replay_config.mode!='uniform':
+        raise ValueError('Prioritized replay supports MADDPG only')
+    if replay_config.mode!='uniform' and config.episode_protocol!='resolve_all_one_penalty_trade':
+        raise ValueError('PER event diagnostics require the current one-penalty interception protocol')
     return config,parameters,rollout
 
 
@@ -193,7 +199,7 @@ def evaluation_interval_for_budget(steps,num_envs):
 
 
 def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mode,output,
-          eval_interval=None,eval_episodes=10,log_every_steps=10000):
+          eval_interval=None,eval_episodes=10,log_every_steps=10000,replay_config=None):
     if num_envs<1 or steps<1 or steps%num_envs or log_every_steps<1 or attack_mode not in ('direct_rush','split_attack'):
         raise ValueError('Invalid training budget or attack mode')
     if eval_interval is None:
@@ -201,6 +207,14 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
     if eval_interval<0 or eval_episodes<1:
         raise ValueError('Invalid evaluation schedule')
     config=replace(config,attack_mode=attack_mode)
+    replay_config=replay_config or ReplayConfig()
+    prioritized=name=='maddpg' and replay_config.mode=='critic_per_with_uniform'
+    if replay_config.mode!='uniform' and not prioritized:
+        raise ValueError('Prioritized replay supports MADDPG only')
+    if prioritized and config.episode_protocol!='resolve_all_one_penalty_trade':
+        raise ValueError('PER event diagnostics require the current one-penalty interception protocol')
+    if prioritized and not 0<round(parameters.batch_size*replay_config.prioritized_fraction)<parameters.batch_size:
+        raise ValueError('MADDPG replay batch needs both sampling components')
     root=Path(output)
     environment=InterceptionEnv(config)
     if name=='dual_critic' and environment.contract['version']!='interception_1':
@@ -214,9 +228,12 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                   log_every_steps=log_every_steps,eval_interval=eval_interval,eval_episodes=eval_episodes,
                   learner_reward_interface=('team_scalar' if name=='mappo' else 'per_defender_vector' if name=='maddpg'
                                             else 'global_scalar_and_mean_local_scalar'))
+    if prioritized:settings['replay']=asdict(replay_config)
     write_json(root/'settings.json',settings)
     policy=make_policy(name,config,parameters,device,seed)
-    replay=ReplayBuffer(parameters.buffer_capacity,seed) if name!='mappo' else None
+    if prioritized:policy.experiment_provenance=dict(replay=asdict(replay_config))
+    replay=(PrioritizedReplayBuffer(parameters.buffer_capacity,seed,alpha=replay_config.alpha,epsilon=replay_config.epsilon)
+            if prioritized else ReplayBuffer(parameters.buffer_capacity,seed) if name!='mappo' else None)
     episode_log=(root/'episodes.jsonl').open('x',encoding='utf-8')
     update_log=(root/'updates.jsonl').open('x',encoding='utf-8')
     evaluation_log=(root/'evaluations.jsonl').open('x',encoding='utf-8')
@@ -246,7 +263,8 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
     try:
         print(f'[train {name}] attack={attack_mode} workers={num_envs} device={device} '
               f'budget={steps:,} log_every={log_every_steps:,} eval_every={eval_interval:,} '
-              f'eval_episodes={eval_episodes}',flush=True)
+              f'eval_episodes={eval_episodes}'+
+              (f' replay={replay_config.mode}' if prioritized else ''),flush=True)
         with ParallelInterceptionEnvs(num_envs,config,seed=seed,attack_mode=attack_mode) as sampler:
             obs,states,masks,_=sampler.reset()
             while sampled<steps:
@@ -270,7 +288,13 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                                 item.update(global_rewards=result.infos[i]['global_reward'],
                                             local_rewards=float(np.mean(result.infos[i]['local_rewards'])))
                             else:item['rewards']=result.individual_rewards[i]
-                            replay.add(**item)
+                            if prioritized:
+                                events=result.infos[i]['events']
+                                metadata=dict(capture=sum(event['type']=='capture' for event in events),
+                                              first_breach=int(result.infos[i]['reward_components']['penetration']<0),
+                                              boundary=sum(event['type']=='defender_oob' for event in events))
+                                replay.add(event_metadata=metadata,**item)
+                            else:replay.add(**item)
                     for i,info in enumerate(result.infos):
                         totals=reward_component_totals[i]
                         for component,value in info['reward_components'].items():
@@ -288,7 +312,18 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                     sampled+=num_envs
                     if replay is not None and len(replay)>=parameters.warmup(config.episode_steps) and sampled%parameters.update_interval_steps==0:
                         for _update in range(parameters.updates_per_interval):
-                            metrics=policy.update(replay.sample(parameters.batch_size));updates+=1
+                            if prioritized:
+                                critic_batch,actor_batch,indices,weights,replay_metrics=replay.sample_update(
+                                    parameters.batch_size,prioritized_fraction=replay_config.prioritized_fraction,
+                                    beta=replay_config.beta(sampled,steps))
+                                metrics,td_errors=policy.update(critic_batch,actor_batch=actor_batch,
+                                                                 critic_weights=weights,return_td_errors=True)
+                                replay.update_priorities(indices,td_errors)
+                                metrics.update(replay_metrics)
+                                metrics['per_critic_grad_clipped']=float(
+                                    metrics['critic_grad_norm']>parameters.critic_max_grad_norm)
+                            else:metrics=policy.update(replay.sample(parameters.batch_size))
+                            updates+=1
                             update_log.write(json.dumps(dict(step=sampled,update=updates,**metrics),allow_nan=False)+'\n')
                             progress.update(metrics)
                     if eval_interval and sampled>=next_eval and sampled<steps:
@@ -321,6 +356,7 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                     episodes_by_attack_mode={attack_mode:episodes},
                     updates=updates,best_score=best_score,best_selection=best_entry['selection'],
                     best_selection_mode=attack_mode)
+        if prioritized:result['replay']=asdict(replay_config)
         write_json(root/'summary.json',result)
         return result
     finally:
