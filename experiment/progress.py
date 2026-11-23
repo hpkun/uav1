@@ -136,7 +136,7 @@ class ProgressLogger:
                 f' breach={_percent(row["penetration_rate"])}'
                 f' cap={_percent(row["capture_efficiency"])} ({row["episodes"]} eps)')
         components=row.get('mean_reward_components',{})
-        names=('capture','penetration','approach','boundary','danger')
+        names=('capture','penetration','approach','heading','boundary','danger')
         detail=' '.join(f'{name}={_signed(components[name])}' for name in names if name in components)
         return (f'{status}\n  reward/ep (undiscounted): {detail}'
                 f' total={_signed(row.get("mean_team_return"))}')

@@ -56,12 +56,12 @@ def test_five_percent_eval_schedule_and_reward_line_are_single_mode():
     summary=dict(all_capture_rate=0.0,penetration_rate=1.0,capture_efficiency=0.8,
                  episodes=20,mean_team_return=-20.5,
                  mean_reward_components=dict(capture=80.0,penetration=-100.0,
-                                             approach=0.5,boundary=-1.0))
+                                             approach=0.5,heading=0.3,boundary=-1.0))
     line=ProgressLogger.evaluation(100_000,{'direct_rush':summary})
     assert '[eval 100,000] direct:' in line
     assert 'split' not in line
     assert 'capture=+80.00' in line and 'penetration=-100.00' in line
-    assert 'approach=+0.50' in line and 'boundary=-1.00' in line
+    assert 'approach=+0.50' in line and 'heading=+0.30' in line and 'boundary=-1.00' in line
     assert 'total=-20.50' in line
     with pytest.raises(ValueError,match='only the training attack mode'):
         ProgressLogger.evaluation(100_000,{'direct_rush':summary,'split_attack':summary})

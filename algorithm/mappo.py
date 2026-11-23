@@ -193,9 +193,10 @@ class MAPPO:
         self.config = config
         version=self.environment_contract.get('version')
         dims=(observation_dim,state_dim)
-        if (version not in ('interception_1','interception_2','interception_3') or
+        if (version not in ('interception_1','interception_2','interception_3','interception_4') or
                 (version=='interception_2' and dims!=(54,75)) or
                 (version=='interception_3' and dims!=(36,75)) or
+                (version=='interception_4' and dims not in ((36,75),(54,75))) or
                 self.environment_contract.get('action_schema')!='world_acceleration_disk_si'):
             raise ValueError('MAPPO requires a supported interception action contract')
         self.action_transform=DISK_ACTION

@@ -48,6 +48,7 @@ class InterceptionConfig:
     boundary_penalty: float = 2.0
     penetration_penalty: float = 100.0
     approach_weight: float | None = None
+    heading_weight: float = 0.0
 
     def __post_init__(self):
         if ((self.n_defenders,self.n_attackers)!=(5,5) or
@@ -96,14 +97,16 @@ class InterceptionConfig:
             raise ValueError('Initial speeds must be finite and within each side\'s speed limit')
         if any(not math.isfinite(getattr(self, name)) for name in
                ('base_x','base_y','split_waypoint_x','split_waypoint_y','danger_weight',
-                'capture_reward','boundary_penalty','penetration_penalty','approach_weight')):
+                'capture_reward','boundary_penalty','penetration_penalty','approach_weight','heading_weight')):
             raise ValueError('Parameters must be finite')
         if (self.breach_radius >= self.danger_radius or
                 max(abs(self.base_x),abs(self.base_y))+self.breach_radius > self.arena_half_extent):
             raise ValueError('Breach circle must fit within the arena and danger radius')
         if any(getattr(self, name) < 0 for name in
-               ('danger_weight','capture_reward','boundary_penalty','penetration_penalty','approach_weight')):
+               ('danger_weight','capture_reward','boundary_penalty','penetration_penalty','approach_weight','heading_weight')):
             raise ValueError('Reward weights must be nonnegative')
+        if self.heading_weight and self.observation_layout not in ('relative_assignment','relative_assignment_target_velocity'):
+            raise ValueError('Heading reward requires an assigned-target observation layout')
 
 
 def _limit(vectors: np.ndarray, maximum: float) -> np.ndarray:
@@ -137,12 +140,14 @@ class InterceptionEnv:
 
     @property
     def contract(self):
-        return dict(schema='Interception/3' if self.target_velocity_layout else 'Interception/2' if self.assigned_layout else 'Interception/1',
-                    version='interception_3' if self.target_velocity_layout else 'interception_2' if self.assigned_layout else 'interception_1', n_agents=5,
+        return dict(schema='Interception/4' if self.config.heading_weight else 'Interception/3' if self.target_velocity_layout else 'Interception/2' if self.assigned_layout else 'Interception/1',
+                    version='interception_4' if self.config.heading_weight else 'interception_3' if self.target_velocity_layout else 'interception_2' if self.assigned_layout else 'interception_1', n_agents=5,
                     n_attackers=5, observation_dim=self.observation_dim, state_dim=self.state_dim, action_dim=2,
                     action_schema='world_acceleration_disk_si',
                     max_acceleration=self.config.defender_acceleration_max,
-                    reward_schema=('shared_capture_and_first_breach+assigned_target_approach+boundary; team=global+mean(local_i)'
+                    reward_schema=('shared_capture_and_first_breach+assigned_target_approach+assigned_target_heading+boundary; team=global+mean(local_i)'
+                                   if self.config.heading_weight else
+                                   'shared_capture_and_first_breach+assigned_target_approach+boundary; team=global+mean(local_i)'
                                    if self.assigned_layout else
                                    'shared_capture_and_first_breach+local_shaping; team=global+mean(local_i)'
                                    if self.config.episode_protocol in ('resolve_all_one_penalty_trade','resolve_all_one_penalty') else
@@ -336,6 +341,8 @@ class InterceptionEnv:
             self.velocities[0,defenders_before]+actions[defenders_before]*c.dt,c.defender_speed_max)
         self.velocities[1,self.attacker_alive] = _limit(
             self.velocities[1,self.attacker_alive]+attacker_actions[self.attacker_alive]*c.dt,c.attacker_speed_max)
+        # Preserve the executed heading before a capture retires either aircraft.
+        defender_velocity_after_action = self.velocities[0].copy() if c.heading_weight else None
         self.step_count += 1
         time_s = self.step_count*c.dt
         events = []
@@ -414,6 +421,7 @@ class InterceptionEnv:
             events.append(dict(type='time_limit',step=self.step_count,time_s=time_s))
         # Legacy reward definitions are retained for historical run configurations.
         approach = np.zeros(5)
+        heading = np.zeros(5)
         for i in range(5):
             if not defenders_before[i]:
                 continue
@@ -426,6 +434,13 @@ class InterceptionEnv:
                 target_after = (self.positions[1,target] if c.episode_protocol!='first_breach' or c.danger_weight
                                 else before[1,target])
                 approach[i] = np.linalg.norm(before[0,i]-before[1,target])-np.linalg.norm(self.positions[0,i]-target_after)
+            if c.heading_weight and assigned_before is not None and assigned_before[i] >= 0:
+                target = int(assigned_before[i])
+                direction = before[1,target]-before[0,i]
+                distance = float(np.linalg.norm(direction))
+                speed = float(np.linalg.norm(defender_velocity_after_action[i]))
+                if alive_before[target] and 1e-12 < distance <= c.sensing_radius and speed > 1e-12:
+                    heading[i] = float(np.clip(np.dot(defender_velocity_after_action[i],direction)/(speed*distance),-1.0,1.0))
         # Legacy configurations retain their original reward for historical checkpoints.
         global_reward = 0.0
         if c.episode_protocol in ('resolve_all_one_penalty_trade','resolve_all_one_penalty'):
@@ -435,7 +450,8 @@ class InterceptionEnv:
         elif c.danger_weight:
             active_distance = np.linalg.norm(self.positions[1,self.attacker_alive]-self.base,axis=1)
             global_reward = -c.danger_weight*float(np.exp(-np.square(active_distance/c.danger_radius)).sum())
-        local = (-c.boundary_penalty*boundary.astype(float)+c.approach_weight*approach)
+        local = (-c.boundary_penalty*boundary.astype(float)+c.approach_weight*approach
+                 +c.heading_weight*heading)
         if c.episode_protocol=='first_breach':
             local += c.capture_reward*captured_by-c.penetration_penalty*bool(breached)
         self.global_return += global_reward
@@ -447,13 +463,15 @@ class InterceptionEnv:
         info = self._info(events,global_reward,local,outcome,first_breach=first_breach)
         if assigned_before is not None:info['reward_target_ids']=assigned_before.copy()
         info['reward_components']['approach'] = float(c.approach_weight*approach.mean())
+        if c.heading_weight:
+            info['reward_components']['heading'] = float(c.heading_weight*heading.mean())
         if not np.isclose(sum(info['reward_components'].values()), info['team_reward'],rtol=0,atol=1e-10):
             raise AssertionError('Interception reward ledger mismatch')
         info['executed_actions'] = joint_actions.copy()
         return self.observations(), (global_reward+local).astype(np.float32), outcome in ('penetrated','all_captured'), outcome=='time_limit', info
 
     def _info(self, events, global_reward, local_rewards, outcome, *, first_breach=False):
-        info = dict(version='interception_3' if self.target_velocity_layout else 'interception_2' if self.assigned_layout else 'interception_1',
+        info = dict(version='interception_4' if self.config.heading_weight else 'interception_3' if self.target_velocity_layout else 'interception_2' if self.assigned_layout else 'interception_1',
                     step=self.step_count, time_s=self.step_count*self.config.dt,
                     attack_mode=self.config.attack_mode, central_state=self.central_state(),
                     active_masks=self.defender_alive.astype(np.float32),
