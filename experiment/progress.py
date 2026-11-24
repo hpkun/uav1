@@ -66,7 +66,8 @@ class ProgressLogger:
                 capture_efficiency=sum(row['captured_count'] for row in rows)/(5*n) if n else None,
                 mean_team_return=sum(row['team_return'] for row in rows)/n if n else None)}
         keys=('actor_loss','critic_loss','entropy','approx_kl','td_abs',
-              'actor_grad_norm','critic_grad_norm','policy_log_std_mean','policy_std_mean',
+              'actor_grad_norm','critic_grad_norm','critic_grad_norm_mean_agent',
+              'critic_grad_norm_max_agent','policy_log_std_mean','policy_std_mean',
               'advantage_raw_mean','advantage_raw_std','q_mean','q_std','target_q_mean',
               'explained_variance','clip_fraction','value_norm_std',
               'per_beta','per_is_weight_mean','per_is_weight_min','per_is_ess',
@@ -108,7 +109,8 @@ class ProgressLogger:
             detail+=f" | replay={row['replay_size']:,}"
             if row['warmup'] is not None and row['replay_size']<row['warmup']:
                 detail+=f"/{row['warmup']:,} warmup"
-        diagnostics=('actor_grad_norm','critic_grad_norm','policy_log_std_mean','policy_std_mean',
+        diagnostics=('actor_grad_norm','critic_grad_norm','critic_grad_norm_mean_agent',
+                     'critic_grad_norm_max_agent','policy_log_std_mean','policy_std_mean',
                      'advantage_raw_mean','advantage_raw_std','q_mean','q_std','target_q_mean',
                      'clip_fraction','value_norm_std')
         shown=[f'{key}={_number(learning[key],4)}' for key in diagnostics if key in learning]

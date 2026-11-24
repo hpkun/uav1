@@ -82,7 +82,7 @@ def analyze_trace(trace):
                    last_assignment_s=None, losses=[], switches=[], unassigned_visible_steps_by_reason={},
                    boundary_defender_times_s=[], boundary_attacker_times_s=[])
               for i in range(5)]
-    reward_defender = reward_attacker = 0.0
+    reward_defender = reward_attacker = reward_heading = 0.0
     transitions = trace['frames']
     for step, (before, after) in enumerate(zip(transitions, transitions[1:]), start=1):
         for i, row in enumerate(agents):
@@ -128,8 +128,25 @@ def analyze_trace(trace):
                 d10 = _distance(after['positions'][0][i], before['positions'][1][target])
                 d01 = _distance(before['positions'][0][i], after['positions'][1][target])
                 d11 = _distance(after['positions'][0][i], after['positions'][1][target])
-                reward_defender += 0.5 * ((d00 - d10) + (d01 - d11))
-                reward_attacker += 0.5 * ((d00 - d01) + (d10 - d11))
+                retired_oob = (config.get('defender_oob_retire') and any(
+                    event['type']=='defender_oob' and event['defender']==i
+                    for event in events_by_step.get(step, [])))
+                if not retired_oob:
+                    reward_defender += 0.5 * ((d00 - d10) + (d01 - d11))
+                    reward_attacker += 0.5 * ((d00 - d01) + (d10 - d11))
+                    if config.get('heading_weight', 0) and before['attacker_alive'][target] and \
+                            d00 <= config['sensing_radius'] and d00 > 1e-12:
+                        velocity = (np.asarray(before['velocities'][0][i], dtype=float) +
+                                    np.asarray(after['defender_actions'][i], dtype=float) * dt)
+                        speed = float(np.linalg.norm(velocity))
+                        if speed > config['defender_speed_max']:
+                            velocity *= config['defender_speed_max'] / speed
+                            speed = config['defender_speed_max']
+                        if speed > 1e-12:
+                            direction = np.asarray(before['positions'][1][target], dtype=float) - \
+                                        np.asarray(before['positions'][0][i], dtype=float)
+                            reward_heading += float(np.clip(np.dot(velocity, direction) /
+                                                            (speed * d00), -1.0, 1.0))
             next_target = after['assigned_target_ids'][i]
             if target >= 0 and next_target < 0:
                 row['losses'].append(dict(time_s=after['time_s'], target=target,
@@ -150,11 +167,13 @@ def analyze_trace(trace):
             row[output] = float(np.mean(values)) if values else None
     weight = config['approach_weight'] / 5
     approach_total = weight * (reward_defender + reward_attacker)
+    heading_total = config.get('heading_weight', 0) * reward_heading / 5
     if config['episode_protocol'] == 'resolve_all_one_penalty_trade':
         summary = trace['summary']
         expected = (summary['team_return'] - config['capture_reward'] * summary['captured_count']
                     + config['penetration_penalty'] * bool(summary['penetrated_count'])
-                    + config['boundary_penalty'] * summary['defender_oob_count'] / 5)
+                    + config['boundary_penalty'] * summary['defender_oob_count'] / 5
+                    - heading_total)
         if not np.isclose(approach_total, expected, rtol=0, atol=1e-6):
             raise AssertionError('Diagnostic approach decomposition disagrees with reward ledger')
     return dict(seed=trace['seed'], outcome=trace['summary']['outcome'],

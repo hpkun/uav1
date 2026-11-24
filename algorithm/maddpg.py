@@ -63,7 +63,8 @@ class MADDPG:
                  ('interception_2',54,75),('interception_3',36,75),
                  ('interception_4',54,75),('interception_4',36,75),
                  ('interception_5',54,75),('interception_5',36,75),
-                 ('interception_6',36,75),('interception_7',36,75),('interception_8',24,75)) or
+                 ('interception_6',36,75),('interception_7',36,75),('interception_8',24,75),
+                 ('interception_9',24,76)) or
                 any(contract.get(k)!=v for k,v in dict(n_agents=5,action_dim=2).items()) or
                 contract.get('action_schema')!='world_acceleration_disk_si' or
                 not isinstance(contract.get('max_acceleration'),(int,float)) or contract['max_acceleration']<=0):
@@ -124,6 +125,11 @@ class MADDPG:
         critic_loss=squared.sum()/mask.sum().clamp_min(1)
         if not torch.isfinite(critic_loss):raise FloatingPointError('Nonfinite MADDPG critic loss')
         self.critic_optimizer.zero_grad(set_to_none=True);critic_loss.backward()
+        individual_critic_grads=[]
+        for critic in self.critics:
+            norms=[parameter.grad.detach().norm() for parameter in critic.parameters()
+                   if parameter.grad is not None]
+            individual_critic_grads.append(float(torch.linalg.vector_norm(torch.stack(norms))) if norms else 0.0)
         critic_grad=nn.utils.clip_grad_norm_(self.critics.parameters(),self.config.critic_max_grad_norm)
         self.critic_optimizer.step();self.critic_update_count+=1
         with torch.no_grad():joint=self._joint(actor_data['observations'],actor_mask).detach()
@@ -149,7 +155,10 @@ class MADDPG:
         self.target_update_count+=1
         metrics=dict(actor_loss=float(np.mean(actor_losses)) if actor_losses else None,
             critic_loss=float(critic_loss.detach()),actor_grad_norm=float(np.mean(actor_grads)) if actor_grads else None,
-            critic_grad_norm=float(critic_grad),td_abs=float(((q.detach()-targets).abs()*mask).sum()/mask.sum().clamp_min(1)),
+            critic_grad_norm=float(critic_grad),
+            critic_grad_norm_mean_agent=float(np.mean(individual_critic_grads)),
+            critic_grad_norm_max_agent=float(np.max(individual_critic_grads)),
+            td_abs=float(((q.detach()-targets).abs()*mask).sum()/mask.sum().clamp_min(1)),
             q_mean=float(active_q.mean()) if active_q.numel() else 0.0,
             q_std=float(active_q.std(unbiased=False)) if active_q.numel() else 0.0,
             target_q_mean=float(active_targets.mean()) if active_targets.numel() else 0.0,
