@@ -37,7 +37,7 @@ def digest(path):
 
 def read_config(env_path, algorithm_path=None):
     raw=yaml.safe_load(Path(env_path).read_text(encoding='utf-8'))
-    if not isinstance(raw,dict) or set(raw)!={'schema','environment'} or raw['schema'] not in ('Interception/1','Interception/2','Interception/3','Interception/4','Interception/5','Interception/6','Interception/7'):
+    if not isinstance(raw,dict) or set(raw)!={'schema','environment'} or raw['schema'] not in ('Interception/1','Interception/2','Interception/3','Interception/4','Interception/5','Interception/6','Interception/7','Interception/8'):
         raise ValueError('Expected supported interception environment configuration')
     config=InterceptionConfig(**raw['environment'])
     if InterceptionEnv(config).contract['schema']!=raw['schema']:
@@ -234,6 +234,9 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
     if prioritized:policy.experiment_provenance=dict(replay=asdict(replay_config))
     replay=(PrioritizedReplayBuffer(parameters.buffer_capacity,seed,alpha=replay_config.alpha,epsilon=replay_config.epsilon)
             if prioritized else ReplayBuffer(parameters.buffer_capacity,seed) if name!='mappo' else None)
+    warmup=parameters.warmup(config.episode_steps) if replay is not None else None
+    next_update_sampled=((warmup+parameters.update_interval_steps-1)//parameters.update_interval_steps*
+                         parameters.update_interval_steps) if replay is not None else None
     episode_log=(root/'episodes.jsonl').open('x',encoding='utf-8')
     update_log=(root/'updates.jsonl').open('x',encoding='utf-8')
     evaluation_log=(root/'evaluations.jsonl').open('x',encoding='utf-8')
@@ -310,7 +313,7 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                             reward_component_totals[i]={}
                     obs,states,masks=result.observations,result.states,result.active_masks
                     sampled+=num_envs
-                    if replay is not None and len(replay)>=parameters.warmup(config.episode_steps) and sampled%parameters.update_interval_steps==0:
+                    while replay is not None and len(replay)>=warmup and sampled>=next_update_sampled:
                         for _update in range(parameters.updates_per_interval):
                             if prioritized:
                                 critic_batch,actor_batch,indices,weights,replay_metrics=replay.sample_update(
@@ -326,6 +329,7 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                             updates+=1
                             update_log.write(json.dumps(dict(step=sampled,update=updates,**metrics),allow_nan=False)+'\n')
                             progress.update(metrics)
+                        next_update_sampled+=parameters.update_interval_steps
                     if eval_interval and sampled>=next_eval and sampled<steps:
                         record_evaluation(sampled)
                         next_eval=(sampled//eval_interval+1)*eval_interval
