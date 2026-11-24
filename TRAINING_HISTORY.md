@@ -45,7 +45,8 @@
 | V6 | MADDPG · Jia 直线 | [maddpg_ideal_jia_straight_seed7_2m](runs/maddpg_ideal_jia_straight_seed7_2m/summary.json) | O36/S75 · 理想全局 · d0.05 · h0.03 · r5 · γ0.99 · I100 · E4 | 2000k/2000k · 19990次 | 0%/46% | 0%/40% | -52.1 |
 | V7 | MADDPG · Jia 直线 | [maddpg_ideal_jia_oob_exit_seed7_2m](runs/maddpg_ideal_jia_oob_exit_seed7_2m/summary.json) | O36/S75 · 理想全局 · d0.05 · h0.03 · r5 · γ0.99 · I100 · E4 | 2000k/2000k · 19990次 | 0%/34% | 0%/8% | -87.6 |
 | V7 | MADDPG · Jia 直线 | [maddpg_ideal_jia_oob_exit_seed7_2mclear](runs/maddpg_ideal_jia_oob_exit_seed7_2mclear/settings.json) | O36/S75 · 理想全局 · d0.05 · h0.03 · r5 · γ0.99 · I100 · E4 | 无完整训练结果 | — | — | — |
-| V8 | MADDPG · Jia 直线 | [maddpg_ideal_jia_circle_heading0p3_gamma099_seed7_300k](runs/maddpg_ideal_jia_circle_heading0p3_gamma099_seed7_300k/settings.json) | O24/S75 · 理想全局 · d0.2 · h0.3 · r5 · γ0.99 · I10 · E1 | 进行中 50.0k/300k | 0%/28% | 0%/28% | -31.7 |
+| V8 | MADDPG · Jia 直线 | [maddpg_ideal_jia_circle_heading0p3_gamma099_seed7_300k](runs/maddpg_ideal_jia_circle_heading0p3_gamma099_seed7_300k/summary.json) | O24/S75 · 理想全局 · d0.2 · h0.3 · r5 · γ0.99 · I10 · E1 | 300k/300k · 29898次 | 0%/50% | 0%/46% | +23.7 |
+| V8 | MADDPG · Jia 直线 | [maddpg_ideal_jia_circle_targets_gamma099_seed7_300k](runs/maddpg_ideal_jia_circle_targets_gamma099_seed7_300k/summary.json) | O24/S75 · 理想全局 · d0.2 · h0.03 · r5 · γ0.99 · I10 · E1 | 300k/300k · 29898次 | 0%/54% | 0%/28% | -54.6 |
 | V8 | MADDPG · Jia 直线 | [maddpg_ideal_jia_obs24_approach02_interval10_critic_lr3e4_single_seed7_300k](runs/maddpg_ideal_jia_obs24_approach02_interval10_critic_lr3e4_single_seed7_300k/summary.json) | O24/S75 · 理想全局 · d0.2 · h0.03 · r5 · γ0.99 · I10 · E1 · Critic LR 0.0003 | 300k/300k · 29898次 | 10%/44% | 0%/40% | -38.8 |
 | V8 | MADDPG · Jia 直线 | [maddpg_ideal_jia_obs24_approach02_interval10_single_seed7_300k](runs/maddpg_ideal_jia_obs24_approach02_interval10_single_seed7_300k/summary.json) | O24/S75 · 理想全局 · d0.2 · h0.03 · r5 · γ0.99 · I10 · E1 | 300k/300k · 29898次 | 0%/58% | 0%/40% | -32.9 |
 | V8 | MADDPG · Jia 直线 | [maddpg_ideal_jia_obs24_capture3m_gamma0995_single_seed7_300k](runs/maddpg_ideal_jia_obs24_capture3m_gamma0995_single_seed7_300k/summary.json) | O24/S75 · 理想全局 · d0.2 · h0.03 · r3 · γ0.995 · I10 · E1 | 300k/300k · 29898次 | 0%/44% | 0%/14% | -69.3 |
@@ -80,6 +81,21 @@
 - [运行结果](runs/maddpg_ideal_jia_oob_exit_seed7_2m/summary.json)：2,000,000 步、6,117 局、19,990 次更新；旧版奖励和观测合同，不能与上面的 24 维版本作单因素比较。
 - 表内峰值（1,000,000 步）捕获率 34%，末次为 8%；两次全歼率均为 0%。末次团队回报约 −87.6。
 - 该记录主要用于追踪版本演化：后续 24 维、距离奖励 0.2 和更新间隔 10 的联合改动在更少步数内表现出更高的部分捕获率。
+
+### 2026-11-24 · 圆周目标航迹，航向系数 0.03
+
+- [配置](runs/maddpg_ideal_jia_circle_targets_gamma099_seed7_300k/settings.json)、[汇总](runs/maddpg_ideal_jia_circle_targets_gamma099_seed7_300k/summary.json)、[周期评估](runs/maddpg_ideal_jia_circle_targets_gamma099_seed7_300k/evaluations.jsonl)、[checkpoint 索引](runs/maddpg_ideal_jia_circle_targets_gamma099_seed7_300k/checkpoints/index.json)：300,000 步、910 局、29,898 次更新，单环境；Actor 24 维、Critic 状态 75 维、`γ=0.99`、`d=0.2`、`h=0.03`、捕获半径 5 m。
+- `Best` 位于 150k：10 局评估的捕获率 54%、全歼率 0%、团队回报 −22.11。`Last` 位于 300k：捕获率 28%、全歼率 0%、团队回报 −54.60；说明峰值后没有保持住捕获表现。
+- 20 次评估共 200 局，全歼 0 局；平均捕获率 37.4%、团队回报 −42.43。训练的 910 局中有 1 局全歼，末尾 100 局捕获率 45.4%，与末次固定评估 28% 不一致，提示策略结果对评估样本或训练噪声敏感。
+- 末次评估每局平均奖励：捕获 +28.00、突防 −100.00、接近 +15.57、航向 +2.23、越界 −0.40。最后 1000 次更新的平均 TD 绝对误差约 0.720、Critic 梯度范数约 24.53，其中约 86% 的合并梯度范数超过配置裁剪阈值 10；这提示训练压力，但不能单独证明 Q 发散。
+
+### 2026-11-24 · 圆周目标航迹，航向系数 0.3
+
+- [配置](runs/maddpg_ideal_jia_circle_heading0p3_gamma099_seed7_300k/settings.json)、[汇总](runs/maddpg_ideal_jia_circle_heading0p3_gamma099_seed7_300k/summary.json)、[周期评估](runs/maddpg_ideal_jia_circle_heading0p3_gamma099_seed7_300k/evaluations.jsonl)、[checkpoint 索引](runs/maddpg_ideal_jia_circle_heading0p3_gamma099_seed7_300k/checkpoints/index.json)：300,000 步、913 局、29,898 次更新。记录中的配置与上一组逐项核对，除航向奖励系数 `0.03 → 0.3` 外相同；两组的环境实现哈希也一致。
+- `Best` 位于 165k：10 局评估捕获率 50%、全歼率 0%、团队回报 +14.40。`Last` 位于 300k：捕获率 46%、全歼率 0%、团队回报 +23.74。20 次评估共 200 局，全歼仍为 0；平均捕获率 41.7%，比低航向系数高 4.3 个百分点，但最佳捕获率反而低 4 个百分点。
+- 末次评估每局平均奖励：捕获 +46.00、突防 −100.00、接近 +26.45、航向 +51.32、越界 −0.04。**10 局均突防，平均团队回报仍为正**；回报上升主要来自航向项，不能解读为防御任务已成功。两组 20 次评估的平均回报差约 +43.22，其中航向项差约 +34.56。
+- 训练 913 局中有 1 局全歼。最后 1000 次更新的平均 TD 绝对误差约 0.759、Critic 梯度范数约 27.40，约 94% 的合并梯度范数超过阈值 10；高于低航向系数组的 0.720/24.53/86%。Q 均值也更高，可能与奖励尺度增加有关，不能仅据此判定价值估计正确或错误。
+- 这组在同一随机种子的多数检查点上部分捕获和越界表现略好，但两组都未在周期评估实现全歼。仅凭这一次 seed、每点评估 10 局，不能确定航向系数提高后的泛化收益。
 
 ## 后续追加格式
 
