@@ -257,8 +257,11 @@ class InterceptionEnv:
         self.split_switched = np.zeros(5, bool)
         self.velocities[0,:,1] = self.config.defender_initial_speed
         if self.config.attack_mode == 'jia_straight':
-            targets = np.column_stack((self.config.base_x+np.linspace(-10,10,5),
-                                       np.full(5,self.config.base_y)))
+            offsets = np.linspace(-0.9, 0.9, 5)
+            radius = self.config.breach_radius
+            target_x = self.config.base_x + radius * offsets
+            target_y = self.config.base_y + radius * np.sqrt(1.0 - offsets**2)
+            targets = np.column_stack((target_x, target_y))
         elif self.config.attack_mode == 'split_attack':
             targets = np.column_stack((self.split_flank*self.config.split_waypoint_x,
                                        np.full(5,self.config.split_waypoint_y)))
