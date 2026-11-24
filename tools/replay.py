@@ -7,14 +7,14 @@ from pathlib import Path
 
 import numpy as np
 
-from env.interception import InterceptionEnv
+from env import make_environment
 from experiment.interception import digest,load_run,require_matching_attack_mode
 
 
 def collect(config,policy,mode,seed):
     if mode!=config.attack_mode:
         raise ValueError('Replay mode differs from checkpoint training mode')
-    env=InterceptionEnv(replace(config,attack_mode=mode))
+    env=make_environment(replace(config,attack_mode=mode))
     obs,info=env.reset(seed=seed)
     frames=[]
     events=[]
@@ -42,6 +42,8 @@ def collect(config,policy,mode,seed):
 
 def validate_trace(trace):
     frames=trace['frames'];events=trace['events'];summary=trace['summary']
+    attackers=1 if trace['config'].get('scenario')=='one_vs_one' else 5
+    defenders=1 if trace['config'].get('scenario')=='one_vs_one' else 5
     if len(frames)!=summary['steps']+1 or [row['step'] for row in frames]!=list(range(len(frames))):
         raise ValueError('Replay frame count or order mismatch')
     if any(not 1<=event['step']<=summary['steps'] for event in events):
@@ -52,9 +54,9 @@ def validate_trace(trace):
         raise ValueError('Replay penetration events disagree with episode')
     if summary['outcome']=='penetrated' and not summary['penetrated_count']:
         raise ValueError('Penetration outcome has no event')
-    if summary['outcome']=='all_captured' and summary['captured_count']!=5:
+    if summary['outcome']=='all_captured' and summary['captured_count']!=attackers:
         raise ValueError('All-capture outcome has incomplete captures')
-    if trace['config'].get('episode_protocol') in ('resolve_all','resolve_all_one_penalty','resolve_all_one_penalty_trade') and summary['captured_count']+summary['penetrated_count']!=5:
+    if trace['config'].get('episode_protocol') in ('resolve_all','resolve_all_one_penalty','resolve_all_one_penalty_trade') and summary['captured_count']+summary['penetrated_count']!=attackers:
         raise ValueError('Resolved episode does not account for all attackers')
     if trace['config'].get('episode_protocol')=='resolve_all_one_penalty_trade':
         if any(len(row['defender_alive'])!=5 for row in frames):
@@ -63,7 +65,7 @@ def validate_trace(trace):
             raise ValueError('A defender captured more than one attacker')
         expected_retired = summary['captured_count'] + (summary['defender_oob_count']
                             if trace['config'].get('defender_oob_retire') else 0)
-        if 5-sum(frames[-1]['defender_alive'])!=expected_retired:
+        if defenders-sum(frames[-1]['defender_alive'])!=expected_retired:
             raise ValueError('Retired defenders disagree with captures')
     return trace
 

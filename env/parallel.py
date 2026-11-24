@@ -5,7 +5,7 @@ import traceback
 
 import numpy as np
 
-from .interception import InterceptionConfig, InterceptionEnv
+from . import InterceptionConfig, make_environment
 
 
 @dataclass
@@ -37,7 +37,7 @@ def _worker(pipe,config,attack_mode):
             if command=='reset':
                 base_seed=int(payload)
                 episode=0
-                env=InterceptionEnv(replace(config,attack_mode=attack_mode))
+                env=make_environment(replace(config,attack_mode=attack_mode))
                 obs,info=env.reset(seed=base_seed)
                 pipe.send(('result',(obs,info['central_state'],info['active_masks'],info)))
             elif command=='step':
@@ -48,7 +48,7 @@ def _worker(pipe,config,attack_mode):
                     episode+=1
                     seed=base_seed+1_000_003*episode
                     env.close()
-                    env=InterceptionEnv(replace(config,attack_mode=attack_mode))
+                    env=make_environment(replace(config,attack_mode=attack_mode))
                     obs,reset=env.reset(seed=seed)
                     current=(obs,reset['central_state'],reset['active_masks'])
                 else:

@@ -25,11 +25,13 @@ def _duration(seconds):
 
 
 class ProgressLogger:
-    def __init__(self,algorithm,total_steps,interval,*,attack_mode,window=100,clock=time.monotonic):
+    def __init__(self,algorithm,total_steps,interval,*,attack_mode,window=100,clock=time.monotonic,
+                 attacker_count=5):
         if interval<1 or attack_mode not in ('direct_rush','split_attack','jia_straight'):
             raise ValueError('Invalid log interval or attack mode')
         self.algorithm=algorithm
         self.attack_mode=attack_mode
+        self.attacker_count=attacker_count
         self.total_steps=total_steps
         self.interval=interval
         self.clock=clock
@@ -63,7 +65,7 @@ class ProgressLogger:
                 all_capture_rate=sum(row['outcome']=='all_captured' for row in rows)/n if n else None,
                 penetration_rate=sum(row['outcome']=='penetrated' for row in rows)/n if n else None,
                 time_limit_rate=sum(row['outcome']=='time_limit' for row in rows)/n if n else None,
-                capture_efficiency=sum(row['captured_count'] for row in rows)/(5*n) if n else None,
+                capture_efficiency=sum(row['captured_count'] for row in rows)/(self.attacker_count*n) if n else None,
                 mean_team_return=sum(row['team_return'] for row in rows)/n if n else None)}
         keys=('actor_loss','critic_loss','entropy','approx_kl','td_abs',
               'actor_grad_norm','critic_grad_norm','critic_grad_norm_mean_agent',

@@ -51,6 +51,9 @@
 | V8 | MADDPG · Jia 直线 | [maddpg_ideal_jia_obs24_approach02_interval10_single_seed7_300k](runs/maddpg_ideal_jia_obs24_approach02_interval10_single_seed7_300k/summary.json) | O24/S75 · 理想全局 · d0.2 · h0.03 · r5 · γ0.99 · I10 · E1 | 300k/300k · 29898次 | 0%/58% | 0%/40% | -32.9 |
 | V8 | MADDPG · Jia 直线 | [maddpg_ideal_jia_obs24_capture3m_gamma0995_single_seed7_300k](runs/maddpg_ideal_jia_obs24_capture3m_gamma0995_single_seed7_300k/summary.json) | O24/S75 · 理想全局 · d0.2 · h0.03 · r3 · γ0.995 · I10 · E1 | 300k/300k · 29898次 | 0%/44% | 0%/14% | -69.3 |
 | V8 | MADDPG · Jia 直线 | [maddpg_ideal_jia_obs24_gamma0995_single_seed7_300k](runs/maddpg_ideal_jia_obs24_gamma0995_single_seed7_300k/summary.json) | O24/S75 · 理想全局 · d0.2 · h0.03 · r5 · γ0.995 · I10 · E1 | 300k/300k · 29898次 | 0%/48% | 0%/36% | -42.8 |
+| V10 | MADDPG · 1v1 Jia 直线 | [maddpg_one_vs_one_jia_seed7_300k](runs/maddpg_one_vs_one_jia_seed7_300k/settings.json) | O24/S75 · 1 对有效 UAV · d0.2 · h0.03 · r5 · γ0.99 · I10 · E1 | 本机主动停止，进度日志至 80k/300k；无完整汇总 | — | — | — |
+| V10 | MADDPG · 1v1 Jia 直线 | [maddpg_one_vs_one_jia_seed7_300k_run2](runs/maddpg_one_vs_one_jia_seed7_300k_run2/summary.json) | O24/S75 · 1 对有效 UAV · d0.2 · h0.03 · r5 · γ0.99 · I10 · E1 | 300k/300k · 29898次 | 70%/70% | 0%/0% | -78.3 |
+| V10 | MADDPG · 1v1 Jia 直线 | [maddpg_one_vs_one_jia_no_heading_seed7_300k](runs/maddpg_one_vs_one_jia_no_heading_seed7_300k/summary.json) | O24/S75 · 1 对有效 UAV · d0.2 · h0 · r5 · γ0.99 · I10 · E1 | 300k/300k · 29898次 | 100%/100% | 100%/100% | +53.7 |
 
 ### 未完成目录说明
 
@@ -96,6 +99,20 @@
 - 末次评估每局平均奖励：捕获 +46.00、突防 −100.00、接近 +26.45、航向 +51.32、越界 −0.04。**10 局均突防，平均团队回报仍为正**；回报上升主要来自航向项，不能解读为防御任务已成功。两组 20 次评估的平均回报差约 +43.22，其中航向项差约 +34.56。
 - 训练 913 局中有 1 局全歼。最后 1000 次更新的平均 TD 绝对误差约 0.759、Critic 梯度范数约 27.40，约 94% 的合并梯度范数超过阈值 10；高于低航向系数组的 0.720/24.53/86%。Q 均值也更高，可能与奖励尺度增加有关，不能仅据此判定价值估计正确或错误。
 - 这组在同一随机种子的多数检查点上部分捕获和越界表现略好，但两组都未在周期评估实现全歼。仅凭这一次 seed、每点评估 10 局，不能确定航向系数提高后的泛化收益。
+
+### 2026-11-24 · 1v1 Jia 场景，航向系数 0.03
+
+- [配置](runs/maddpg_one_vs_one_jia_seed7_300k_run2/settings.json)、[汇总](runs/maddpg_one_vs_one_jia_seed7_300k_run2/summary.json)、[周期评估](runs/maddpg_one_vs_one_jia_seed7_300k_run2/evaluations.jsonl)、[更新日志](runs/maddpg_one_vs_one_jia_seed7_300k_run2/updates.jsonl)：300,000 步、1,134 局、29,898 次更新，seed 7、单环境。只有一对 UAV 有效，其余槽位掩码；1v1 的捕获率即全歼率。
+- Best 在 240k，10 局评估拦截 7 局（70%）、团队回报 +21.70；255k 仍为 70%。但 285k 和 Last 300k 均为 0/10，末次团队回报 −78.26（捕获 0、突防 −100、接近 +23.41、航向 −0.28、越界 −1.40）。训练末尾 100 局成功率只有 10%，低于开头 100 局的 24%。
+- 全部 20 次周期评估累计 66/200 局成功，均值 33%；训练回合累计 328/1,134 局成功。末尾 1000 次更新的 Critic loss 约 2.55、TD 绝对误差 0.366、裁剪前 Critic 梯度范数 54.85（约 92.5% 超过阈值 10）；Actor 梯度范数约 0.51（约 44.2% 超过阈值 0.5）。这些指标与后期策略退化同时出现，但不足以单独证明 Critic 发散。
+
+### 2026-11-24 · 1v1 Jia 场景，航向奖励关闭
+
+- [配置](runs/maddpg_one_vs_one_jia_no_heading_seed7_300k/settings.json)、[汇总](runs/maddpg_one_vs_one_jia_no_heading_seed7_300k/summary.json)、[周期评估](runs/maddpg_one_vs_one_jia_no_heading_seed7_300k/evaluations.jsonl)、[更新日志](runs/maddpg_one_vs_one_jia_no_heading_seed7_300k/updates.jsonl)：300,000 步、1,175 局、29,898 次更新。与上一组的环境配置仅有 `heading_weight: 0.03 → 0` 差异；保存的实现哈希和奖励描述也因相应代码说明更新而不同，物理规则、网络与训练超参数未变。
+- Best 在 270k，10/10 局成功；Last 300k 再次 10/10，团队回报 +53.70（捕获 +20、突防 0、接近 +33.70、越界 0）。但 165k、180k、210k、225k、240k 都是 0/10，285k 为 5/10；不能把末次 100% 视作已稳定收敛。
+- 全部周期评估累计 68/200 局成功，均值 34%，与有航向组的 33% 接近；后五次评估均值为 64%，有航向组为 34%。训练末尾 100 局成功率 66%，高于开头 100 局的 20%；训练回合累计 425/1,175 局成功。
+- 末尾 1000 次更新的 Critic loss 约 0.84、TD 绝对误差 0.232、裁剪前 Critic 梯度范数 29.59（约 83.9% 超过阈值 10）；Actor 梯度范数约 0.32（约 12.9% 超过阈值 0.5）。相较有航向组，这些末期指标与成功率更好，但两组都存在较高梯度裁剪比例。
+- **步数判断**：30 万步已足以出现 1v1 全部拦截，问题不能简单归因于训练步数不够。两组周期评估波动都很大，继续训练可能改善也可能破坏策略。每个检查点只用固定 10 个种子评估；确认泛化前需用独立种子评估 Best/Last，并保留检查点间的波动信息。
 
 ## 后续追加格式
 

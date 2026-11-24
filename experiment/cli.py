@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import yaml
 
-from env.interception import InterceptionEnv
+from env import make_environment
 
 from .interception import (evaluate_policy,evaluation_interval_for_budget,load_run,read_config,require_matching_attack_mode,
                            summarize,train,write_json)
@@ -69,7 +69,7 @@ def main(argv=None):
         if args.device=='cuda':
             import torch
             if not torch.cuda.is_available():raise ValueError('CUDA is unavailable')
-        plan=dict(status='supported',environment_contract=InterceptionEnv(config).contract,
+        plan=dict(status='supported',environment_contract=make_environment(config).contract,
                   algorithm=args.algorithm,attack_mode=args.attack_mode,sampled_steps=args.total_sampled_steps,
                   num_envs=args.num_envs,rollout_length=rollout,log_every_steps=args.log_every_steps,
                   eval_interval=eval_interval,eval_episodes=args.eval_episodes,

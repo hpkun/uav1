@@ -15,7 +15,7 @@ from algorithm.mappo_config import MAPPOConfig
 from algorithm.maddpg import MADDPG
 from algorithm.maddpg_config import MADDPGConfig
 from algorithm.dual_critic import DualCritic, DualCriticConfig
-from env.interception import InterceptionConfig, InterceptionEnv
+from env import InterceptionConfig, OneVsOneConfig, make_environment
 from env.parallel import ParallelInterceptionEnvs
 from .progress import ProgressLogger
 from .prioritized_replay import PrioritizedReplayBuffer, ReplayConfig
@@ -37,10 +37,10 @@ def digest(path):
 
 def read_config(env_path, algorithm_path=None):
     raw=yaml.safe_load(Path(env_path).read_text(encoding='utf-8'))
-    if not isinstance(raw,dict) or set(raw)!={'schema','environment'} or raw['schema'] not in ('Interception/1','Interception/2','Interception/3','Interception/4','Interception/5','Interception/6','Interception/7','Interception/8'):
+    if not isinstance(raw,dict) or set(raw)!={'schema','environment'} or raw['schema'] not in ('Interception/1','Interception/2','Interception/3','Interception/4','Interception/5','Interception/6','Interception/7','Interception/8','Interception/10'):
         raise ValueError('Expected supported interception environment configuration')
-    config=InterceptionConfig(**raw['environment'])
-    if InterceptionEnv(config).contract['schema']!=raw['schema']:
+    config=(OneVsOneConfig if raw['schema']=='Interception/10' else InterceptionConfig)(**raw['environment'])
+    if make_environment(config).contract['schema']!=raw['schema']:
         raise ValueError('Configuration schema and observation layout disagree')
     if algorithm_path is None:return config,None,None
     learner=yaml.safe_load(Path(algorithm_path).read_text(encoding='utf-8'))
@@ -49,7 +49,9 @@ def read_config(env_path, algorithm_path=None):
     name=learner['algorithm']
     if name not in ('mappo','maddpg','dual_critic'):
         raise ValueError('Unsupported interception algorithm')
-    if name=='dual_critic' and InterceptionEnv(config).contract['version']!='interception_1':
+    if isinstance(config,OneVsOneConfig) and name!='maddpg':
+        raise ValueError('The isolated one-versus-one experiment supports MADDPG only')
+    if name=='dual_critic' and make_environment(config).contract['version']!='interception_1':
         raise ValueError('Dual critic supports only Interception/1')
     parameters={'mappo':MAPPOConfig,'maddpg':MADDPGConfig,'dual_critic':DualCriticConfig}[name](**learner['parameters'])
     rollout=int(learner['training']['rollout_length'])
@@ -63,7 +65,7 @@ def read_config(env_path, algorithm_path=None):
 
 
 def make_policy(name,config,parameters,device,seed,environment_contract=None,environment_config=None):
-    environment=InterceptionEnv(config)
+    environment=make_environment(config)
     contract=environment_contract if environment_contract is not None else environment.contract
     snapshot=dict(environment=asdict(config) if environment_config is None else environment_config)
     if name=='mappo':
@@ -95,7 +97,8 @@ def load_run(checkpoint,label='Best',device='cpu'):
     if restored_environment['observation_layout'] in ('relative_assignment','relative_assignment_target_velocity'):
         restored_environment.setdefault('assignment_method','nearest_visible_legacy')
     restored_environment.setdefault('episode_protocol','first_breach')
-    config=replace(InterceptionConfig(**restored_environment),
+    config_type=OneVsOneConfig if settings.get('environment_contract',{}).get('version')=='interception_10' else InterceptionConfig
+    config=replace(config_type(**restored_environment),
                    attack_mode=settings['attack_mode'])
     name=settings['algorithm']
     parameters={'mappo':MAPPOConfig,'maddpg':MADDPGConfig,'dual_critic':DualCriticConfig}[name](**settings['parameters'])
@@ -122,7 +125,7 @@ def evaluate_policy(config,policy,mode,episodes,seed_start):
     rows=[]
     for offset in range(episodes):
         seed=seed_start+offset
-        env=InterceptionEnv(replace(config,attack_mode=mode))
+        env=make_environment(replace(config,attack_mode=mode))
         obs,info=env.reset(seed=seed)
         reward_components={}
         while True:
@@ -157,11 +160,14 @@ def summarize(rows):
         center=(p+z*z/(2*count))/(1+z*z/count)
         half=z*np.sqrt((p*(1-p)+z*z/(4*count))/count)/(1+z*z/count)
         return [float(max(0,center-half)),float(min(1,center+half))]
+    attacker_count=rows[0].get('n_attackers',5)
+    if any(row.get('n_attackers',5)!=attacker_count for row in rows):
+        raise ValueError('Evaluation rows have different attacker counts')
     return dict(episodes=count,counts=outcomes,all_capture_rate=outcomes['all_captured']/count,
                 penetration_rate=outcomes['penetrated']/count,time_limit_rate=outcomes['time_limit']/count,
                 all_capture_95pct_wilson=interval(outcomes['all_captured']),
                 penetration_95pct_wilson=interval(outcomes['penetrated']),
-                capture_efficiency=sum(row['captured_count'] for row in rows)/(5*count),
+                capture_efficiency=sum(row['captured_count'] for row in rows)/(attacker_count*count),
                 mean_first_capture_time_s=float(np.mean(first)) if first else None,
                 mean_duration_s=float(np.mean([row['duration_s'] for row in rows])),
                 mean_defender_oob_count=float(np.mean([row['defender_oob_count'] for row in rows])),
@@ -216,12 +222,12 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
     if prioritized and not 0<round(parameters.batch_size*replay_config.prioritized_fraction)<parameters.batch_size:
         raise ValueError('MADDPG replay batch needs both sampling components')
     root=Path(output)
-    environment=InterceptionEnv(config)
+    environment=make_environment(config)
     if name=='dual_critic' and environment.contract['version']!='interception_1':
         raise ValueError('Dual critic supports only Interception/1')
     root.mkdir(parents=True,exist_ok=False)
     (root/'checkpoints').mkdir()
-    settings=dict(schema='InterceptionRun/1',environment=asdict(config),environment_contract=InterceptionEnv(config).contract,
+    settings=dict(schema='InterceptionRun/1',environment=asdict(config),environment_contract=environment.contract,
                   algorithm=name,parameters=asdict(parameters),rollout_length=rollout,seed=seed,
                   attack_mode=attack_mode,checkpoint_selection_mode=attack_mode,
                   total_sampled_steps=steps,num_envs=num_envs,
@@ -241,7 +247,8 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
     update_log=(root/'updates.jsonl').open('x',encoding='utf-8')
     evaluation_log=(root/'evaluations.jsonl').open('x',encoding='utf-8')
     progress_log=(root/'progress.jsonl').open('x',encoding='utf-8')
-    progress=ProgressLogger(name,steps,log_every_steps,attack_mode=attack_mode)
+    progress=ProgressLogger(name,steps,log_every_steps,attack_mode=attack_mode,
+                            attacker_count=1 if isinstance(config,OneVsOneConfig) else 5)
     best_score=None
     best_entry=None
     next_eval=eval_interval if eval_interval else None
