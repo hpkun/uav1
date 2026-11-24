@@ -56,19 +56,23 @@ class ProgressLogger:
         self.next_step=(step//self.interval+1)*self.interval
         return True
 
-    def snapshot(self,step,episodes,updates,*,replay_size=None,warmup=None):
+    def snapshot(self,step,episodes,updates,*,replay_size=None,replay_capacity=None,warmup=None):
         elapsed=max(self.clock()-self.started,1e-9)
         speed=step/elapsed
         rows=list(self.episodes)
         n=len(rows)
         recent={self.attack_mode:dict(episodes=n,
                 all_capture_rate=sum(row['outcome']=='all_captured' for row in rows)/n if n else None,
-                penetration_rate=sum(row['outcome']=='penetrated' for row in rows)/n if n else None,
-                time_limit_rate=sum(row['outcome']=='time_limit' for row in rows)/n if n else None,
+                failure_rate=sum(row['outcome']!='all_captured' for row in rows)/n if n else None,
+                penetration_rate=sum(row.get('actual_penetrated_count',row.get('penetrated_count',0))>0
+                                     for row in rows)/n if n else None,
+                time_limit_rate=sum(row.get('time_limit_occurred',row['outcome']=='time_limit')
+                                    for row in rows)/n if n else None,
                 capture_efficiency=sum(row['captured_count'] for row in rows)/(self.attacker_count*n) if n else None,
                 mean_team_return=sum(row['team_return'] for row in rows)/n if n else None)}
         keys=('actor_loss','critic_loss','entropy','approx_kl','td_abs',
-              'actor_grad_norm','critic_grad_norm','critic_grad_norm_mean_agent',
+              'actor_grad_norm','actor_clip_rate','critic_grad_norm','critic_clip_rate','active_critic_count',
+              'critic_grad_norm_mean_agent',
               'critic_grad_norm_max_agent','policy_log_std_mean','policy_std_mean',
               'advantage_raw_mean','advantage_raw_std','q_mean','q_std','target_q_mean',
               'explained_variance','clip_fraction','value_norm_std',
@@ -86,48 +90,46 @@ class ProgressLogger:
                     percent=step/self.total_steps,episodes=episodes,updates=updates,
                     elapsed_s=elapsed,steps_per_s=speed,eta_s=(self.total_steps-step)/speed if speed>0 else None,
                     recent_window=len(self.episodes),recent=recent,learning=learning,
-                    replay_size=replay_size,warmup=warmup)
+                    replay_size=replay_size,replay_capacity=replay_capacity,warmup=warmup)
 
     @staticmethod
     def lines(row):
         header=(f"[train {row['algorithm']}] {row['step']:,}/{row['total_steps']:,} ({_percent(row['percent'])})"
                 f" | episodes {row['episodes']} | updates {row['updates']}"
-                f" | {row['steps_per_s']:.0f} steps/s | ETA {_duration(row['eta_s'])}")
+                f" | {row['steps_per_s']:.0f} steps/s")
+        if row['replay_size'] is not None:
+            header+=f" | replay {row['replay_size']:,}"
+            if row['replay_capacity'] is not None:
+                header+=f"/{row['replay_capacity']:,}"
+            if row['warmup'] is not None and row['replay_size']<row['warmup']:
+                header+=f"/{row['warmup']:,} warmup"
         mode=row['attack_mode']
         label={'direct_rush':'direct','split_attack':'split','jia_straight':'jia'}[mode]
         value=row['recent'][mode]
         recent=(f"  recent {row['recent_window']}: {label} n={value['episodes']}"
-                f" all={_percent(value['all_capture_rate'])} breach={_percent(value['penetration_rate'])}"
-                f" cap={_percent(value['capture_efficiency'])} timeout={_percent(value['time_limit_rate'])}"
+                f" all={_percent(value['all_capture_rate'])} cap={_percent(value['capture_efficiency'])}"
+                f" fail={_percent(value['failure_rate'])}"
                 f" return={_number(value['mean_team_return'],2)}")
+        if value['time_limit_rate']:
+            recent+=f" timeout={_percent(value['time_limit_rate'])}"
         learning=row['learning']
         if learning:
-            detail='  learn: '+' '.join(f'{key}={_number(learning.get(key),4)}' for key in
-                ('actor_loss','critic_loss','entropy','approx_kl','explained_variance') if key in learning)
-            if 'td_abs' in learning:detail+=f" td_abs={_number(learning['td_abs'],4)}"
+            keys=(('actor_loss','critic_loss','td_abs','q_mean') if row['algorithm']=='maddpg' else
+                  ('actor_loss','critic_loss','entropy','approx_kl','explained_variance'))
+            detail='  learn: '+' '.join(f'{key}={_number(learning.get(key),4)}' for key in keys if key in learning)
         else:
             detail='  learn: waiting for first update'
-        if row['replay_size'] is not None:
-            detail+=f" | replay={row['replay_size']:,}"
-            if row['warmup'] is not None and row['replay_size']<row['warmup']:
-                detail+=f"/{row['warmup']:,} warmup"
-        diagnostics=('actor_grad_norm','critic_grad_norm','critic_grad_norm_mean_agent',
-                     'critic_grad_norm_max_agent','policy_log_std_mean','policy_std_mean',
-                     'advantage_raw_mean','advantage_raw_std','q_mean','q_std','target_q_mean',
-                     'clip_fraction','value_norm_std')
-        shown=[f'{key}={_number(learning[key],4)}' for key in diagnostics if key in learning]
         lines=[header,recent,detail]
-        if shown:lines.append('  diag: '+' '.join(shown))
-        if 'per_beta' in learning:
-            lines.append('  per: beta='+_number(learning['per_beta'],3)+
-                         ' is_ess='+_number(learning.get('per_is_ess'),3)+
-                         ' is_mean='+_number(learning.get('per_is_weight_mean'),3)+
-                         ' priority='+_number(learning.get('per_priority_mean'),3)+
-                         ' grad_clip='+_percent(learning.get('per_critic_grad_clipped')))
-            events=' '.join(name+'='+_percent(learning.get('per_sample_'+name+'_fraction'))+
-                            '/'+_percent(learning.get('per_buffer_'+name+'_fraction'))
-                            for name in ('capture','first_breach','boundary','ordinary'))
-            lines.append('  per samples/buffer: '+events)
+        if row['algorithm']=='maddpg' and learning:
+            lines.append('  diag: actor_grad_norm='+_number(learning.get('actor_grad_norm'),4)+
+                         ' actor_clip='+_percent(learning.get('actor_clip_rate'))+
+                         ' critic_grad_norm='+_number(learning.get('critic_grad_norm'),4)+
+                         ' critic_clip='+_percent(learning.get('critic_clip_rate'))+
+                         ' active_critics='+_number(learning.get('active_critic_count'),1))
+        elif row['algorithm']!='maddpg' and learning:
+            lines.append('  diag: '+' '.join(f'{key}={_number(learning[key],4)}' for key in
+                         ('actor_grad_norm','critic_grad_norm','policy_std_mean','value_norm_std')
+                         if key in learning))
         return tuple(lines)
 
     @staticmethod
@@ -137,10 +139,12 @@ class ProgressLogger:
         mode,row=next(iter(summaries.items()))
         label={'direct_rush':'direct','split_attack':'split','jia_straight':'jia'}[mode]
         status=(f'[eval {step:,}] {label}: all={_percent(row["all_capture_rate"])}'
-                f' breach={_percent(row["penetration_rate"])}'
-                f' cap={_percent(row["capture_efficiency"])} ({row["episodes"]} eps)')
+                f' cap={_percent(row["capture_efficiency"])}'
+                f' fail={_percent(row.get("failure_rate",1-row["all_capture_rate"]))}'
+                f' return={_number(row.get("mean_team_return"),2)} ({row["episodes"]} eps)')
+        if row.get('time_limit_rate'):
+            status+=f' timeout={_percent(row["time_limit_rate"])}'
         components=row.get('mean_reward_components',{})
         names=('capture','penetration','approach','heading','boundary','danger')
         detail=' '.join(f'{name}={_signed(components[name])}' for name in names if name in components)
-        return (f'{status}\n  reward/ep (undiscounted): {detail}'
-                f' total={_signed(row.get("mean_team_return"))}')
+        return f'{status}\n  reward/ep (undiscounted): {detail}'

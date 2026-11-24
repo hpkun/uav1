@@ -131,6 +131,19 @@ def require_matching_attack_mode(settings,requested):
         raise ValueError(f'Checkpoint trained for {trained}; requested attack mode {requested}')
 
 
+def episode_summary_with_outcome(info):
+    """Report synthetic timeout resolutions separately from physical breaches."""
+    row=dict(info['episode_summary'])
+    events=info['events']
+    synthetic=sum(event['type']=='penetration' and event.get('reason')=='time_limit'
+                  for event in events)
+    row['actual_penetrated_count']=row['penetrated_count']-synthetic
+    row['time_limit_occurred']=any(event['type']=='time_limit' for event in events)
+    if row['actual_penetrated_count']<0:
+        raise AssertionError('Synthetic penetrations exceed episode count')
+    return row
+
+
 def evaluate_policy(config,policy,mode,episodes,seed_start):
     if mode!=config.attack_mode:
         raise ValueError('Evaluation mode differs from checkpoint training mode')
@@ -146,7 +159,7 @@ def evaluate_policy(config,policy,mode,episodes,seed_start):
             for component,value in info['reward_components'].items():
                 reward_components[component]=reward_components.get(component,0.0)+value
             if term or trunc:
-                row=dict(info['episode_summary'])
+                row=episode_summary_with_outcome(info)
                 if row['seed']!=seed:
                     raise AssertionError('Evaluation episode seed mismatch')
                 if not np.isclose(sum(reward_components.values()),row['team_return'],rtol=0,atol=1e-6):
@@ -162,6 +175,8 @@ def summarize(rows):
     count=len(rows)
     if not count:raise ValueError('No evaluation episodes')
     outcomes={key:sum(row['outcome']==key for row in rows) for key in ('all_captured','penetrated','time_limit')}
+    actual_breaches=sum(row.get('actual_penetrated_count',row.get('penetrated_count',0))>0 for row in rows)
+    time_limits=sum(row.get('time_limit_occurred',row['outcome']=='time_limit') for row in rows)
     first=[row['first_capture_time_s'] for row in rows if row['first_capture_time_s'] is not None]
     component_names=sorted({name for row in rows for name in row.get('reward_components',{})})
     mean_reward_components={name:float(np.mean([row.get('reward_components',{}).get(name,0.0) for row in rows]))
@@ -176,9 +191,10 @@ def summarize(rows):
     if any(row.get('n_attackers',5)!=attacker_count for row in rows):
         raise ValueError('Evaluation rows have different attacker counts')
     return dict(episodes=count,counts=outcomes,all_capture_rate=outcomes['all_captured']/count,
-                penetration_rate=outcomes['penetrated']/count,time_limit_rate=outcomes['time_limit']/count,
+                failure_rate=(count-outcomes['all_captured'])/count,
+                penetration_rate=actual_breaches/count,time_limit_rate=time_limits/count,
                 all_capture_95pct_wilson=interval(outcomes['all_captured']),
-                penetration_95pct_wilson=interval(outcomes['penetrated']),
+                penetration_95pct_wilson=interval(actual_breaches),
                 capture_efficiency=sum(row['captured_count'] for row in rows)/(attacker_count*count),
                 mean_first_capture_time_s=float(np.mean(first)) if first else None,
                 mean_duration_s=float(np.mean([row['duration_s'] for row in rows])),
@@ -288,7 +304,7 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
         evaluation_log.flush()
         print(ProgressLogger.evaluation(step,summaries),flush=True)
         own=summaries[attack_mode]
-        score=(own['all_capture_rate'],own['capture_efficiency'],-own['penetration_rate'])
+        score=(own['all_capture_rate'],own['capture_efficiency'],-own['failure_rate'])
         if best_score is None or score>best_score:
             model=root/'checkpoints'/'best.pt'
             save_policy(policy,name,model,step,config)
@@ -335,7 +351,7 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                         for component,value in info['reward_components'].items():
                             totals[component]=totals.get(component,0.0)+value
                         if 'episode_summary' in info:
-                            summary=info['episode_summary']
+                            summary=episode_summary_with_outcome(info)
                             if not np.isclose(sum(totals.values()),summary['team_return'],rtol=0,atol=1e-6):
                                 raise AssertionError('Episode reward ledger mismatch')
                             episodes+=1
@@ -355,8 +371,7 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                                                                  critic_weights=weights,return_td_errors=True)
                                 replay.update_priorities(indices,td_errors)
                                 metrics.update(replay_metrics)
-                                metrics['per_critic_grad_clipped']=float(
-                                    metrics['critic_grad_norm']>parameters.critic_max_grad_norm)
+                                metrics['per_critic_grad_clipped']=metrics['critic_clip_rate']
                             else:metrics=policy.update(replay.sample(parameters.batch_size))
                             updates+=1
                             update_log.write(json.dumps(dict(step=sampled,update=updates,**metrics),allow_nan=False)+'\n')
@@ -375,6 +390,7 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                 if progress.ready(sampled,final=sampled==steps):
                     status=progress.snapshot(sampled,episodes,updates,
                                              replay_size=len(replay) if replay is not None else None,
+                                             replay_capacity=parameters.buffer_capacity if replay is not None else None,
                                              warmup=parameters.warmup(config.episode_steps) if replay is not None else None)
                     progress_log.write(json.dumps(status,allow_nan=False)+'\n')
                     progress_log.flush()

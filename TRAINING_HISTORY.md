@@ -136,6 +136,18 @@
 - 最后 1,000 次更新均值：Actor loss +8.43、Actor 梯度范数 0.205（3.0% 超过阈值）；Critic loss 2.800、TD 绝对误差 0.261、Critic 梯度范数 32.28（75.7% 超过阈值）；Q/target Q 均值约 −8.47/−8.45。Critic 能拟合当前采样分布，不意味着 Actor 已学会稳定拦截。
 - 这一次 seed 的结果支持“目标速度输入对当前无历史帧的加速度 Actor 有帮助”，但不能证明没有目标速度在所有设置中必定失败。三组均使用相同 30 个固定周期评估种子；末次 30/30 仍需要独立种子测试。相对与绝对速度在保留自身速度时信息等价，差别主要是表示形式及优化路径；当前单 seed 的相对速度组学习更早、末期更稳定。
 
+### 2026-11-24 · 1v1 相对速度，距离系数 0.5，600k 从头训练
+
+- [配置](runs/maddpg_1v1_velocity_relative_approach05_seed7_600k/settings.json)、[汇总](runs/maddpg_1v1_velocity_relative_approach05_seed7_600k/summary.json)、[周期评估](runs/maddpg_1v1_velocity_relative_approach05_seed7_600k/evaluations.jsonl)、[更新](runs/maddpg_1v1_velocity_relative_approach05_seed7_600k/updates.jsonl)：600,000 步、2,754 局、59,898 次更新；单环境、seed 7、`γ=0.99`、Actor/Critic LR 为 `0.0003/0.001`、batch 128、更新间隔 10、uniform replay 200k；1v1 Jia 直线、相对目标速度、航向奖励 0，距离系数 0.5。
+- 首次 30/30 是 180k，亦是 Best；但 210k、240k、270k 连续三次 0/30，说明出现严重中期策略退化。300k 恢复 30/30；300k 以后 10 次评估平均成功率 95.3%，最低 540k 的 24/30。Last 600k 为 30/30、团队回报 +104.61、捕获时间均值 18.12 s。20 次固定种子周期评估累计 429/600 成功；训练最后 100 局 97/100，最后 500 局 468/500。
+- Last 每局平均奖励：捕获 +20、距离 +84.61、突防与越界均为 0；距离占这两项正回报约 80.9%。在 210k～270k 的 0/30 评估期间，距离项仍有约 +64～+69，表明缩距本身不足以保证最终捕获。训练末尾 1,000 次更新：Actor loss −28.71、Actor 梯度范数 0.254（7.1% 超过 0.5）；Critic loss 1.283、TD 绝对误差 0.238、Critic 梯度范数 35.03（83.6% 超过 10），Q/target Q 均值约 28.64/28.67。Critic 更新压力较高，单凭这些指标不能证明 Q 发散。
+
+### 2026-11-24 · 1v1 相对速度，距离系数 0.2，700k 从头训练
+
+- [配置](runs/maddpg_1v1_velocity_relative_seed7_700k_from_scratch/settings.json)、[汇总](runs/maddpg_1v1_velocity_relative_seed7_700k_from_scratch/summary.json)、[周期评估](runs/maddpg_1v1_velocity_relative_seed7_700k_from_scratch/evaluations.jsonl)、[更新](runs/maddpg_1v1_velocity_relative_seed7_700k_from_scratch/updates.jsonl)：700,000 步、3,220 局、69,898 次更新；核心学习参数及场景与上条相同，距离系数为 0.2。两组还存在训练预算 600k/700k 与评估间隔 30k/25k 的差异；对比时应以共同训练步数和捕获指标为主。
+- 首次 30/30 在 300k，亦是 Best；350k 再次跌至 0/30，400k 恢复，之后至 700k 连续 13 次评估均达到 29/30 或 30/30，其中 450k～700k 的 11 次均为 30/30。Last 700k 为 30/30、团队回报 +53.85、捕获时间均值 17.59 s。28 次固定种子周期评估累计 551/840 成功；训练最后 100 局 96/100，最后 500 局 481/500。
+- Last 每局平均奖励：捕获 +20、距离 +33.85、突防与越界均为 0；距离占这两项正回报约 62.9%。训练末尾 1,000 次更新：Actor loss −16.95、Actor 梯度范数 0.210（3.6% 超过 0.5）；Critic loss 0.467、TD 绝对误差 0.151、Critic 梯度范数 20.39（54.6% 超过 10），Q/target Q 均值约 16.91/16.92。两组回报与 Q 尺度不同，不能直接依据 Actor loss 或 Q 大小判断策略优劣；这一次 seed 的 0.2 组在后期固定评估上更平稳，0.5 组更早出现 30/30，但中期退化和末期波动均存在。
+
 ## 后续追加格式
 
 每次用户要求分析一次训练，就在“已分析训练记录”末尾新增日期与运行目录的小节，记录：实际配置与完成状态、评估峰值和末次的全歼/捕获/团队回报、主要奖励分量、Actor/Critic 学习指标、训练趋势、可比性限制、`settings.json`/`summary.json`/`evaluations.jsonl` 证据链接。未完成训练明确标注快照，不写成最终结论。

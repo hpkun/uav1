@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from env import make_environment
-from experiment.interception import read_config, summarize
+from experiment.interception import episode_summary_with_outcome,evaluate_policy,read_config, summarize
 
 
 CONFIG = 'configs/interception_one_vs_one_jia.yaml'
@@ -37,7 +37,7 @@ def test_one_vs_one_capture_and_reward():
     env.positions[0, 0] = env.positions[1, 0]
     _, rewards, terminated, truncated, info = env.step(np.zeros((5, 2)))
     assert terminated and not truncated
-    summary = info['episode_summary']
+    summary = episode_summary_with_outcome(info)
     assert summary['outcome'] == 'all_captured'
     assert (summary['captured_count'], summary['penetrated_count'], summary['n_attackers']) == (1, 0, 1)
     assert info['reward_components']['capture'] == 20.0
@@ -54,13 +54,47 @@ def test_one_vs_one_penetration_and_reward():
     env.velocities[1, 0] = [0.0, -5.0]
     _, rewards, terminated, truncated, info = env.step(np.zeros((5, 2)))
     assert terminated and not truncated
-    summary = info['episode_summary']
+    summary = episode_summary_with_outcome(info)
     assert summary['outcome'] == 'penetrated'
     assert (summary['captured_count'], summary['penetrated_count']) == (0, 1)
+    assert summary['actual_penetrated_count']==1 and not summary['time_limit_occurred']
     assert info['reward_components']['penetration'] == -100.0
     np.testing.assert_allclose(info['team_reward'], rewards[0])
     np.testing.assert_allclose(sum(info['reward_components'].values()), summary['team_return'])
-    assert summarize([summary])['capture_efficiency'] == 0.0
+    result=summarize([summary])
+    assert result['capture_efficiency']==0.0
+    assert (result['failure_rate'],result['penetration_rate'],result['time_limit_rate'])==(1,1,0)
+
+
+def test_time_limit_is_failure_without_actual_breach_and_reward_still_balances():
+    config,_,_=read_config(CONFIG)
+    env=make_environment(replace(config,episode_steps=1))
+    env.reset(seed=7)
+    _,_,terminated,truncated,info=env.step(np.zeros((5,2)))
+    summary=episode_summary_with_outcome(info)
+    assert terminated and not truncated  # Existing environment terminal semantics.
+    assert summary['outcome']=='penetrated'
+    assert summary['time_limit_occurred'] is True
+    assert summary['actual_penetrated_count']==0
+    assert summary['penetrated_count']==1  # Existing synthetic timeout resolution.
+    assert any(e['type']=='time_limit' for e in info['events'])
+    assert any(e['type']=='penetration' and e.get('reason')=='time_limit' for e in info['events'])
+    result=summarize([summary])
+    assert (result['failure_rate'],result['penetration_rate'],result['time_limit_rate'])==(1,0,1)
+    assert sum(info['reward_components'].values())==pytest.approx(summary['team_return'])
+
+
+def test_deterministic_evaluation_rewards_balance_with_timeout():
+    config,_,_=read_config(CONFIG)
+    class StationaryPolicy:
+        def policy_actions(self,observations,active_masks,*,deterministic):
+            assert deterministic
+            return np.zeros((len(observations),5,2),np.float32)
+    rows=evaluate_policy(replace(config,episode_steps=1),StationaryPolicy(),
+                         'jia_straight',2,900000)
+    assert all(row['time_limit_occurred'] and row['actual_penetrated_count']==0 for row in rows)
+    for row in rows:
+        assert sum(row['reward_components'].values())==pytest.approx(row['team_return'])
 
 
 def test_target_velocity_views_change_only_assigned_velocity_slots():
