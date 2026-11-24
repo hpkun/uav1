@@ -47,7 +47,6 @@ class InterceptionConfig:
     capture_reward: float = 20.0
     boundary_penalty: float = 2.0
     defender_oob_retire: bool = False
-    prepay_unavoidable_breach: bool = False
     penetration_penalty: float = 100.0
     approach_weight: float | None = None
     heading_weight: float = 0.0
@@ -103,9 +102,6 @@ class InterceptionConfig:
         if self.defender_oob_retire and (self.attack_mode != 'jia_straight' or
                                          self.assignment_method != 'ideal_global_distance_matching'):
             raise ValueError('Boundary retirement requires the isolated Jia ideal interface')
-        if self.prepay_unavoidable_breach and (not self.defender_oob_retire or
-                self.observation_layout != 'relative_assignment_target_velocity_no_defenders'):
-            raise ValueError('Early unavoidable-breach feedback requires the isolated Jia low-level interface')
         if self.episode_protocol not in ('resolve_all_one_penalty_trade', 'resolve_all_one_penalty', 'resolve_all', 'first_breach'):
             raise ValueError('Unknown episode protocol')
         if type(self.episode_steps) is not int or self.episode_steps < 1:
@@ -152,8 +148,7 @@ class InterceptionEnv:
         self.observation_dim = (own_features+(3 if self.target_velocity_layout else 5)*
                                 (self.config.visible_neighbors+self.config.visible_attackers)+
                                 (5 if self.assigned_layout else 0))
-        self.state_dim = (76 if self.config.prepay_unavoidable_breach else 75
-                          if self.assigned_layout else 5*self.observation_dim)
+        self.state_dim = 75 if self.assigned_layout else 5*self.observation_dim
         self.observation_space = spaces.Box(-np.inf, np.inf, (5, self.observation_dim), np.float32)
         self.action_space = spaces.Box(-self.config.defender_acceleration_max,
                                        self.config.defender_acceleration_max, (5, 2), np.float32)
@@ -172,14 +167,12 @@ class InterceptionEnv:
         ideal = self.config.assignment_method == 'ideal_global_distance_matching'
         jia = self.config.attack_mode == 'jia_straight'
         no_defenders = self.config.observation_layout == 'relative_assignment_target_velocity_no_defenders'
-        return dict(schema='Interception/9' if self.config.prepay_unavoidable_breach else 'Interception/8' if no_defenders else 'Interception/7' if self.config.defender_oob_retire else 'Interception/6' if jia else 'Interception/5' if ideal else 'Interception/4' if self.config.heading_weight else 'Interception/3' if self.target_velocity_layout else 'Interception/2' if self.assigned_layout else 'Interception/1',
-                    version='interception_9' if self.config.prepay_unavoidable_breach else 'interception_8' if no_defenders else 'interception_7' if self.config.defender_oob_retire else 'interception_6' if jia else 'interception_5' if ideal else 'interception_4' if self.config.heading_weight else 'interception_3' if self.target_velocity_layout else 'interception_2' if self.assigned_layout else 'interception_1', n_agents=5,
+        return dict(schema='Interception/8' if no_defenders else 'Interception/7' if self.config.defender_oob_retire else 'Interception/6' if jia else 'Interception/5' if ideal else 'Interception/4' if self.config.heading_weight else 'Interception/3' if self.target_velocity_layout else 'Interception/2' if self.assigned_layout else 'Interception/1',
+                    version='interception_8' if no_defenders else 'interception_7' if self.config.defender_oob_retire else 'interception_6' if jia else 'interception_5' if ideal else 'interception_4' if self.config.heading_weight else 'interception_3' if self.target_velocity_layout else 'interception_2' if self.assigned_layout else 'interception_1', n_agents=5,
                     n_attackers=5, observation_dim=self.observation_dim, state_dim=self.state_dim, action_dim=2,
                     action_schema='world_acceleration_disk_si',
                     max_acceleration=self.config.defender_acceleration_max,
-                    reward_schema=('shared_capture_and_first_breach_or_inevitable_breach+assigned_target_approach+assigned_target_heading+boundary_retirement; team=global+mean(local_i)'
-                                   if self.config.prepay_unavoidable_breach else
-                                   'shared_capture_and_first_breach+assigned_target_approach+assigned_target_heading+boundary_retirement; team=global+mean(local_i)'
+                    reward_schema=('shared_capture_and_first_breach+assigned_target_approach+assigned_target_heading+boundary_retirement; team=global+mean(local_i)'
                                    if self.config.defender_oob_retire else
                                    'shared_capture_and_first_breach+assigned_target_approach+assigned_target_heading+boundary; team=global+mean(local_i)'
                                    if self.config.heading_weight else
@@ -201,9 +194,7 @@ class InterceptionEnv:
                                         'self_xy_vxy_base_relative_xy_all_4_visible_defenders_all_5_visible_attackers_relative_xy_vxy_valid'
                                         if self.observation_dim==51 else
                                         'self_xy_vxy_all_4_visible_defenders_all_5_visible_attackers_absolute_xy_vxy_valid'),
-                    state_schema=('all_defender_and_attacker_xy_vxy_alive_assignment_matrix_breach_penalty_applied'
-                                  if self.config.prepay_unavoidable_breach else
-                                  'all_defender_and_attacker_xy_vxy_alive_assignment_matrix'
+                    state_schema=('all_defender_and_attacker_xy_vxy_alive_assignment_matrix'
                                   if self.assigned_layout else 'five_defender_observations_in_agent_order'),
                     assignment_schema=('global_initial_one_to_one_distance_event_replan'
                                        if ideal else
@@ -280,7 +271,6 @@ class InterceptionEnv:
         self.finished = False
         self.captured_count = 0
         self.penetrated_count = 0
-        self.breach_penalty_applied = False
         self.defender_oob_count = 0
         self.first_capture_time_s = None
         self.global_return = 0.0
@@ -344,9 +334,7 @@ class InterceptionEnv:
             matrix=np.zeros((5,5),np.float32)
             for i,j in enumerate(self.assignment.targets):
                 if self.defender_alive[i] and j>=0:matrix[i,j]=1
-            state=np.concatenate((*physical,matrix.ravel()))
-            return (np.concatenate((state,np.array([float(self.breach_penalty_applied)],np.float32)))
-                    if self.config.prepay_unavoidable_breach else state)
+            return np.concatenate((*physical,matrix.ravel()))
         return self.observations().reshape(self.state_dim).copy()
 
     def _attacker_actions(self):
@@ -469,19 +457,10 @@ class InterceptionEnv:
                         breached.append(int(j))
                         events.append(dict(type='penetration',step=self.step_count,time_s=time_s,
                                            attacker=int(j),position=self.positions[1,j].tolist(),reason='time_limit'))
-            first_breach=bool(breached) and (not self.breach_penalty_applied
-                         if c.prepay_unavoidable_breach else self.penetrated_count==0)
+            first_breach=bool(breached) and self.penetrated_count==0
             self.attacker_alive[breached] = False
             self.velocities[1,breached] = 0
             self.penetrated_count += len(breached)
-            if (c.prepay_unavoidable_breach and not first_breach and
-                    not self.breach_penalty_applied and
-                    not self.defender_alive.any() and self.attacker_alive.any()):
-                first_breach=True
-                events.append(dict(type='defense_lost',step=self.step_count,time_s=time_s,
-                                   reason='no_defenders_remaining'))
-            if c.prepay_unavoidable_breach and first_breach:
-                self.breach_penalty_applied=True
             outcome = ('penetrated' if self.penetrated_count else 'all_captured') if not self.attacker_alive.any() else None
         else:
             first_breach=bool(breached)
@@ -544,7 +523,7 @@ class InterceptionEnv:
         return self.observations(), (global_reward+local).astype(np.float32), outcome in ('penetrated','all_captured'), outcome=='time_limit', info
 
     def _info(self, events, global_reward, local_rewards, outcome, *, first_breach=False):
-        info = dict(version='interception_9' if self.config.prepay_unavoidable_breach else 'interception_8' if self.config.observation_layout == 'relative_assignment_target_velocity_no_defenders' else 'interception_7' if self.config.defender_oob_retire else 'interception_6' if self.config.attack_mode == 'jia_straight' else 'interception_5' if self.config.assignment_method == 'ideal_global_distance_matching' else 'interception_4' if self.config.heading_weight else 'interception_3' if self.target_velocity_layout else 'interception_2' if self.assigned_layout else 'interception_1',
+        info = dict(version='interception_8' if self.config.observation_layout == 'relative_assignment_target_velocity_no_defenders' else 'interception_7' if self.config.defender_oob_retire else 'interception_6' if self.config.attack_mode == 'jia_straight' else 'interception_5' if self.config.assignment_method == 'ideal_global_distance_matching' else 'interception_4' if self.config.heading_weight else 'interception_3' if self.target_velocity_layout else 'interception_2' if self.assigned_layout else 'interception_1',
                     step=self.step_count, time_s=self.step_count*self.config.dt,
                     attack_mode=self.config.attack_mode, central_state=self.central_state(),
                     active_masks=self.defender_alive.astype(np.float32),
