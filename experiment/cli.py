@@ -7,7 +7,7 @@ import yaml
 
 from env import make_environment
 
-from .interception import (evaluate_policy,evaluation_interval_for_budget,load_run,read_config,require_matching_attack_mode,
+from .interception import (evaluate_policy,evaluation_interval_for_budget,load_run,read_config,require_matching_attack_mode,validate_warm_start,
                            summarize,train,write_json)
 from .prioritized_replay import ReplayConfig
 
@@ -30,6 +30,8 @@ def parser():
         p.add_argument('--eval-episodes',type=int,default=10)
         p.add_argument('--log-every-steps',type=int,default=10000)
         p.add_argument('--output-dir',type=Path,required=True)
+        p.add_argument('--warm-start-run',type=Path,
+                       help='MADDPG Last checkpoint learner state; replay and episodes start fresh')
     p=commands.add_parser('evaluate')
     p.add_argument('--checkpoint',type=Path,required=True)
     p.add_argument('--label',choices=('Best','Last'),default='Best')
@@ -69,11 +71,19 @@ def main(argv=None):
         if args.device=='cuda':
             import torch
             if not torch.cuda.is_available():raise ValueError('CUDA is unavailable')
+        warm_start=(validate_warm_start(args.warm_start_run,config,parameters,args.algorithm,args.attack_mode,args.device)
+                    if args.warm_start_run is not None else None)
         plan=dict(status='supported',environment_contract=make_environment(config).contract,
                   algorithm=args.algorithm,attack_mode=args.attack_mode,sampled_steps=args.total_sampled_steps,
                   num_envs=args.num_envs,rollout_length=rollout,log_every_steps=args.log_every_steps,
                   eval_interval=eval_interval,eval_episodes=args.eval_episodes,
                   output=str(args.output_dir.resolve()))
+        if warm_start is not None:
+            plan['warm_start']=dict(source_checkpoint=str(warm_start[0].resolve()),
+                                    source_step=warm_start[1]['total_sampled_steps'],
+                                    additional_steps=args.total_sampled_steps,
+                                    cumulative_steps=warm_start[1]['total_sampled_steps']+args.total_sampled_steps,
+                                    scope='learner and optimizer state; fresh replay and environment episodes')
         if replay_config.mode!='uniform':plan['replay']=vars(replay_config)
         if args.command=='preflight':
             print(json.dumps(plan,ensure_ascii=False,indent=2))
@@ -81,7 +91,8 @@ def main(argv=None):
         return train(config,parameters,rollout,args.algorithm,steps=args.total_sampled_steps,num_envs=args.num_envs,
                      seed=args.seed,device=args.device,attack_mode=args.attack_mode,output=args.output_dir,
                      eval_interval=eval_interval,eval_episodes=args.eval_episodes,
-                     log_every_steps=args.log_every_steps,replay_config=replay_config)
+                     log_every_steps=args.log_every_steps,replay_config=replay_config,
+                     warm_start_run=args.warm_start_run)
     if args.command=='evaluate':
         if args.output_dir.exists():raise FileExistsError(args.output_dir)
         if args.episodes_per_mode<1 or args.seed<0:raise ValueError('Invalid evaluation count or seed')

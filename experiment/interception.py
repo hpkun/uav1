@@ -113,6 +113,18 @@ def load_run(checkpoint,label='Best',device='cpu'):
     return config,policy,name,model,settings
 
 
+def validate_warm_start(run,config,parameters,name,mode,device):
+    if name!='maddpg':
+        raise ValueError('Learner warm start currently supports MADDPG only')
+    source_config,_,source_name,model,source=load_run(run,'Last',device)
+    if (source_name!=name or source['attack_mode']!=mode or
+            asdict(source_config)!=asdict(config) or source['parameters']!=asdict(parameters) or
+            source['environment_contract']!=make_environment(config).contract or
+            source.get('replay',{}).get('mode','uniform')!='uniform'):
+        raise ValueError('Warm-start checkpoint does not match the new experiment')
+    return model,source
+
+
 def require_matching_attack_mode(settings,requested):
     trained=settings.get('attack_mode')
     if trained not in ('direct_rush','split_attack','jia_straight') or requested!=trained:
@@ -205,7 +217,8 @@ def evaluation_interval_for_budget(steps,num_envs):
 
 
 def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mode,output,
-          eval_interval=None,eval_episodes=10,log_every_steps=10000,replay_config=None):
+          eval_interval=None,eval_episodes=10,log_every_steps=10000,replay_config=None,
+          warm_start_run=None):
     if num_envs<1 or steps<1 or steps%num_envs or log_every_steps<1 or attack_mode not in ('direct_rush','split_attack','jia_straight'):
         raise ValueError('Invalid training budget or attack mode')
     if eval_interval is None:
@@ -221,6 +234,8 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
         raise ValueError('PER event diagnostics require the current one-penalty interception protocol')
     if prioritized and not 0<round(parameters.batch_size*replay_config.prioritized_fraction)<parameters.batch_size:
         raise ValueError('MADDPG replay batch needs both sampling components')
+    warm_start=(validate_warm_start(warm_start_run,config,parameters,name,attack_mode,device)
+                if warm_start_run is not None else None)
     root=Path(output)
     environment=make_environment(config)
     if name=='dual_critic' and environment.contract['version']!='interception_1':
@@ -235,8 +250,18 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                   learner_reward_interface=('team_scalar' if name=='mappo' else 'per_defender_vector' if name=='maddpg'
                                             else 'global_scalar_and_mean_local_scalar'))
     if prioritized:settings['replay']=asdict(replay_config)
+    if warm_start is not None:
+        model,source=warm_start
+        settings['warm_start']=dict(source_run=str(Path(warm_start_run).resolve()),
+                                    checkpoint=str(model.resolve()),sha256=digest(model),
+                                    source_step=source['total_sampled_steps'],
+                                    scope='learner and optimizer state; fresh replay and environment episodes')
+        settings['cumulative_sampled_steps']=settings['warm_start']['source_step']+steps
     write_json(root/'settings.json',settings)
     policy=make_policy(name,config,parameters,device,seed)
+    if warm_start is not None:
+        policy.load(warm_start[0],load_optimizers=True)
+        policy.experiment_provenance=dict(warm_start=settings['warm_start'])
     if prioritized:policy.experiment_provenance=dict(replay=asdict(replay_config))
     replay=(PrioritizedReplayBuffer(parameters.buffer_capacity,seed,alpha=replay_config.alpha,epsilon=replay_config.epsilon)
             if prioritized else ReplayBuffer(parameters.buffer_capacity,seed) if name!='mappo' else None)
