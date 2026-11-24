@@ -1,5 +1,7 @@
 """The isolated one-on-one task must resolve and reward exactly one aircraft pair."""
+from dataclasses import replace
 import numpy as np
+import pytest
 
 from env import make_environment
 from experiment.interception import read_config, summarize
@@ -59,3 +61,39 @@ def test_one_vs_one_penetration_and_reward():
     np.testing.assert_allclose(info['team_reward'], rewards[0])
     np.testing.assert_allclose(sum(info['reward_components'].values()), summary['team_return'])
     assert summarize([summary])['capture_efficiency'] == 0.0
+
+
+def test_target_velocity_views_change_only_assigned_velocity_slots():
+    baseline, _, _ = read_config('configs/interception_one_vs_one_jia_no_heading.yaml')
+    observations = {}
+    states = {}
+    environments = {}
+    for view in ('relative', 'absolute', 'none'):
+        env = make_environment(replace(baseline, target_velocity_view=view))
+        observation, info = env.reset(seed=17)
+        environments[view] = env
+        observations[view] = observation
+        states[view] = info['central_state']
+        assert observation.shape == (5, 24)
+        assert env.contract['observation_dim'] == 24
+        assert env.contract['state_dim'] == 75
+    relative = observations['relative']
+    absolute = observations['absolute']
+    absent = observations['none']
+    np.testing.assert_array_equal(states['relative'], states['absolute'])
+    np.testing.assert_array_equal(states['relative'], states['none'])
+    for other in (absolute, absent):
+        np.testing.assert_array_equal(relative[:, :-3], other[:, :-3])
+        np.testing.assert_array_equal(relative[:, -1], other[:, -1])
+    defender_velocity = environments['relative'].velocities[0, 0]
+    attacker_velocity = environments['relative'].velocities[1, 0]
+    np.testing.assert_allclose(relative[0, -3:-1], (attacker_velocity-defender_velocity)/10)
+    np.testing.assert_allclose(absolute[0, -3:-1], attacker_velocity/10)
+    np.testing.assert_array_equal(absent[:, -3:-1], 0)
+    np.testing.assert_array_equal(relative[1:], 0)
+
+
+def test_target_velocity_view_rejects_unknown_value():
+    baseline, _, _ = read_config('configs/interception_one_vs_one_jia_no_heading.yaml')
+    with pytest.raises(ValueError, match='target velocity view'):
+        replace(baseline, target_velocity_view='other')

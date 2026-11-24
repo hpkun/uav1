@@ -11,6 +11,7 @@ from .interception import InterceptionConfig, InterceptionEnv
 @dataclass(frozen=True)
 class OneVsOneConfig(InterceptionConfig):
     scenario: str = 'one_vs_one'
+    target_velocity_view: str = 'relative'
 
     def __post_init__(self):
         super().__post_init__()
@@ -19,6 +20,8 @@ class OneVsOneConfig(InterceptionConfig):
                 self.observation_layout != 'relative_assignment_target_velocity_no_defenders' or
                 not self.defender_oob_retire):
             raise ValueError('One-versus-one requires the isolated Jia low-level configuration')
+        if self.target_velocity_view not in ('relative', 'absolute', 'none'):
+            raise ValueError('Unsupported one-versus-one target velocity view')
 
 
 class OneVsOneEnv(InterceptionEnv):
@@ -41,7 +44,21 @@ class OneVsOneEnv(InterceptionEnv):
                       state_schema='five_slot_padded_defender_and_attacker_xy_vxy_alive_assignment_matrix',
                       implementation_sha256=hashlib.sha256(source).hexdigest(),
                       config=asdict(self.config))
+        result['observation_schema'] += f'; target_velocity_view={self.config.target_velocity_view}'
         return result
+
+    def observations(self):
+        observations = super().observations()
+        mode = self.config.target_velocity_view
+        if mode != 'relative':
+            scale = self.config.defender_speed_max + self.config.attacker_speed_max
+            for i in np.flatnonzero(self.defender_alive):
+                if observations[i, -1] == 0:
+                    continue
+                target = int(self.assignment.targets[i])
+                observations[i, -3:-1] = (self.velocities[1, target] / scale
+                                           if mode == 'absolute' else 0.0)
+        return observations
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed, options=options)

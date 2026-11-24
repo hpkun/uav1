@@ -54,6 +54,9 @@
 | V10 | MADDPG · 1v1 Jia 直线 | [maddpg_one_vs_one_jia_seed7_300k](runs/maddpg_one_vs_one_jia_seed7_300k/settings.json) | O24/S75 · 1 对有效 UAV · d0.2 · h0.03 · r5 · γ0.99 · I10 · E1 | 本机主动停止，进度日志至 80k/300k；无完整汇总 | — | — | — |
 | V10 | MADDPG · 1v1 Jia 直线 | [maddpg_one_vs_one_jia_seed7_300k_run2](runs/maddpg_one_vs_one_jia_seed7_300k_run2/summary.json) | O24/S75 · 1 对有效 UAV · d0.2 · h0.03 · r5 · γ0.99 · I10 · E1 | 300k/300k · 29898次 | 70%/70% | 0%/0% | -78.3 |
 | V10 | MADDPG · 1v1 Jia 直线 | [maddpg_one_vs_one_jia_no_heading_seed7_300k](runs/maddpg_one_vs_one_jia_no_heading_seed7_300k/summary.json) | O24/S75 · 1 对有效 UAV · d0.2 · h0 · r5 · γ0.99 · I10 · E1 | 300k/300k · 29898次 | 100%/100% | 100%/100% | +53.7 |
+| V10 | MADDPG · 1v1 Jia 直线 | [maddpg_1v1_velocity_relative_seed7_500k](runs/maddpg_1v1_velocity_relative_seed7_500k/summary.json) | O24/S75 · 目标相对速度 · d0.2 · h0 · r5 · γ0.99 · I10 · E1 | 500k/500k · 49898次 | 100%/100% | 100%/100% | +53.9 |
+| V10 | MADDPG · 1v1 Jia 直线 | [maddpg_1v1_velocity_absolute_seed7_500k](runs/maddpg_1v1_velocity_absolute_seed7_500k/summary.json) | O24/S75 · 目标绝对速度 · d0.2 · h0 · r5 · γ0.99 · I10 · E1 | 500k/500k · 49898次 | 100%/100% | 100%/100% | +53.9 |
+| V10 | MADDPG · 1v1 Jia 直线 | [maddpg_1v1_velocity_none_seed7_500k](runs/maddpg_1v1_velocity_none_seed7_500k/summary.json) | O24/S75 · 目标速度两维置零 · d0.2 · h0 · r5 · γ0.99 · I10 · E1 | 500k/500k · 49898次 | 37%/37% | 0%/0% | -78.2 |
 
 ### 未完成目录说明
 
@@ -113,6 +116,25 @@
 - 全部周期评估累计 68/200 局成功，均值 34%，与有航向组的 33% 接近；后五次评估均值为 64%，有航向组为 34%。训练末尾 100 局成功率 66%，高于开头 100 局的 20%；训练回合累计 425/1,175 局成功。
 - 末尾 1000 次更新的 Critic loss 约 0.84、TD 绝对误差 0.232、裁剪前 Critic 梯度范数 29.59（约 83.9% 超过阈值 10）；Actor 梯度范数约 0.32（约 12.9% 超过阈值 0.5）。相较有航向组，这些末期指标与成功率更好，但两组都存在较高梯度裁剪比例。
 - **步数判断**：30 万步已足以出现 1v1 全部拦截，问题不能简单归因于训练步数不够。两组周期评估波动都很大，继续训练可能改善也可能破坏策略。每个检查点只用固定 10 个种子评估；确认泛化前需用独立种子评估 Best/Last，并保留检查点间的波动信息。
+
+### 2026-11-24 · 1v1 目标速度观测消融：相对速度，500k
+
+- [配置](runs/maddpg_1v1_velocity_relative_seed7_500k/settings.json)、[汇总](runs/maddpg_1v1_velocity_relative_seed7_500k/summary.json)、[评估](runs/maddpg_1v1_velocity_relative_seed7_500k/evaluations.jsonl)、[更新](runs/maddpg_1v1_velocity_relative_seed7_500k/updates.jsonl)：500,000 步、2,140 局、49,898 次 Critic/Actor 更新；`γ=0.99`、Actor/Critic LR `0.0003/0.001`、batch 128、warmup 1,024、每 10 步更新一次、replay 容量 200k、单环境、seed 7。三组仅指定目标的速度编码不同，环境实现哈希相同。
+- Best 在 300k 首次达到固定 30 局全部成功；350k 又降到 0/30，400k 后恢复，最后五次评估成功率为 `100%, 96.7%, 100%, 100%, 100%`，均值 99.3%。Last 500k 为 30/30、团队回报 +53.87，成功回合平均捕获时间 17.50 s。20 次评估累计 311/600 局成功；训练最后 100 局成功 97 局。
+- 最后 1,000 次更新均值：Actor loss −4.51、裁剪前 Actor 梯度范数 0.164（0.8% 超过阈值 0.5）；Critic loss 0.688、TD 绝对误差 0.183、Critic 梯度范数 24.51（71.3% 超过阈值 10）；Q 均值 4.45、target Q 均值 4.47。早期 1,000 次更新的 TD 绝对误差约 0.244，末期较低，但仍有较多 Critic 梯度被裁剪。
+
+### 2026-11-24 · 1v1 目标速度观测消融：绝对速度，500k
+
+- [配置](runs/maddpg_1v1_velocity_absolute_seed7_500k/settings.json)、[汇总](runs/maddpg_1v1_velocity_absolute_seed7_500k/summary.json)、[评估](runs/maddpg_1v1_velocity_absolute_seed7_500k/evaluations.jsonl)、[更新](runs/maddpg_1v1_velocity_absolute_seed7_500k/updates.jsonl)：500,000 步、1,918 局、49,898 次 Critic/Actor 更新；训练参数与相对速度组一致。
+- Best 在 475k 首次达到固定 30 局全部成功，Last 500k 仍为 30/30、团队回报 +53.85；但 450k 为 0/30，后五次评估均值仅 60.0%，标准差约 38.9 个百分点。20 次评估累计 220/600 局成功；训练最后 100 局成功 90 局。Last 成功回合平均捕获时间 19.05 s，比相对速度组的 17.50 s 慢约 1.55 s。
+- 最后 1,000 次更新均值：Actor loss +6.11、Actor 梯度范数 0.272（6.9% 超过阈值）；Critic loss 2.902、TD 绝对误差 0.250、Critic 梯度范数 24.84（65.0% 超过阈值）；Q/target Q 均值约 −6.19/−6.16。Actor loss 与 Q 均值的正负受价值基线和采样分布影响，不能直接与另一组比较为策略优劣。
+
+### 2026-11-24 · 1v1 目标速度观测消融：无目标速度，500k
+
+- [配置](runs/maddpg_1v1_velocity_none_seed7_500k/settings.json)、[汇总](runs/maddpg_1v1_velocity_none_seed7_500k/summary.json)、[评估](runs/maddpg_1v1_velocity_none_seed7_500k/evaluations.jsonl)、[更新](runs/maddpg_1v1_velocity_none_seed7_500k/updates.jsonl)：500,000 步、1,803 局、49,898 次 Critic/Actor 更新。Actor 的指定目标速度两维恒为零，保留自身速度；Critic 仍看完整全局速度状态。
+- Best 在 75k 达到 11/30（36.7%），300k 也有 11/30；其余多数检查点为 0/30，最后五次全部 0/30。Last 的捕获奖励 0、突防 −100、接近 +21.84、团队回报 −78.16。20 次评估累计 32/600 局成功；训练最后 100 局却成功 54 局，表明带探索噪声的采样表现和确定性评估严重背离，不能把训练窗口的 54% 当作部署成功率。
+- 最后 1,000 次更新均值：Actor loss +8.43、Actor 梯度范数 0.205（3.0% 超过阈值）；Critic loss 2.800、TD 绝对误差 0.261、Critic 梯度范数 32.28（75.7% 超过阈值）；Q/target Q 均值约 −8.47/−8.45。Critic 能拟合当前采样分布，不意味着 Actor 已学会稳定拦截。
+- 这一次 seed 的结果支持“目标速度输入对当前无历史帧的加速度 Actor 有帮助”，但不能证明没有目标速度在所有设置中必定失败。三组均使用相同 30 个固定周期评估种子；末次 30/30 仍需要独立种子测试。相对与绝对速度在保留自身速度时信息等价，差别主要是表示形式及优化路径；当前单 seed 的相对速度组学习更早、末期更稳定。
 
 ## 后续追加格式
 
