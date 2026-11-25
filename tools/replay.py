@@ -34,7 +34,7 @@ def collect(config,policy,mode,seed):
         events.extend(info['events'])
         if terminated or truncated:
             break
-    trace=dict(schema='InterceptionReplay/1',mode=mode,seed=seed,
+    trace=dict(schema='InterceptionReplay/2' if mode=='radial_straight' else 'InterceptionReplay/1',mode=mode,seed=seed,
                config=env.contract['config'],frames=frames,events=events,summary=info['episode_summary'])
     env.close()
     return trace
@@ -86,7 +86,7 @@ def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--checkpoint',type=Path,required=True)
     p.add_argument('--label',choices=('Best','Last'),default='Best')
-    p.add_argument('--attack-mode',choices=('direct_rush','split_attack','jia_straight'),required=True)
+    p.add_argument('--attack-mode',choices=('direct_rush','split_attack','jia_straight','radial_straight'),required=True)
     p.add_argument('--seed',type=int,default=900001)
     p.add_argument('--device',choices=('cpu','cuda'),default='cpu')
     p.add_argument('--frame-stride',type=int,default=5)

@@ -27,7 +27,7 @@ def _duration(seconds):
 class ProgressLogger:
     def __init__(self,algorithm,total_steps,interval,*,attack_mode,window=100,clock=time.monotonic,
                  attacker_count=5):
-        if interval<1 or attack_mode not in ('direct_rush','split_attack','jia_straight'):
+        if interval<1 or attack_mode not in ('direct_rush','split_attack','jia_straight','radial_straight'):
             raise ValueError('Invalid log interval or attack mode')
         self.algorithm=algorithm
         self.attack_mode=attack_mode
@@ -104,7 +104,7 @@ class ProgressLogger:
             if row['warmup'] is not None and row['replay_size']<row['warmup']:
                 header+=f"/{row['warmup']:,} warmup"
         mode=row['attack_mode']
-        label={'direct_rush':'direct','split_attack':'split','jia_straight':'jia'}[mode]
+        label={'direct_rush':'direct','split_attack':'split','jia_straight':'jia','radial_straight':'radial'}[mode]
         value=row['recent'][mode]
         recent=(f"  recent {row['recent_window']}: {label} n={value['episodes']}"
                 f" all={_percent(value['all_capture_rate'])} cap={_percent(value['capture_efficiency'])}"
@@ -137,7 +137,7 @@ class ProgressLogger:
         if len(summaries)!=1:
             raise ValueError('Periodic evaluation must contain only the training attack mode')
         mode,row=next(iter(summaries.items()))
-        label={'direct_rush':'direct','split_attack':'split','jia_straight':'jia'}[mode]
+        label={'direct_rush':'direct','split_attack':'split','jia_straight':'jia','radial_straight':'radial'}[mode]
         status=(f'[eval {step:,}] {label}: all={_percent(row["all_capture_rate"])}'
                 f' cap={_percent(row["capture_efficiency"])}'
                 f' fail={_percent(row.get("failure_rate",1-row["all_capture_rate"]))}'

@@ -84,7 +84,7 @@ class InterceptionConfig:
                 self.communication_radius is None or not math.isfinite(self.communication_radius)
                 or self.communication_radius<=0):
             raise ValueError('Historical relative observations require a communication radius')
-        if self.attack_mode not in ('direct_rush', 'split_attack', 'jia_straight'):
+        if self.attack_mode not in ('direct_rush', 'split_attack', 'jia_straight', 'radial_straight'):
             raise ValueError('Unknown attack mode')
         if self.assignment_method.startswith('huang_') and self.attack_mode != 'direct_rush':
             raise ValueError('Huang global assignment currently supports direct_rush only')
@@ -95,14 +95,19 @@ class InterceptionConfig:
                                                 'relative_assignment_target_velocity_no_defenders') or
                 self.sensing_radius < 2*math.sqrt(2)*self.arena_half_extent):
             raise ValueError('Ideal global assignment requires assigned observations and full-arena sensing')
-        if self.attack_mode == 'jia_straight' and (
+        if self.attack_mode in ('jia_straight', 'radial_straight') and (
                 self.assignment_method != 'ideal_global_distance_matching' or
                 self.observation_layout not in ('relative_assignment_target_velocity',
                                                 'relative_assignment_target_velocity_no_defenders')):
             raise ValueError('Jia straight trajectories require the isolated ideal interface')
-        if self.defender_oob_retire and (self.attack_mode != 'jia_straight' or
+        if self.defender_oob_retire and (self.attack_mode not in ('jia_straight', 'radial_straight') or
                                          self.assignment_method != 'ideal_global_distance_matching'):
             raise ValueError('Boundary retirement requires the isolated Jia ideal interface')
+        if self.attack_mode == 'radial_straight' and (self.observation_layout != 'relative_assignment_target_velocity_no_defenders' or
+                self.base_x != 0 or self.base_y != 0 or
+                self.arena_half_extent < 180 or self.breach_radius != 30 or
+                self.defender_initial_speed != 0):
+            raise ValueError('Radial straight requires the isolated central battlefield geometry')
         if self.episode_protocol not in ('resolve_all_one_penalty_trade', 'resolve_all_one_penalty', 'resolve_all', 'first_breach'):
             raise ValueError('Unknown episode protocol')
         if self.breach_penalty_mode not in ('first_breach','per_target'):
@@ -171,9 +176,10 @@ class InterceptionEnv:
     def contract(self):
         ideal = self.config.assignment_method == 'ideal_global_distance_matching'
         jia = self.config.attack_mode == 'jia_straight'
+        radial = self.config.attack_mode == 'radial_straight'
         no_defenders = self.config.observation_layout == 'relative_assignment_target_velocity_no_defenders'
-        return dict(schema='Interception/8' if no_defenders else 'Interception/7' if self.config.defender_oob_retire else 'Interception/6' if jia else 'Interception/5' if ideal else 'Interception/4' if self.config.heading_weight else 'Interception/3' if self.target_velocity_layout else 'Interception/2' if self.assigned_layout else 'Interception/1',
-                    version='interception_8' if no_defenders else 'interception_7' if self.config.defender_oob_retire else 'interception_6' if jia else 'interception_5' if ideal else 'interception_4' if self.config.heading_weight else 'interception_3' if self.target_velocity_layout else 'interception_2' if self.assigned_layout else 'interception_1', n_agents=5,
+        return dict(schema='Interception/11' if radial else 'Interception/8' if no_defenders else 'Interception/7' if self.config.defender_oob_retire else 'Interception/6' if jia else 'Interception/5' if ideal else 'Interception/4' if self.config.heading_weight else 'Interception/3' if self.target_velocity_layout else 'Interception/2' if self.assigned_layout else 'Interception/1',
+                    version='interception_11' if radial else 'interception_8' if no_defenders else 'interception_7' if self.config.defender_oob_retire else 'interception_6' if jia else 'interception_5' if ideal else 'interception_4' if self.config.heading_weight else 'interception_3' if self.target_velocity_layout else 'interception_2' if self.assigned_layout else 'interception_1', n_agents=5,
                     n_attackers=5, observation_dim=self.observation_dim, state_dim=self.state_dim, action_dim=2,
                     action_schema='world_acceleration_disk_si',
                     max_acceleration=self.config.defender_acceleration_max,
@@ -253,12 +259,22 @@ class InterceptionEnv:
             raise ValueError('Use an explicit InterceptionConfig for scenario changes')
         self.rng = np.random.default_rng(seed)
         self.seed = seed
-        self.positions[0] = self._spawn(-35, 35, -95, -75)
+        if self.config.attack_mode == 'radial_straight':
+            angles = np.pi / 2 + np.arange(5) * (2 * np.pi / 5) + self.rng.uniform(-np.pi/60, np.pi/60, 5)
+            attacker_radii = self.rng.uniform(160, 180, 5)
+            defender_angles = angles + np.pi/9
+            defender_radii = self.rng.uniform(50, 60, 5)
+            self.positions[0] = np.column_stack((defender_radii*np.cos(defender_angles),
+                                                 defender_radii*np.sin(defender_angles)))
+            self.positions[1] = np.column_stack((attacker_radii*np.cos(angles),
+                                                 attacker_radii*np.sin(angles)))
+        else:
+            self.positions[0] = self._spawn(-35, 35, -95, -75)
         if self.config.attack_mode == 'jia_straight':
             # Stratified top-edge deployment retains randomness while separating the five approach lanes.
             self.positions[1,:,0] = np.linspace(-55,55,5)+self.rng.uniform(-4,4,5)
             self.positions[1,:,1] = self.rng.uniform(75,90,5)
-        else:
+        elif self.config.attack_mode != 'radial_straight':
             self.positions[1] = self._spawn(-30, 30, 75, 90)
         self.velocities.fill(0)
         self.attacker_alive.fill(True)
@@ -266,7 +282,9 @@ class InterceptionEnv:
         self.split_flank = np.where(np.argsort(np.argsort(self.positions[1,:,0])) < 2, -1, 1)
         self.split_switched = np.zeros(5, bool)
         self.velocities[0,:,1] = self.config.defender_initial_speed
-        if self.config.attack_mode == 'jia_straight':
+        if self.config.attack_mode == 'radial_straight':
+            targets = np.broadcast_to(self.base,(5,2))
+        elif self.config.attack_mode == 'jia_straight':
             offsets = np.linspace(-0.9, 0.9, 5)
             radius = self.config.breach_radius
             target_x = self.config.base_x + radius * offsets
@@ -354,7 +372,7 @@ class InterceptionEnv:
         c = self.config
         actions = np.zeros((5,2), np.float64)
         for j in np.flatnonzero(self.attacker_alive):
-            if c.attack_mode == 'jia_straight':
+            if c.attack_mode in ('jia_straight', 'radial_straight'):
                 desired = c.attacker_speed_max*self.attacker_course_directions[j]
                 actions[j] = _limit(((desired-self.velocities[1,j])/0.5)[None],c.attacker_acceleration_max)[0]
                 continue
@@ -537,7 +555,7 @@ class InterceptionEnv:
         return self.observations(), (global_reward+local).astype(np.float32), outcome in ('penetrated','all_captured'), outcome=='time_limit', info
 
     def _info(self, events, global_reward, local_rewards, outcome, *, first_breach=False):
-        info = dict(version='interception_8' if self.config.observation_layout == 'relative_assignment_target_velocity_no_defenders' else 'interception_7' if self.config.defender_oob_retire else 'interception_6' if self.config.attack_mode == 'jia_straight' else 'interception_5' if self.config.assignment_method == 'ideal_global_distance_matching' else 'interception_4' if self.config.heading_weight else 'interception_3' if self.target_velocity_layout else 'interception_2' if self.assigned_layout else 'interception_1',
+        info = dict(version='interception_11' if self.config.attack_mode == 'radial_straight' else 'interception_8' if self.config.observation_layout == 'relative_assignment_target_velocity_no_defenders' else 'interception_7' if self.config.defender_oob_retire else 'interception_6' if self.config.attack_mode == 'jia_straight' else 'interception_5' if self.config.assignment_method == 'ideal_global_distance_matching' else 'interception_4' if self.config.heading_weight else 'interception_3' if self.target_velocity_layout else 'interception_2' if self.assigned_layout else 'interception_1',
                     step=self.step_count, time_s=self.step_count*self.config.dt,
                     attack_mode=self.config.attack_mode, central_state=self.central_state(),
                     active_masks=self.defender_alive.astype(np.float32),

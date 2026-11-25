@@ -20,7 +20,7 @@ def parser():
         p.add_argument('--env-config',type=Path,required=True)
         p.add_argument('--algorithm-config',type=Path,required=True)
         p.add_argument('--algorithm',choices=('mappo','maddpg','dual_critic'),required=True)
-        p.add_argument('--attack-mode',choices=('direct_rush','split_attack','jia_straight'),required=True)
+        p.add_argument('--attack-mode',choices=('direct_rush','split_attack','jia_straight','radial_straight'),required=True)
         p.add_argument('--total-sampled-steps',type=int,required=True)
         p.add_argument('--num-envs',type=int,default=1)
         p.add_argument('--seed',type=int,default=7)
@@ -35,7 +35,7 @@ def parser():
     p=commands.add_parser('evaluate')
     p.add_argument('--checkpoint',type=Path,required=True)
     p.add_argument('--label',choices=('Best','Last'),default='Best')
-    p.add_argument('--attack-mode',choices=('direct_rush','split_attack','jia_straight'))
+    p.add_argument('--attack-mode',choices=('direct_rush','split_attack','jia_straight','radial_straight'))
     p.add_argument('--episodes-per-mode',type=int,default=200)
     p.add_argument('--seed',type=int,default=900000)
     p.add_argument('--device',choices=('cpu','cuda'),default='cpu')
@@ -112,7 +112,7 @@ def main(argv=None):
         return result
     run_settings=json.loads((args.run/'settings.json').read_text(encoding='utf-8'))
     mode=run_settings.get('attack_mode')
-    if mode not in ('direct_rush','split_attack','jia_straight'):
+    if mode not in ('direct_rush','split_attack','jia_straight','radial_straight'):
         raise ValueError('Run training attack mode is unsupported')
     summary=json.loads((args.run/'summary.json').read_text(encoding='utf-8'))
     if args.evaluation:
