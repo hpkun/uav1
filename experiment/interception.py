@@ -15,7 +15,7 @@ from algorithm.mappo_config import MAPPOConfig
 from algorithm.maddpg import MADDPG
 from algorithm.maddpg_config import MADDPGConfig
 from algorithm.dual_critic import DualCritic, DualCriticConfig
-from env import InterceptionConfig, OneVsOneConfig, make_environment
+from env import InterceptionConfig, PaperRewardInterceptionConfig, OneVsOneConfig, make_environment
 from env.parallel import ParallelInterceptionEnvs
 from .progress import ProgressLogger
 from .prioritized_replay import PrioritizedReplayBuffer, ReplayConfig
@@ -37,9 +37,9 @@ def digest(path):
 
 def read_config(env_path, algorithm_path=None):
     raw=yaml.safe_load(Path(env_path).read_text(encoding='utf-8'))
-    if not isinstance(raw,dict) or set(raw)!={'schema','environment'} or raw['schema'] not in ('Interception/1','Interception/2','Interception/3','Interception/4','Interception/5','Interception/6','Interception/7','Interception/8','Interception/10','Interception/11'):
+    if not isinstance(raw,dict) or set(raw)!={'schema','environment'} or raw['schema'] not in ('Interception/1','Interception/2','Interception/3','Interception/4','Interception/5','Interception/6','Interception/7','Interception/8','Interception/10','Interception/11','Interception/12'):
         raise ValueError('Expected supported interception environment configuration')
-    config=(OneVsOneConfig if raw['schema']=='Interception/10' else InterceptionConfig)(**raw['environment'])
+    config=({'Interception/10':OneVsOneConfig,'Interception/12':PaperRewardInterceptionConfig}.get(raw['schema'],InterceptionConfig))(**raw['environment'])
     if make_environment(config).contract['schema']!=raw['schema']:
         raise ValueError('Configuration schema and observation layout disagree')
     if algorithm_path is None:return config,None,None
@@ -97,7 +97,7 @@ def load_run(checkpoint,label='Best',device='cpu'):
     if restored_environment['observation_layout'] in ('relative_assignment','relative_assignment_target_velocity'):
         restored_environment.setdefault('assignment_method','nearest_visible_legacy')
     restored_environment.setdefault('episode_protocol','first_breach')
-    config_type=OneVsOneConfig if settings.get('environment_contract',{}).get('version')=='interception_10' else InterceptionConfig
+    config_type={'interception_10':OneVsOneConfig,'interception_12':PaperRewardInterceptionConfig}.get(settings.get('environment_contract',{}).get('version'),InterceptionConfig)
     config=replace(config_type(**restored_environment),
                    attack_mode=settings['attack_mode'])
     name=settings['algorithm']
