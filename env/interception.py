@@ -141,6 +141,28 @@ class InterceptionConfig:
             raise ValueError('Heading reward requires an assigned-target observation layout')
 
 
+@dataclass(frozen=True)
+class PaperRewardInterceptionConfig(InterceptionConfig):
+    """Isolated paper-inspired credit assignment; legacy scenarios are unchanged.
+
+    The capture_reward in this profile is credited to the capturing defender,
+    teammate_capture_reward to each *other* defender. The shared failure and
+    terminal team bonus are delivered to each defender's reward channel.
+    """
+    teammate_capture_reward: float = 5.0
+    all_captured_reward: float = 50.0
+
+    def __post_init__(self):
+        super().__post_init__()
+        if (self.attack_mode != 'radial_straight' or
+                self.episode_protocol != 'resolve_all_one_penalty_trade' or
+                self.breach_penalty_mode != 'per_target'):
+            raise ValueError('Paper reward profile requires radial one-capture, per-target failure protocol')
+        if any(not math.isfinite(v) or v < 0 for v in
+               (self.teammate_capture_reward,self.all_captured_reward)):
+            raise ValueError('Paper reward weights must be finite and nonnegative')
+
+
 def _limit(vectors: np.ndarray, maximum: float) -> np.ndarray:
     lengths = np.linalg.norm(vectors, axis=-1, keepdims=True)
     return vectors * np.minimum(1.0, maximum / np.maximum(lengths, 1e-12))
@@ -177,13 +199,15 @@ class InterceptionEnv:
         ideal = self.config.assignment_method == 'ideal_global_distance_matching'
         jia = self.config.attack_mode == 'jia_straight'
         radial = self.config.attack_mode == 'radial_straight'
+        paper_reward = isinstance(self.config, PaperRewardInterceptionConfig)
         no_defenders = self.config.observation_layout == 'relative_assignment_target_velocity_no_defenders'
-        return dict(schema='Interception/11' if radial else 'Interception/8' if no_defenders else 'Interception/7' if self.config.defender_oob_retire else 'Interception/6' if jia else 'Interception/5' if ideal else 'Interception/4' if self.config.heading_weight else 'Interception/3' if self.target_velocity_layout else 'Interception/2' if self.assigned_layout else 'Interception/1',
-                    version='interception_11' if radial else 'interception_8' if no_defenders else 'interception_7' if self.config.defender_oob_retire else 'interception_6' if jia else 'interception_5' if ideal else 'interception_4' if self.config.heading_weight else 'interception_3' if self.target_velocity_layout else 'interception_2' if self.assigned_layout else 'interception_1', n_agents=5,
+        return dict(schema='Interception/12' if paper_reward else 'Interception/11' if radial else 'Interception/8' if no_defenders else 'Interception/7' if self.config.defender_oob_retire else 'Interception/6' if jia else 'Interception/5' if ideal else 'Interception/4' if self.config.heading_weight else 'Interception/3' if self.target_velocity_layout else 'Interception/2' if self.assigned_layout else 'Interception/1',
+                    version='interception_12' if paper_reward else 'interception_11' if radial else 'interception_8' if no_defenders else 'interception_7' if self.config.defender_oob_retire else 'interception_6' if jia else 'interception_5' if ideal else 'interception_4' if self.config.heading_weight else 'interception_3' if self.target_velocity_layout else 'interception_2' if self.assigned_layout else 'interception_1', n_agents=5,
                     n_attackers=5, observation_dim=self.observation_dim, state_dim=self.state_dim, action_dim=2,
                     action_schema='world_acceleration_disk_si',
                     max_acceleration=self.config.defender_acceleration_max,
-                    reward_schema=('shared_capture_and_per_target_breach+assigned_target_approach'+
+                    reward_schema=('paper_self_capture+peer_capture+all_captured+shared_per_target_failure+assigned_approach; team=sum_i(r_i)' if paper_reward else
+                                   'shared_capture_and_per_target_breach+assigned_target_approach'+
                                    ('+assigned_target_heading' if self.config.heading_weight else '')+
                                    ('+boundary_retirement' if self.config.defender_oob_retire else '+boundary')+
                                    '; team=global+mean(local_i)'
@@ -523,6 +547,7 @@ class InterceptionEnv:
                 if alive_before[target] and 1e-12 < distance <= c.sensing_radius and speed > 1e-12:
                     heading[i] = float(np.clip(np.dot(defender_velocity_after_action[i],direction)/(speed*distance),-1.0,1.0))
         # Legacy configurations retain their original reward for historical checkpoints.
+        paper_reward = isinstance(c, PaperRewardInterceptionConfig)
         global_reward = 0.0
         if c.episode_protocol in ('resolve_all_one_penalty_trade','resolve_all_one_penalty'):
             failures=(len(breached) if c.breach_penalty_mode=='per_target' else int(first_breach))
@@ -536,9 +561,20 @@ class InterceptionEnv:
                  +c.heading_weight*heading)
         if c.episode_protocol=='first_breach':
             local += c.capture_reward*captured_by-c.penetration_penalty*bool(breached)
+        if paper_reward:
+            # Local self/teammate success signals follow the individual reward
+            # channels of MADDPG; one physical capture is counted only once.
+            n_captures = int(captured_by.sum())
+            local += (c.capture_reward*captured_by +
+                      c.teammate_capture_reward*(n_captures-captured_by))
+            # Shared signals are repeated for each agent, not divided by N.
+            global_reward = (-c.penetration_penalty*len(breached) +
+                             c.all_captured_reward*int(outcome=='all_captured'))
+        individual = global_reward+local
+        team_reward = float(individual.sum()) if paper_reward else float(global_reward+local.mean())
         self.global_return += global_reward
         self.mean_local_return += float(local.mean())
-        self.team_return += global_reward+float(local.mean())
+        self.team_return += team_reward
         self.event_history.extend(events)
         if self.assignment is not None:
             assignment_events = (events + [{'type':'defender_retired'}]
@@ -546,16 +582,23 @@ class InterceptionEnv:
             self._update_assignment(self.step_count, assignment_events)
         info = self._info(events,global_reward,local,outcome,first_breach=first_breach)
         if assigned_before is not None:info['reward_target_ids']=assigned_before.copy()
-        info['reward_components']['approach'] = float(c.approach_weight*approach.mean())
+        if paper_reward:
+            info['reward_components'] = dict(
+                capture_self=float(c.capture_reward*int(captured_by.sum())),
+                capture_teammate=float(c.teammate_capture_reward*(len(captured_by)-1)*int(captured_by.sum())),
+                all_captured=float(len(captured_by)*c.all_captured_reward*int(outcome=='all_captured')),
+                penetration=-float(len(captured_by)*c.penetration_penalty*len(breached)),
+                boundary=-float(c.boundary_penalty*boundary.sum()))
+        info['reward_components']['approach'] = float(c.approach_weight*(approach.sum() if paper_reward else approach.mean()))
         if c.heading_weight:
-            info['reward_components']['heading'] = float(c.heading_weight*heading.mean())
+            info['reward_components']['heading'] = float(c.heading_weight*(heading.sum() if paper_reward else heading.mean()))
         if not np.isclose(sum(info['reward_components'].values()), info['team_reward'],rtol=0,atol=1e-10):
             raise AssertionError('Interception reward ledger mismatch')
         info['executed_actions'] = joint_actions.copy()
-        return self.observations(), (global_reward+local).astype(np.float32), outcome in ('penetrated','all_captured'), outcome=='time_limit', info
+        return self.observations(), individual.astype(np.float32), outcome in ('penetrated','all_captured'), outcome=='time_limit', info
 
     def _info(self, events, global_reward, local_rewards, outcome, *, first_breach=False):
-        info = dict(version='interception_11' if self.config.attack_mode == 'radial_straight' else 'interception_8' if self.config.observation_layout == 'relative_assignment_target_velocity_no_defenders' else 'interception_7' if self.config.defender_oob_retire else 'interception_6' if self.config.attack_mode == 'jia_straight' else 'interception_5' if self.config.assignment_method == 'ideal_global_distance_matching' else 'interception_4' if self.config.heading_weight else 'interception_3' if self.target_velocity_layout else 'interception_2' if self.assigned_layout else 'interception_1',
+        info = dict(version='interception_12' if isinstance(self.config, PaperRewardInterceptionConfig) else 'interception_11' if self.config.attack_mode == 'radial_straight' else 'interception_8' if self.config.observation_layout == 'relative_assignment_target_velocity_no_defenders' else 'interception_7' if self.config.defender_oob_retire else 'interception_6' if self.config.attack_mode == 'jia_straight' else 'interception_5' if self.config.assignment_method == 'ideal_global_distance_matching' else 'interception_4' if self.config.heading_weight else 'interception_3' if self.target_velocity_layout else 'interception_2' if self.assigned_layout else 'interception_1',
                     step=self.step_count, time_s=self.step_count*self.config.dt,
                     attack_mode=self.config.attack_mode, central_state=self.central_state(),
                     active_masks=self.defender_alive.astype(np.float32),
@@ -563,7 +606,9 @@ class InterceptionEnv:
                     assigned_target_ids=(self.assignment.targets.copy() if self.assignment is not None else None),
                     global_reward=float(global_reward), local_rewards=np.asarray(local_rewards,dtype=np.float64).copy(),
                     individual_rewards=(global_reward+local_rewards).copy(),
-                    team_reward=float(global_reward+np.mean(local_rewards)), events=list(events),
+                    team_reward=float(np.sum(global_reward+local_rewards) if isinstance(self.config, PaperRewardInterceptionConfig) else global_reward+np.mean(local_rewards)),
+                    reward_aggregation=('sum_agent' if isinstance(self.config, PaperRewardInterceptionConfig) else 'mean_agent'),
+                    events=list(events),
                     reward_components=dict(capture=float(self.config.capture_reward*sum(e['type']=='capture' for e in events))
                                            /(5 if self.config.episode_protocol=='first_breach' else 1),
                                            boundary=-float(self.config.boundary_penalty*sum(e['type']=='defender_oob' for e in events))/5,
@@ -578,7 +623,8 @@ class InterceptionEnv:
             info['reward_components']['danger'] = float(global_reward)
         if outcome is not None:
             info['episode_summary'] = dict(attack_mode=self.config.attack_mode,outcome=outcome,
-                seed=self.seed,steps=self.step_count,duration_s=info['time_s'],captured_count=self.captured_count,
+                seed=self.seed,steps=self.step_count,duration_s=info['time_s'],
+                reward_aggregation=info['reward_aggregation'],captured_count=self.captured_count,
                 penetrated_count=(self.penetrated_count if self.config.episode_protocol!='first_breach' else
                                   sum(e['type']=='penetration' for e in events)),
                 first_capture_time_s=self.first_capture_time_s,defender_oob_count=self.defender_oob_count,
