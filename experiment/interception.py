@@ -190,7 +190,10 @@ def summarize(rows):
     attacker_count=rows[0].get('n_attackers',5)
     if any(row.get('n_attackers',5)!=attacker_count for row in rows):
         raise ValueError('Evaluation rows have different attacker counts')
-    return dict(episodes=count,counts=outcomes,all_capture_rate=outcomes['all_captured']/count,
+    aggregation=rows[0].get('reward_aggregation','mean_agent')
+    if any(row.get('reward_aggregation','mean_agent')!=aggregation for row in rows):
+        raise ValueError('Cannot aggregate episodes with different reward accounting')
+    return dict(episodes=count,counts=outcomes,reward_aggregation=aggregation,all_capture_rate=outcomes['all_captured']/count,
                 failure_rate=(count-outcomes['all_captured'])/count,
                 penetration_rate=actual_breaches/count,time_limit_rate=time_limits/count,
                 all_capture_95pct_wilson=interval(outcomes['all_captured']),
