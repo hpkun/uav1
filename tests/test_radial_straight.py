@@ -91,3 +91,32 @@ def test_radial_short_training_checkpoint_and_replay(tmp_path):
     restored, policy, _, _, settings = load_run(output, 'Last', 'cpu')
     assert settings['attack_mode'] == restored.attack_mode == 'radial_straight'
     assert validate_trace(collect(restored, policy, 'radial_straight', 900001))['summary']['steps'] == 2
+
+
+def test_radial_local_sum_reward_accounting():
+    """Only reporting/team scalar sums local terms; MADDPG agent rewards stay full."""
+    config, _, _ = read_config(CONFIG)
+    env = InterceptionEnv(config)
+    env.reset(seed=7)
+    _, individual, _, _, info = env.step(np.zeros((5, 2), np.float32))
+    local = info['local_rewards']
+    global_reward = info['global_reward']
+    np.testing.assert_allclose(individual,global_reward+local,rtol=0,atol=1e-5)
+    np.testing.assert_allclose(info['individual_rewards'],global_reward+local)
+    assert np.isclose(info['team_reward'],global_reward+local.sum())
+    assert np.isclose(info['reward_components']['approach'],
+                      config.approach_weight*(
+                          (local/config.approach_weight).sum()))  # no boundary in this step
+    assert np.isclose(sum(info['reward_components'].values()),info['team_reward'])
+    assert np.isclose(env.team_return,info['team_reward'])
+
+    # Legacy straight-line scenario keeps the earlier mean-agent accounting.
+    from dataclasses import replace
+    old = InterceptionEnv(replace(config, attack_mode='jia_straight',base_y=-80,
+                                  breach_radius=15,arena_half_extent=100,
+                                  sensing_radius=300,defender_initial_speed=2))
+    old.reset(seed=7)
+    _, old_individual, _, _, old_info = old.step(np.zeros((5, 2), np.float32))
+    np.testing.assert_allclose(old_individual,old_info['global_reward']+old_info['local_rewards'])
+    assert np.isclose(old_info['team_reward'],
+                      old_info['global_reward']+old_info['local_rewards'].mean())
