@@ -19,22 +19,25 @@ def collect(config,policy,mode,seed):
     frames=[]
     events=[]
 
-    def frame(step,actions=None):
+    def frame(step,actions=None,physical=None):
         return dict(step=step,time_s=step*config.dt,positions=env.positions.tolist(),
                     velocities=env.velocities.tolist(),attacker_alive=env.attacker_alive.tolist(),
                     defender_alive=env.defender_alive.tolist(),
+                    headings=(env.headings.tolist() if hasattr(env,'headings') else None),
                     assigned_target_ids=(env.assignment.targets.tolist() if env.assignment is not None else None),
-                    defender_actions=None if actions is None else np.asarray(actions).tolist())
+                    defender_actions=None if actions is None else np.asarray(actions).tolist(),
+                    physical_commands=None if physical is None else np.asarray(physical).tolist())
 
     frames.append(frame(0))
     while True:
         actions=policy.policy_actions(obs[None],info['active_masks'][None],deterministic=True)[0]
         obs,_,terminated,truncated,info=env.step(actions)
-        frames.append(frame(env.step_count,actions))
+        frames.append(frame(env.step_count,actions,info.get('physical_commands')))
         events.extend(info['events'])
         if terminated or truncated:
             break
-    trace=dict(schema='InterceptionReplay/2' if mode=='radial_straight' else 'InterceptionReplay/1',mode=mode,seed=seed,
+    trace=dict(schema=('InterceptionReplay/3' if env.contract['version']=='interception_13' else
+                       'InterceptionReplay/2' if mode=='radial_straight' else 'InterceptionReplay/1'),mode=mode,seed=seed,
                config=env.contract['config'],frames=frames,events=events,summary=info['episode_summary'])
     env.close()
     return trace
@@ -42,8 +45,8 @@ def collect(config,policy,mode,seed):
 
 def validate_trace(trace):
     frames=trace['frames'];events=trace['events'];summary=trace['summary']
-    attackers=1 if trace['config'].get('scenario')=='one_vs_one' else 5
-    defenders=1 if trace['config'].get('scenario')=='one_vs_one' else 5
+    pairs=trace['config'].get('active_pairs') if trace['config'].get('scenario')=='radial_scale' else None
+    attackers=defenders=pairs if pairs is not None else 1 if trace['config'].get('scenario')=='one_vs_one' else 5
     if len(frames)!=summary['steps']+1 or [row['step'] for row in frames]!=list(range(len(frames))):
         raise ValueError('Replay frame count or order mismatch')
     if any(not 1<=event['step']<=summary['steps'] for event in events):

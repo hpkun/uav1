@@ -64,7 +64,7 @@
   const W=canvas.width, H=canvas.height;
   const radial=d.mode==='radial_straight';
   if(radial){
-    document.querySelector('h1').textContent='中心型五向拦截回放';
+    document.querySelector('h1').textContent=cfg.active_pairs?`中心型${cfg.active_pairs}向拦截回放`:'中心型五向拦截回放';
     showSensing.checked=false;
   }
   const half=cfg.arena_half_extent;
@@ -92,8 +92,10 @@
     g.strokeStyle='#8a9cad';g.lineWidth=2;g.strokeRect(sx(-half),sy(half),2*half*unit,2*half*unit);
     g.font='13px system-ui';g.fillStyle='#546578';
     if(radial){
-      g.fillText('五向径向直线进攻 · 蓝方进入圆周即突防',sx(-half)+9,sy(half)+19);
-      for(const p of frames[0].positions[1]){
+      g.fillText(cfg.active_pairs?`${cfg.active_pairs}向径向直线进攻 · 蓝方进入圆周即突防`:'五向径向直线进攻 · 蓝方进入圆周即突防',sx(-half)+9,sy(half)+19);
+      for(let i=0;i<5;i++){
+        if(!frames[0].attacker_alive[i])continue;
+        const p=frames[0].positions[1][i];
         const angle=Math.atan2(p[1]-cfg.base_y,p[0]-cfg.base_x);
         const x=cfg.base_x+cfg.breach_radius*Math.cos(angle);
         const y=cfg.base_y+cfg.breach_radius*Math.sin(angle);
@@ -140,7 +142,8 @@
         g.strokeStyle=side===0?'rgba(220,65,75,.55)':'rgba(44,120,212,.65)';g.lineWidth=2;g.stroke();
       }
     }
-    document.getElementById('sensor-count').textContent=`D${selected}：友方 ${friends}/4 · 进攻方 ${attackers}/5`;
+    const n=cfg.active_pairs||((cfg.scenario==='one_vs_one')?1:5);
+    document.getElementById('sensor-count').textContent=`D${selected}：友方 ${friends}/${n-1} · 进攻方 ${attackers}/${n}`;
   }
   function vehicles(row){
     for(let i=0;i<5;i++){

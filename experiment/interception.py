@@ -13,9 +13,9 @@ import yaml
 from algorithm.mappo import MAPPO, RolloutBuffer
 from algorithm.mappo_config import MAPPOConfig
 from algorithm.maddpg import MADDPG
-from algorithm.maddpg_config import MADDPGConfig
+from algorithm.maddpg_config import MADDPGConfig, NormalizedMADDPGConfig
 from algorithm.dual_critic import DualCritic, DualCriticConfig
-from env import InterceptionConfig, OneVsOneConfig, make_environment
+from env import InterceptionConfig, OneVsOneConfig, RadialScaleConfig, JiaHeadingConfig, make_environment
 from env.parallel import ParallelInterceptionEnvs
 from .progress import ProgressLogger
 from .prioritized_replay import PrioritizedReplayBuffer, ReplayConfig
@@ -37,9 +37,11 @@ def digest(path):
 
 def read_config(env_path, algorithm_path=None):
     raw=yaml.safe_load(Path(env_path).read_text(encoding='utf-8'))
-    if not isinstance(raw,dict) or set(raw)!={'schema','environment'} or raw['schema'] not in ('Interception/1','Interception/2','Interception/3','Interception/4','Interception/5','Interception/6','Interception/7','Interception/8','Interception/10','Interception/11'):
+    if not isinstance(raw,dict) or set(raw)!={'schema','environment'} or raw['schema'] not in ('Interception/1','Interception/2','Interception/3','Interception/4','Interception/5','Interception/6','Interception/7','Interception/8','Interception/10','Interception/11','Interception/12','Interception/13'):
         raise ValueError('Expected supported interception environment configuration')
-    config=(OneVsOneConfig if raw['schema']=='Interception/10' else InterceptionConfig)(**raw['environment'])
+    config=({'Interception/10':OneVsOneConfig,'Interception/12':RadialScaleConfig,
+             'Interception/13':JiaHeadingConfig}
+            .get(raw['schema'],InterceptionConfig))(**raw['environment'])
     if make_environment(config).contract['schema']!=raw['schema']:
         raise ValueError('Configuration schema and observation layout disagree')
     if algorithm_path is None:return config,None,None
@@ -49,11 +51,13 @@ def read_config(env_path, algorithm_path=None):
     name=learner['algorithm']
     if name not in ('mappo','maddpg','dual_critic'):
         raise ValueError('Unsupported interception algorithm')
-    if isinstance(config,OneVsOneConfig) and name!='maddpg':
-        raise ValueError('The isolated one-versus-one experiment supports MADDPG only')
+    if isinstance(config,(OneVsOneConfig,RadialScaleConfig,JiaHeadingConfig)) and name!='maddpg':
+        raise ValueError('The isolated reduced-scale experiments support MADDPG only')
     if name=='dual_critic' and make_environment(config).contract['version']!='interception_1':
         raise ValueError('Dual critic supports only Interception/1')
-    parameters={'mappo':MAPPOConfig,'maddpg':MADDPGConfig,'dual_critic':DualCriticConfig}[name](**learner['parameters'])
+    parameter_type=(NormalizedMADDPGConfig if isinstance(config,JiaHeadingConfig) else
+                    {'mappo':MAPPOConfig,'maddpg':MADDPGConfig,'dual_critic':DualCriticConfig}[name])
+    parameters=parameter_type(**learner['parameters'])
     rollout=int(learner['training']['rollout_length'])
     if rollout<1:raise ValueError('rollout_length must be positive')
     replay_config=ReplayConfig.from_mapping(learner['training'].get('replay'))
@@ -97,11 +101,15 @@ def load_run(checkpoint,label='Best',device='cpu'):
     if restored_environment['observation_layout'] in ('relative_assignment','relative_assignment_target_velocity'):
         restored_environment.setdefault('assignment_method','nearest_visible_legacy')
     restored_environment.setdefault('episode_protocol','first_breach')
-    config_type=OneVsOneConfig if settings.get('environment_contract',{}).get('version')=='interception_10' else InterceptionConfig
+    config_type={'interception_10':OneVsOneConfig,'interception_12':RadialScaleConfig,
+                 'interception_13':JiaHeadingConfig}.get(
+        settings.get('environment_contract',{}).get('version'),InterceptionConfig)
     config=replace(config_type(**restored_environment),
                    attack_mode=settings['attack_mode'])
     name=settings['algorithm']
-    parameters={'mappo':MAPPOConfig,'maddpg':MADDPGConfig,'dual_critic':DualCriticConfig}[name](**settings['parameters'])
+    parameter_type=(NormalizedMADDPGConfig if isinstance(config,JiaHeadingConfig) else
+                    {'mappo':MAPPOConfig,'maddpg':MADDPGConfig,'dual_critic':DualCriticConfig}[name])
+    parameters=parameter_type(**settings['parameters'])
     model=(root/'checkpoints'/('best.pt' if label=='Best' else 'last.pt')) if Path(checkpoint).is_dir() else Path(checkpoint)
     index=json.loads((root/'checkpoints'/'index.json').read_text(encoding='utf-8'))
     expected=index['checkpoints'].get(label)
@@ -289,7 +297,8 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
     evaluation_log=(root/'evaluations.jsonl').open('x',encoding='utf-8')
     progress_log=(root/'progress.jsonl').open('x',encoding='utf-8')
     progress=ProgressLogger(name,steps,log_every_steps,attack_mode=attack_mode,
-                            attacker_count=1 if isinstance(config,OneVsOneConfig) else 5)
+                            attacker_count=(config.active_pairs if isinstance(config,RadialScaleConfig) else
+                                            1 if isinstance(config,OneVsOneConfig) else 5))
     best_score=None
     best_entry=None
     next_eval=eval_interval if eval_interval else None

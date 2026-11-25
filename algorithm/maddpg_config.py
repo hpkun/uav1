@@ -33,3 +33,15 @@ class MADDPGConfig:
 
     def warmup(self,episode_steps):
         return max(self.batch_size,self.learning_starts)
+
+
+@dataclass
+class NormalizedMADDPGConfig(MADDPGConfig):
+    exploration_std_speed: float = .3
+    exploration_std_turn: float = .3
+
+    def __post_init__(self):
+        super().__post_init__()
+        if (not math.isfinite(self.exploration_std_speed) or not math.isfinite(self.exploration_std_turn) or
+                min(self.exploration_std_speed,self.exploration_std_turn)<0):
+            raise ValueError('Invalid normalized action exploration')

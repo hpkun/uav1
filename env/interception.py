@@ -106,7 +106,7 @@ class InterceptionConfig:
         if self.attack_mode == 'radial_straight' and (self.observation_layout != 'relative_assignment_target_velocity_no_defenders' or
                 self.base_x != 0 or self.base_y != 0 or
                 self.arena_half_extent < 180 or self.breach_radius != 30 or
-                self.defender_initial_speed != 0):
+                (self.defender_initial_speed != 0 and getattr(self,'scenario',None)!='jia_heading_radial')):
             raise ValueError('Radial straight requires the isolated central battlefield geometry')
         if self.episode_protocol not in ('resolve_all_one_penalty_trade', 'resolve_all_one_penalty', 'resolve_all', 'first_breach'):
             raise ValueError('Unknown episode protocol')
@@ -158,6 +158,7 @@ class InterceptionEnv:
         self.observation_dim = (own_features+(3 if self.target_velocity_layout else 5)*
                                 (self.config.visible_neighbors+self.config.visible_attackers)+
                                 (5 if self.assigned_layout else 0))
+        self.observation_core_dim = self.observation_dim
         self.state_dim = 75 if self.assigned_layout else 5*self.observation_dim
         self.observation_space = spaces.Box(-np.inf, np.inf, (5, self.observation_dim), np.float32)
         self.action_space = spaces.Box(-self.config.defender_acceleration_max,
@@ -315,7 +316,7 @@ class InterceptionEnv:
 
     def observations(self):
         c = self.config
-        out = np.zeros((5,self.observation_dim),dtype=np.float32)
+        out = np.zeros((5,self.observation_core_dim),dtype=np.float32)
         absolute=c.observation_layout=='absolute_no_base'
         own_features=4 if c.observation_layout!='relative_with_base' else 6
         for i in range(5):
@@ -396,21 +397,16 @@ class InterceptionEnv:
             actions[j] = _limit(((desired-self.velocities[1,j])/0.5)[None],c.attacker_acceleration_max)[0]
         return actions
 
-    def step(self, defender_actions):
-        if self.finished:
-            raise RuntimeError('reset required after episode end')
-        c = self.config
+    def _validate_defender_actions(self, defender_actions):
         actions = np.asarray(defender_actions,dtype=np.float64)
         if actions.shape != (5,2) or not np.isfinite(actions).all():
             raise ValueError('Expected finite (5,2) defender accelerations')
-        if np.any(np.linalg.norm(actions,axis=1) > c.defender_acceleration_max+1e-6):
+        if np.any(np.linalg.norm(actions,axis=1) > self.config.defender_acceleration_max+1e-6):
             raise ValueError('Defender acceleration exceeds disk')
-        before = self.positions.copy()
-        alive_before = self.attacker_alive.copy()
-        defenders_before = self.defender_alive.copy()
-        assigned_before = self.assignment.targets.copy() if self.assignment is not None else None
-        actions = actions.copy()
-        actions[~defenders_before] = 0
+        return actions
+
+    def _advance_motion(self, actions, defenders_before):
+        c = self.config
         attacker_actions = self._attacker_actions()
         joint_actions = np.stack((actions,attacker_actions))
         self.positions[0,defenders_before] += self.velocities[0,defenders_before]*c.dt
@@ -419,8 +415,28 @@ class InterceptionEnv:
             self.velocities[0,defenders_before]+actions[defenders_before]*c.dt,c.defender_speed_max)
         self.velocities[1,self.attacker_alive] = _limit(
             self.velocities[1,self.attacker_alive]+attacker_actions[self.attacker_alive]*c.dt,c.attacker_speed_max)
-        # Preserve the executed heading before a capture retires either aircraft.
-        defender_velocity_after_action = self.velocities[0].copy() if c.heading_weight else None
+        return joint_actions, self.velocities[0].copy() if c.heading_weight else None
+
+    def _heading_alignment(self, i, target, before, velocity_after):
+        direction = before[1,target]-before[0,i]
+        distance = float(np.linalg.norm(direction))
+        speed = float(np.linalg.norm(velocity_after[i]))
+        if 1e-12 < distance <= self.config.sensing_radius and speed > 1e-12:
+            return float(np.clip(np.dot(velocity_after[i],direction)/(speed*distance),-1.0,1.0))
+        return 0.0
+
+    def step(self, defender_actions):
+        if self.finished:
+            raise RuntimeError('reset required after episode end')
+        c = self.config
+        actions = self._validate_defender_actions(defender_actions)
+        before = self.positions.copy()
+        alive_before = self.attacker_alive.copy()
+        defenders_before = self.defender_alive.copy()
+        assigned_before = self.assignment.targets.copy() if self.assignment is not None else None
+        actions = actions.copy()
+        actions[~defenders_before] = 0
+        joint_actions, defender_velocity_after_action = self._advance_motion(actions, defenders_before)
         self.step_count += 1
         time_s = self.step_count*c.dt
         events = []
@@ -517,11 +533,8 @@ class InterceptionEnv:
                 approach[i] = np.linalg.norm(before[0,i]-before[1,target])-np.linalg.norm(self.positions[0,i]-target_after)
             if c.heading_weight and assigned_before is not None and assigned_before[i] >= 0:
                 target = int(assigned_before[i])
-                direction = before[1,target]-before[0,i]
-                distance = float(np.linalg.norm(direction))
-                speed = float(np.linalg.norm(defender_velocity_after_action[i]))
-                if alive_before[target] and 1e-12 < distance <= c.sensing_radius and speed > 1e-12:
-                    heading[i] = float(np.clip(np.dot(defender_velocity_after_action[i],direction)/(speed*distance),-1.0,1.0))
+                if alive_before[target]:
+                    heading[i] = self._heading_alignment(i,target,before,defender_velocity_after_action)
         # Legacy configurations retain their original reward for historical checkpoints.
         global_reward = 0.0
         if c.episode_protocol in ('resolve_all_one_penalty_trade','resolve_all_one_penalty'):

@@ -6,7 +6,7 @@ import random
 import numpy as np
 import torch
 from torch import nn
-from .maddpg_config import MADDPGConfig
+from .maddpg_config import MADDPGConfig, NormalizedMADDPGConfig
 from .state import (validate_model_state,validate_optimizer_state,validate_counter,validate_torch_rng,
     validate_cuda_rng,validate_numpy_rng,validate_python_rng,validate_generator_rng,loading_transaction)
 
@@ -21,6 +21,16 @@ class DiskActor(nn.Module):
     def forward(self,observation):
         raw=self.net(observation)
         return self.radius*raw/torch.sqrt(1+raw.square().sum(-1,keepdim=True))
+
+
+class BoxActor(nn.Module):
+    def __init__(self,observation_dim,hidden_dim):
+        super().__init__()
+        self.net=nn.Sequential(nn.Linear(observation_dim,hidden_dim),nn.ReLU(),
+            nn.Linear(hidden_dim,hidden_dim),nn.ReLU(),nn.Linear(hidden_dim,2))
+
+    def forward(self,observation):
+        return torch.tanh(self.net(observation))
 
 
 class JointCritic(nn.Module):
@@ -45,8 +55,13 @@ class MADDPG:
         self.device=torch.device(device);self.seed=seed
         self.rng=np.random.default_rng(seed)
         torch.manual_seed(seed)
-        h=self.config.hidden_dim;radius=float(self.environment_spec['max_acceleration'])
-        self.actors=nn.ModuleList([DiskActor(self.environment_spec['observation_dim'],h,radius) for _ in range(5)]).to(self.device)
+        h=self.config.hidden_dim
+        self.normalized_actions=self.environment_spec['action_schema']=='normalized_speed_turn_box'
+        if self.normalized_actions and not isinstance(self.config,NormalizedMADDPGConfig):
+            raise ValueError('Normalized speed-turn actions require normalized MADDPG configuration')
+        actor_type=(lambda:BoxActor(self.environment_spec['observation_dim'],h)) if self.normalized_actions else (
+            lambda:DiskActor(self.environment_spec['observation_dim'],h,float(self.environment_spec['max_acceleration'])))
+        self.actors=nn.ModuleList([actor_type() for _ in range(5)]).to(self.device)
         self.critics=nn.ModuleList([JointCritic(self.environment_spec['state_dim'],h) for _ in range(5)]).to(self.device)
         self.target_actors=deepcopy(self.actors).requires_grad_(False).eval()
         self.target_critics=deepcopy(self.critics).requires_grad_(False).eval()
@@ -64,10 +79,12 @@ class MADDPG:
                  ('interception_4',54,75),('interception_4',36,75),
                  ('interception_5',54,75),('interception_5',36,75),
                  ('interception_6',36,75),('interception_7',36,75),('interception_8',24,75),
-                  ('interception_10',24,75),('interception_11',24,75)) or
+                  ('interception_10',24,75),('interception_11',24,75),('interception_12',24,75),
+                  ('interception_13',26,85)) or
                 any(contract.get(k)!=v for k,v in dict(n_agents=5,action_dim=2).items()) or
-                contract.get('action_schema')!='world_acceleration_disk_si' or
-                not isinstance(contract.get('max_acceleration'),(int,float)) or contract['max_acceleration']<=0):
+                (contract.get('action_schema')!='normalized_speed_turn_box' if contract.get('version')=='interception_13'
+                 else contract.get('action_schema')!='world_acceleration_disk_si' or
+                 not isinstance(contract.get('max_acceleration'),(int,float)) or contract['max_acceleration']<=0)):
             raise ValueError('MADDPG requires a supported interception interface')
         return deepcopy(contract)
 
@@ -81,12 +98,18 @@ class MADDPG:
         mask=torch.as_tensor(active_masks,dtype=torch.float32,device=self.device)
         if obs.ndim!=3 or obs.shape[1:]!=(5,self.environment_spec['observation_dim']) or mask.shape!=obs.shape[:2]:raise ValueError('MADDPG observation/mask shape')
         actions=self._joint(obs,mask).cpu().numpy()
-        if not deterministic and self.config.exploration_std_mps2:
-            actions+=self.rng.normal(0,self.config.exploration_std_mps2,actions.shape).astype(np.float32)
-            radius=self.environment_spec['max_acceleration']
-            norms=np.linalg.norm(actions,axis=-1,keepdims=True)
-            actions*=np.minimum(1.,radius/np.maximum(norms,1e-12))
-            actions*=mask.cpu().numpy()[...,None]
+        if not deterministic:
+            if self.normalized_actions:
+                std=(self.config.exploration_std_speed,self.config.exploration_std_turn)
+                actions+=self.rng.normal(0,std,actions.shape).astype(np.float32)
+                np.clip(actions,-1,1,out=actions)
+                actions*=mask.cpu().numpy()[...,None]
+            elif self.config.exploration_std_mps2:
+                actions+=self.rng.normal(0,self.config.exploration_std_mps2,actions.shape).astype(np.float32)
+                radius=self.environment_spec['max_acceleration']
+                norms=np.linalg.norm(actions,axis=-1,keepdims=True)
+                actions*=np.minimum(1.,radius/np.maximum(norms,1e-12))
+                actions*=mask.cpu().numpy()[...,None]
         return actions.astype(np.float32,copy=False)
 
     def _batch(self,batch):
@@ -99,7 +122,10 @@ class MADDPG:
             raise ValueError('Invalid MADDPG joint replay batch')
         if any(not ((b[k]==0)|(b[k]==1)).all() for k in ('dones','active_masks','next_active_masks')):
             raise ValueError('MADDPG masks/dones must be binary')
-        if (b['actions'].norm(dim=-1)>self.environment_spec['max_acceleration']+1e-4).any():
+        if self.normalized_actions:
+            if (b['actions'].abs()>1+1e-4).any():
+                raise ValueError('MADDPG normalized actions exceed [-1,1]')
+        elif (b['actions'].norm(dim=-1)>self.environment_spec['max_acceleration']+1e-4).any():
             raise ValueError('MADDPG actions exceed physical disk')
         return b
 
