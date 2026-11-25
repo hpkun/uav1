@@ -267,7 +267,10 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                   total_sampled_steps=steps,num_envs=num_envs,
                   log_every_steps=log_every_steps,eval_interval=eval_interval,eval_episodes=eval_episodes,
                   learner_reward_interface=('team_scalar' if name=='mappo' else 'per_defender_vector' if name=='maddpg'
-                                            else 'global_scalar_and_mean_local_scalar'))
+                                            else 'global_scalar_and_mean_local_scalar'),
+                  reward_aggregation=('sum_agent' if isinstance(config,PaperRewardInterceptionConfig) else 'mean_agent'),
+                  critic_horizon=('team_episode' if isinstance(config,PaperRewardInterceptionConfig) and name=='maddpg'
+                                  else 'active_defender' if name=='maddpg' else 'algorithm_default'))
     if prioritized:settings['replay']=asdict(replay_config)
     if warm_start is not None:
         model,source=warm_start
