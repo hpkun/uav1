@@ -105,6 +105,13 @@ class MADDPG:
 
     def update(self,batch,*,actor_batch=None,critic_weights=None,return_td_errors=False):
         b=self._batch(batch);mask=b['active_masks']
+        # The paper reward interface carries team rewards even after a defender
+        # has physically retired. Only the actor is masked by retirement; its
+        # centralized critic learns the remaining team episode, with zero
+        # actions from inactive defenders. Legacy interfaces are unchanged.
+        full_episode_critic = self.environment_spec['version']=='interception_12'
+        critic_mask = torch.ones_like(mask) if full_episode_critic else mask
+        bootstrap_mask = torch.ones_like(mask) if full_episode_critic else b['next_active_masks']
         actor_data=b if actor_batch is None else self._batch(actor_batch)
         actor_mask=actor_data['active_masks']
         if critic_weights is not None:
@@ -113,21 +120,21 @@ class MADDPG:
                 raise ValueError('Invalid MADDPG importance weights')
         with torch.no_grad():
             next_actions=self._joint(b['next_observations'],b['next_active_masks'],target=True)
-            targets=torch.stack([b['rewards'][:,i]+self.config.gamma*(1-b['dones'])*b['next_active_masks'][:,i]*
+            targets=torch.stack([b['rewards'][:,i]+self.config.gamma*(1-b['dones'])*bootstrap_mask[:,i]*
                 critic(b['next_states'],next_actions) for i,critic in enumerate(self.target_critics)],1)
         q=torch.stack([critic(b['states'],b['actions']) for critic in self.critics],1)
-        active_q=q.detach()[mask.bool()]
-        active_targets=targets[mask.bool()]
+        active_q=q.detach()[critic_mask.bool()]
+        active_targets=targets[critic_mask.bool()]
         td=q-targets
-        td_errors=(td.detach().abs()*mask).sum(dim=1)/mask.sum(dim=1).clamp_min(1)
-        squared=td.square()*mask
+        td_errors=(td.detach().abs()*critic_mask).sum(dim=1)/critic_mask.sum(dim=1).clamp_min(1)
+        squared=td.square()*critic_mask
         if critic_weights is not None:squared=squared*weights[:,None]
-        critic_loss=squared.sum()/mask.sum().clamp_min(1)
+        critic_loss=squared.sum()/critic_mask.sum().clamp_min(1)
         if not torch.isfinite(critic_loss):raise FloatingPointError('Nonfinite MADDPG critic loss')
         self.critic_optimizer.zero_grad(set_to_none=True);critic_loss.backward()
         individual_critic_grads=[]
         for i,critic in enumerate(self.critics):
-            if not mask[:,i].bool().any():
+            if not critic_mask[:,i].bool().any():
                 for parameter in critic.parameters():parameter.grad=None
                 continue
             # clip_grad_norm_ returns the norm before clipping.
@@ -162,9 +169,10 @@ class MADDPG:
             critic_grad_norm=float(critic_grad),
             critic_clip_rate=float(any(value>self.config.critic_max_grad_norm for value in individual_critic_grads)),
             active_critic_count=len(individual_critic_grads),
+            critic_full_team_episode=float(full_episode_critic),
             critic_grad_norm_mean_agent=critic_grad,
             critic_grad_norm_max_agent=float(np.max(individual_critic_grads)) if individual_critic_grads else 0.0,
-            td_abs=float(((q.detach()-targets).abs()*mask).sum()/mask.sum().clamp_min(1)),
+            td_abs=float(((q.detach()-targets).abs()*critic_mask).sum()/critic_mask.sum().clamp_min(1)),
             q_mean=float(active_q.mean()) if active_q.numel() else 0.0,
             q_std=float(active_q.std(unbiased=False)) if active_q.numel() else 0.0,
             target_q_mean=float(active_targets.mean()) if active_targets.numel() else 0.0,
