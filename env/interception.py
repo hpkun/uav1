@@ -186,7 +186,7 @@ class InterceptionEnv:
                     reward_schema=('shared_capture_and_per_target_breach+assigned_target_approach'+
                                    ('+assigned_target_heading' if self.config.heading_weight else '')+
                                    ('+boundary_retirement' if self.config.defender_oob_retire else '+boundary')+
-                                   '; team=global+mean(local_i)'
+                                   ('; team=global+sum(local_i)' if radial else '; team=global+mean(local_i)')
                                    if self.config.breach_penalty_mode=='per_target' else
                                    'shared_capture_and_first_breach+assigned_target_approach+assigned_target_heading+boundary_retirement; team=global+mean(local_i)'
                                    if self.config.defender_oob_retire else
@@ -538,7 +538,7 @@ class InterceptionEnv:
             local += c.capture_reward*captured_by-c.penetration_penalty*bool(breached)
         self.global_return += global_reward
         self.mean_local_return += float(local.mean())
-        self.team_return += global_reward+float(local.mean())
+        self.team_return += global_reward+float(local.sum() if c.attack_mode=='radial_straight' else local.mean())
         self.event_history.extend(events)
         if self.assignment is not None:
             assignment_events = (events + [{'type':'defender_retired'}]
@@ -546,9 +546,9 @@ class InterceptionEnv:
             self._update_assignment(self.step_count, assignment_events)
         info = self._info(events,global_reward,local,outcome,first_breach=first_breach)
         if assigned_before is not None:info['reward_target_ids']=assigned_before.copy()
-        info['reward_components']['approach'] = float(c.approach_weight*approach.mean())
+        info['reward_components']['approach'] = float(c.approach_weight*(approach.sum() if c.attack_mode=='radial_straight' else approach.mean()))
         if c.heading_weight:
-            info['reward_components']['heading'] = float(c.heading_weight*heading.mean())
+            info['reward_components']['heading'] = float(c.heading_weight*(heading.sum() if c.attack_mode=='radial_straight' else heading.mean()))
         if not np.isclose(sum(info['reward_components'].values()), info['team_reward'],rtol=0,atol=1e-10):
             raise AssertionError('Interception reward ledger mismatch')
         info['executed_actions'] = joint_actions.copy()
@@ -563,10 +563,10 @@ class InterceptionEnv:
                     assigned_target_ids=(self.assignment.targets.copy() if self.assignment is not None else None),
                     global_reward=float(global_reward), local_rewards=np.asarray(local_rewards,dtype=np.float64).copy(),
                     individual_rewards=(global_reward+local_rewards).copy(),
-                    team_reward=float(global_reward+np.mean(local_rewards)), events=list(events),
+                    team_reward=float(global_reward+(local_rewards.sum() if self.config.attack_mode=='radial_straight' else np.mean(local_rewards))), events=list(events),
                     reward_components=dict(capture=float(self.config.capture_reward*sum(e['type']=='capture' for e in events))
                                            /(5 if self.config.episode_protocol=='first_breach' else 1),
-                                           boundary=-float(self.config.boundary_penalty*sum(e['type']=='defender_oob' for e in events))/5,
+                                           boundary=-float(self.config.boundary_penalty*sum(e['type']=='defender_oob' for e in events))/(1 if self.config.attack_mode=='radial_straight' else 5),
                                            penetration=-float(self.config.penetration_penalty*(
                                                sum(e['type']=='penetration' for e in events)
                                                if self.config.breach_penalty_mode=='per_target' else
