@@ -48,6 +48,7 @@ class InterceptionConfig:
     boundary_penalty: float = 2.0
     defender_oob_retire: bool = False
     penetration_penalty: float = 100.0
+    breach_penalty_mode: str = 'first_breach'
     approach_weight: float | None = None
     heading_weight: float = 0.0
 
@@ -104,6 +105,10 @@ class InterceptionConfig:
             raise ValueError('Boundary retirement requires the isolated Jia ideal interface')
         if self.episode_protocol not in ('resolve_all_one_penalty_trade', 'resolve_all_one_penalty', 'resolve_all', 'first_breach'):
             raise ValueError('Unknown episode protocol')
+        if self.breach_penalty_mode not in ('first_breach','per_target'):
+            raise ValueError('Unknown breach penalty mode')
+        if self.breach_penalty_mode=='per_target' and self.episode_protocol!='resolve_all_one_penalty_trade':
+            raise ValueError('Per-target breach penalty requires the one-to-one retirement protocol')
         if type(self.episode_steps) is not int or self.episode_steps < 1:
             raise ValueError('episode_steps must be positive')
         names = ('arena_half_extent','breach_radius','danger_radius','capture_radius','dt',
@@ -172,7 +177,12 @@ class InterceptionEnv:
                     n_attackers=5, observation_dim=self.observation_dim, state_dim=self.state_dim, action_dim=2,
                     action_schema='world_acceleration_disk_si',
                     max_acceleration=self.config.defender_acceleration_max,
-                    reward_schema=('shared_capture_and_first_breach+assigned_target_approach+assigned_target_heading+boundary_retirement; team=global+mean(local_i)'
+                    reward_schema=('shared_capture_and_per_target_breach+assigned_target_approach'+
+                                   ('+assigned_target_heading' if self.config.heading_weight else '')+
+                                   ('+boundary_retirement' if self.config.defender_oob_retire else '+boundary')+
+                                   '; team=global+mean(local_i)'
+                                   if self.config.breach_penalty_mode=='per_target' else
+                                   'shared_capture_and_first_breach+assigned_target_approach+assigned_target_heading+boundary_retirement; team=global+mean(local_i)'
                                    if self.config.defender_oob_retire else
                                    'shared_capture_and_first_breach+assigned_target_approach+assigned_target_heading+boundary; team=global+mean(local_i)'
                                    if self.config.heading_weight else
@@ -497,7 +507,8 @@ class InterceptionEnv:
         # Legacy configurations retain their original reward for historical checkpoints.
         global_reward = 0.0
         if c.episode_protocol in ('resolve_all_one_penalty_trade','resolve_all_one_penalty'):
-            global_reward = c.capture_reward*int(captured_by.sum())-c.penetration_penalty*first_breach
+            failures=(len(breached) if c.breach_penalty_mode=='per_target' else int(first_breach))
+            global_reward = c.capture_reward*int(captured_by.sum())-c.penetration_penalty*failures
         elif c.episode_protocol=='resolve_all':
             global_reward = c.capture_reward*int(captured_by.sum())-c.penetration_penalty*len(breached)
         elif c.danger_weight:
@@ -539,6 +550,8 @@ class InterceptionEnv:
                                            /(5 if self.config.episode_protocol=='first_breach' else 1),
                                            boundary=-float(self.config.boundary_penalty*sum(e['type']=='defender_oob' for e in events))/5,
                                            penetration=-float(self.config.penetration_penalty*(
+                                               sum(e['type']=='penetration' for e in events)
+                                               if self.config.breach_penalty_mode=='per_target' else
                                                int(first_breach) if self.config.episode_protocol in
                                                ('resolve_all_one_penalty_trade','resolve_all_one_penalty') else
                                                int(any(e['type']=='penetration' for e in events)) if self.config.episode_protocol=='first_breach'
