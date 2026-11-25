@@ -69,7 +69,8 @@ class ProgressLogger:
                 time_limit_rate=sum(row.get('time_limit_occurred',row['outcome']=='time_limit')
                                     for row in rows)/n if n else None,
                 capture_efficiency=sum(row['captured_count'] for row in rows)/(self.attacker_count*n) if n else None,
-                mean_team_return=sum(row['team_return'] for row in rows)/n if n else None)}
+                mean_team_return=sum(row['team_return'] for row in rows)/n if n else None,
+                reward_aggregation=rows[0].get('reward_aggregation','mean_agent') if n else 'mean_agent')}
         keys=('actor_loss','critic_loss','entropy','approx_kl','td_abs',
               'actor_grad_norm','actor_clip_rate','critic_grad_norm','critic_clip_rate','active_critic_count',
               'critic_grad_norm_mean_agent',
@@ -106,10 +107,11 @@ class ProgressLogger:
         mode=row['attack_mode']
         label={'direct_rush':'direct','split_attack':'split','jia_straight':'jia','radial_straight':'radial'}[mode]
         value=row['recent'][mode]
+        return_name='return_sum_agents' if value.get('reward_aggregation')=='sum_agent' else 'return'
         recent=(f"  recent {row['recent_window']}: {label} n={value['episodes']}"
                 f" all={_percent(value['all_capture_rate'])} cap={_percent(value['capture_efficiency'])}"
                 f" fail={_percent(value['failure_rate'])}"
-                f" return={_number(value['mean_team_return'],2)}")
+                f" {return_name}={_number(value['mean_team_return'],2)}")
         if value['time_limit_rate']:
             recent+=f" timeout={_percent(value['time_limit_rate'])}"
         learning=row['learning']
@@ -138,13 +140,16 @@ class ProgressLogger:
             raise ValueError('Periodic evaluation must contain only the training attack mode')
         mode,row=next(iter(summaries.items()))
         label={'direct_rush':'direct','split_attack':'split','jia_straight':'jia','radial_straight':'radial'}[mode]
+        summed=row.get('reward_aggregation')=='sum_agent'
+        return_name='return_sum_agents' if summed else 'return'
         status=(f'[eval {step:,}] {label}: all={_percent(row["all_capture_rate"])}'
                 f' cap={_percent(row["capture_efficiency"])}'
                 f' fail={_percent(row.get("failure_rate",1-row["all_capture_rate"]))}'
-                f' return={_number(row.get("mean_team_return"),2)} ({row["episodes"]} eps)')
+                f' {return_name}={_number(row.get("mean_team_return"),2)} ({row["episodes"]} eps)')
         if row.get('time_limit_rate'):
             status+=f' timeout={_percent(row["time_limit_rate"])}'
         components=row.get('mean_reward_components',{})
-        names=('capture','penetration','approach','heading','boundary','danger')
+        names=('capture_self','capture_teammate','all_captured','capture','penetration','approach','heading','boundary','danger')
         detail=' '.join(f'{name}={_signed(components[name])}' for name in names if name in components)
-        return f'{status}\n  reward/ep (undiscounted): {detail}'
+        label='sum of five agent rewards' if summed else 'mean across five agent rewards'
+        return f'{status}\n  reward/ep ({label}, undiscounted): {detail}'
