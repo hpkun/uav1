@@ -54,7 +54,42 @@ The exact MAPPO, MADDPG and dual-critic observation, action, critic and reward i
 
 ## Outputs
 
-Training writes `settings.json`, `episodes.jsonl`, `updates.jsonl`, `evaluations.jsonl`, `progress.jsonl`, `summary.json`, and a SHA-256 checkpoint catalog under `checkpoints/`. By default, each periodic evaluation also saves `checkpoints/step_<step>.pt` and updates `checkpoints/index.json` atomically under label `step_<step>` (disable with `--no-save-eval-checkpoints`). Evaluation, replay, and diagnostics accept either `--checkpoint <run_dir> --label <Best|Last|step_<step>>` or a direct cataloged `.pt` file path `--checkpoint <run_dir>/checkpoints/step_<step>.pt`. Each training episode row includes summed reward components; training no longer writes per-step reward traces. Independent evaluation writes `evaluation.json` and `episodes.jsonl`. Replay writes a complete compressed trace, an offline HTML player, and a summary. In the new protocol, unresolved attackers at the time limit count as penetrations, so completed episodes end as all-captured or penetrated. Historical first-breach runs can still have a separate time-limit outcome.
+Training writes `settings.json`, `episodes.jsonl`, `updates.jsonl.gz`, `updates_summary.jsonl`, `evaluations.jsonl`, `progress.jsonl`, `summary.json`, and a SHA-256 checkpoint catalog under `checkpoints/`.
+
+- `updates.jsonl.gz`: complete gzip-compressed raw per-update training metrics (streamed directly during training; new runs no longer write uncompressed `updates.jsonl`, while existing historical runs keep their original files).
+- `updates_summary.jsonl`: fixed-window aggregated update statistics written every `--update-log-interval` policy updates (default `100`, including the final partial window). Each line records `step_start`, `step_end`, `update_start`, `update_end`, `count`, per-metric `mean`/`std` (population std)/`min`/`max`/`count` under `metrics`, and window-end cumulative values under `counters`.
+- `progress.jsonl`: periodic training progress and recent-window status snapshots.
+
+By default, each periodic evaluation also saves `checkpoints/step_<step>.pt` and updates `checkpoints/index.json` atomically under label `step_<step>` (disable with `--no-save-eval-checkpoints`). Evaluation, replay, and diagnostics accept either `--checkpoint <run_dir> --label <Best|Last|step_<step>>` or a direct cataloged `.pt` file path `--checkpoint <run_dir>/checkpoints/step_<step>.pt`. Each training episode row includes summed reward components; training no longer writes per-step reward traces. Independent evaluation writes `evaluation.json` and `episodes.jsonl`. Replay writes a complete compressed trace, an offline HTML player, and a summary. In the new protocol, unresolved attackers at the time limit count as penetrations, so completed episodes end as all-captured or penetrated. Historical first-breach runs can still have a separate time-limit outcome.
+
+Reading compressed raw update logs and plotting training curves from `updates_summary.jsonl`:
+
+```python
+import gzip
+import json
+import matplotlib.pyplot as plt
+
+# 1. Stream-read complete raw updates from updates.jsonl.gz
+with gzip.open("runs/interception_example/updates.jsonl.gz", "rt", encoding="utf-8") as f:
+    raw_updates = [json.loads(line) for line in f if line.strip()]
+
+# 2. Load aggregated summaries and plot critic_loss mean ± std
+with open("runs/interception_example/updates_summary.jsonl", "rt", encoding="utf-8") as f:
+    summaries = [json.loads(line) for line in f if line.strip()]
+
+steps = [row["step_end"] for row in summaries]
+mean = [row["metrics"]["critic_loss"]["mean"] for row in summaries]
+std = [row["metrics"]["critic_loss"]["std"] for row in summaries]
+
+plt.plot(steps, mean, label="critic_loss mean")
+plt.fill_between(steps, [m - s for m, s in zip(mean, std)], [m + s for m, s in zip(mean, std)], alpha=0.2)
+plt.xlabel("Sampled steps")
+plt.ylabel("Critic loss")
+plt.legend()
+plt.show()
+```
+
+Or use `experiment.update_log.read_update_log(run_dir)` to transparently read either new `updates.jsonl.gz` or historical `updates.jsonl`.
 
 Existing run and replay artifacts are not modified by the new commands.
 

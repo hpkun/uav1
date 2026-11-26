@@ -127,4 +127,6 @@ def test_short_maddpg_training_and_evaluation_use_new_reward(tmp_path):
     assert all(row['mean_reward_components']['penetration']==-250 for row in evaluations)
     assert all(sum(row['mean_reward_components'].values())==pytest.approx(row['mean_team_return'])
                for row in evaluations)
-    assert len((output/'updates.jsonl').read_text(encoding='utf-8').splitlines())>0
+    from experiment.interception import read_update_log
+    assert (output/'updates.jsonl.gz').is_file() and not (output/'updates.jsonl').exists()
+    assert len(read_update_log(output))>0

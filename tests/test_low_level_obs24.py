@@ -8,7 +8,7 @@ import pytest
 
 from algorithm.maddpg_config import MADDPGConfig
 from env.interception import InterceptionEnv
-from experiment.interception import load_run, read_config, train
+from experiment.interception import load_run, read_config, read_update_log, train
 from tools.replay import collect, html, validate_trace
 
 
@@ -54,7 +54,8 @@ def test_parallel_update_schedule_and_checkpoint(tmp_path, interval, expected_up
           eval_interval=0, eval_episodes=1, log_every_steps=100)
     summary = json.loads((output / 'summary.json').read_text(encoding='utf-8'))
     assert summary['updates'] == expected_updates
-    rows = [json.loads(row) for row in (output / 'updates.jsonl').read_text(encoding='utf-8').splitlines()]
+    assert (output / 'updates.jsonl.gz').is_file() and not (output / 'updates.jsonl').exists()
+    rows = read_update_log(output)
     assert len(rows) == expected_updates
     if interval == 10:
         restored, policy, _, _, _ = load_run(output, 'Last', 'cpu')

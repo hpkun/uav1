@@ -10,6 +10,7 @@ from env import make_environment
 from .interception import (evaluate_policy,evaluation_interval_for_budget,load_run,read_config,require_matching_attack_mode,validate_warm_start,
                            summarize,train,write_json)
 from .prioritized_replay import ReplayConfig
+from .update_log import DEFAULT_UPDATE_LOG_INTERVAL
 
 
 def parser():
@@ -31,6 +32,8 @@ def parser():
         p.add_argument('--save-eval-checkpoints',action=argparse.BooleanOptionalAction,default=True,
                        help='Save a checkpoint at each periodic evaluation (default: enabled)')
         p.add_argument('--log-every-steps',type=int,default=10000)
+        p.add_argument('--update-log-interval',type=int,default=DEFAULT_UPDATE_LOG_INTERVAL,
+                       help='Number of policy updates per updates_summary.jsonl aggregation window (default: 100)')
         p.add_argument('--output-dir',type=Path,required=True)
         p.add_argument('--warm-start-run',type=Path,
                        help='MADDPG Last checkpoint learner state; replay and episodes start fresh')
@@ -66,8 +69,9 @@ def main(argv=None):
         if args.total_sampled_steps<1 or args.num_envs<1 or args.total_sampled_steps%args.num_envs:
             raise ValueError('Sampled steps must be positive and divisible by num-envs')
         if (args.eval_interval is not None and args.eval_interval<0 or
-                args.eval_episodes<1 or args.seed<0 or args.log_every_steps<1):
-            raise ValueError('Invalid evaluation interval, count, log cadence or seed')
+                args.eval_episodes<1 or args.seed<0 or args.log_every_steps<1 or
+                args.update_log_interval<1):
+            raise ValueError('Invalid evaluation interval, count, log cadence, update log interval or seed')
         eval_interval=(evaluation_interval_for_budget(args.total_sampled_steps,args.num_envs)
                        if args.eval_interval is None else args.eval_interval)
         if args.output_dir.exists():raise FileExistsError(args.output_dir)
@@ -79,6 +83,7 @@ def main(argv=None):
         plan=dict(status='supported',environment_contract=make_environment(config).contract,
                   algorithm=args.algorithm,attack_mode=args.attack_mode,sampled_steps=args.total_sampled_steps,
                   num_envs=args.num_envs,rollout_length=rollout,log_every_steps=args.log_every_steps,
+                  update_log_interval=args.update_log_interval,
                   eval_interval=eval_interval,eval_episodes=args.eval_episodes,
                   save_eval_checkpoints=args.save_eval_checkpoints,
                   output=str(args.output_dir.resolve()))
@@ -97,7 +102,8 @@ def main(argv=None):
                      eval_interval=eval_interval,eval_episodes=args.eval_episodes,
                      log_every_steps=args.log_every_steps,replay_config=replay_config,
                      warm_start_run=args.warm_start_run,
-                     save_eval_checkpoints=args.save_eval_checkpoints)
+                     save_eval_checkpoints=args.save_eval_checkpoints,
+                     update_log_interval=args.update_log_interval)
     if args.command=='evaluate':
         if args.output_dir.exists():raise FileExistsError(args.output_dir)
         if args.episodes_per_mode<1 or args.seed<0:raise ValueError('Invalid evaluation count or seed')

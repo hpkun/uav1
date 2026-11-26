@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from algorithm.maddpg_config import MADDPGConfig
-from experiment.interception import ReplayBuffer, load_run, make_policy, read_config, train
+from experiment.interception import ReplayBuffer, load_run, make_policy, read_config, read_update_log, train
 from experiment.prioritized_replay import PrioritizedReplayBuffer, ReplayConfig
 
 
@@ -96,7 +96,8 @@ def test_prioritized_training_keeps_checkpoint_contract(tmp_path):
           log_every_steps=8,replay_config=ReplayConfig(mode='critic_per_with_uniform'))
     settings=json.loads((output/'settings.json').read_text(encoding='utf-8'))
     assert settings['replay']['mode']=='critic_per_with_uniform'
-    updates=[json.loads(line) for line in (output/'updates.jsonl').read_text(encoding='utf-8').splitlines()]
+    assert (output/'updates.jsonl.gz').is_file() and not (output/'updates.jsonl').exists()
+    updates=read_update_log(output)
     assert updates and all('per_beta' in row and 'per_is_ess' in row for row in updates)
     progress=[json.loads(line) for line in (output/'progress.jsonl').read_text(encoding='utf-8').splitlines()]
     assert 'per_sample_capture_fraction' in progress[-1]['learning']

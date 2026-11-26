@@ -21,6 +21,7 @@ from env import InterceptionConfig, OneVsOneConfig, RadialScaleConfig, JiaHeadin
 from env.parallel import ParallelInterceptionEnvs
 from .progress import ProgressLogger
 from .prioritized_replay import PrioritizedReplayBuffer, ReplayConfig
+from .update_log import DEFAULT_UPDATE_LOG_INTERVAL, UpdateLogWriter, iter_update_log, read_update_log, read_update_summary
 
 
 def write_json(path, value):
@@ -327,13 +328,15 @@ def evaluation_interval_for_budget(steps,num_envs):
 
 def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mode,output,
           eval_interval=None,eval_episodes=10,log_every_steps=10000,replay_config=None,
-          warm_start_run=None,save_eval_checkpoints=True):
+          warm_start_run=None,save_eval_checkpoints=True,update_log_interval=DEFAULT_UPDATE_LOG_INTERVAL):
     if num_envs<1 or steps<1 or steps%num_envs or log_every_steps<1 or attack_mode not in ('direct_rush','split_attack','jia_straight','radial_straight'):
         raise ValueError('Invalid training budget or attack mode')
     if eval_interval is None:
         eval_interval=evaluation_interval_for_budget(steps,num_envs)
     if eval_interval<0 or eval_episodes<1:
         raise ValueError('Invalid evaluation schedule')
+    if type(update_log_interval) is not int or update_log_interval<1:
+        raise ValueError('update_log_interval must be a positive integer')
     save_eval_checkpoints=bool(save_eval_checkpoints)
     config=replace(config,attack_mode=attack_mode)
     replay_config=replay_config or ReplayConfig()
@@ -357,7 +360,7 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                   attack_mode=attack_mode,checkpoint_selection_mode=attack_mode,
                   total_sampled_steps=steps,num_envs=num_envs,
                   log_every_steps=log_every_steps,eval_interval=eval_interval,eval_episodes=eval_episodes,
-                  save_eval_checkpoints=save_eval_checkpoints,
+                  save_eval_checkpoints=save_eval_checkpoints,update_log_interval=update_log_interval,
                   learner_reward_interface=('team_scalar' if name=='mappo' else 'per_defender_vector' if name=='maddpg'
                                             else 'global_scalar_and_mean_local_scalar'))
     if prioritized:settings['replay']=asdict(replay_config)
@@ -380,7 +383,7 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
     next_update_sampled=((warmup+parameters.update_interval_steps-1)//parameters.update_interval_steps*
                          parameters.update_interval_steps) if replay is not None else None
     episode_log=(root/'episodes.jsonl').open('x',encoding='utf-8')
-    update_log=(root/'updates.jsonl').open('x',encoding='utf-8')
+    update_log=UpdateLogWriter(root,interval=update_log_interval)
     evaluation_log=(root/'evaluations.jsonl').open('x',encoding='utf-8')
     progress_log=(root/'progress.jsonl').open('x',encoding='utf-8')
     progress=ProgressLogger(name,steps,log_every_steps,attack_mode=attack_mode,
@@ -495,7 +498,7 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                                 metrics['per_critic_grad_clipped']=metrics['critic_clip_rate']
                             else:metrics=policy.update(replay.sample(parameters.batch_size))
                             updates+=1
-                            update_log.write(json.dumps(dict(step=sampled,update=updates,**metrics),allow_nan=False)+'\n')
+                            update_log.record(sampled,updates,metrics)
                             progress.update(metrics)
                         next_update_sampled+=parameters.update_interval_steps
                     if eval_interval and sampled>=next_eval and sampled<steps:
@@ -504,7 +507,7 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                 if buffer is not None:
                     buffer.compute_returns_and_advantages(policy.values(states),parameters.gamma,parameters.gae_lambda)
                     metrics=policy.update(buffer);updates+=1
-                    update_log.write(json.dumps(dict(step=sampled,update=updates,**metrics),allow_nan=False)+'\n')
+                    update_log.record(sampled,updates,metrics)
                     progress.update(metrics)
                 if eval_interval and sampled==steps:
                     record_evaluation(sampled)
@@ -534,7 +537,13 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                     updates=updates,best_score=best_score,best_selection=best_entry['selection'],
                     best_selection_mode=attack_mode)
         if prioritized:result['replay']=asdict(replay_config)
+        update_log.flush()
         write_json(root/'summary.json',result)
         return result
     finally:
-        episode_log.close();update_log.close();evaluation_log.close();progress_log.close()
+        first_error=None
+        for handle in (episode_log,update_log,evaluation_log,progress_log):
+            try:handle.close()
+            except BaseException as error:
+                if first_error is None:first_error=error
+        if first_error is not None:raise first_error

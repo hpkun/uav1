@@ -263,7 +263,7 @@ def test_new_interface_short_training_and_checkpoint(tmp_path,name,attack_mode):
     import json
     from algorithm.mappo_config import MAPPOConfig
     from algorithm.maddpg_config import MADDPGConfig
-    from experiment.interception import load_run,train
+    from experiment.interception import load_run,read_update_log,train
 
     config=InterceptionConfig(observation_layout='relative_assignment',episode_steps=2)
     parameters=(MAPPOConfig(hidden_size=16,update_epochs=1,minibatch_size=4) if name=='mappo'
@@ -275,7 +275,8 @@ def test_new_interface_short_training_and_checkpoint(tmp_path,name,attack_mode):
     settings=json.loads((output/'settings.json').read_text(encoding='utf-8'))
     assert settings['environment_contract']['version']=='interception_2'
     assert json.loads((output/'summary.json').read_text(encoding='utf-8'))['updates']>0
-    update=json.loads((output/'updates.jsonl').read_text(encoding='utf-8').splitlines()[0])
+    assert (output/'updates.jsonl.gz').is_file() and not (output/'updates.jsonl').exists()
+    update=read_update_log(output)[0]
     assert {'actor_grad_norm','critic_grad_norm'} <= update.keys()
     if name=='mappo':
         assert {'policy_log_std_mean','policy_std_mean','advantage_raw_mean','advantage_raw_std'} <= update.keys()
