@@ -80,9 +80,9 @@ class MADDPG:
                  ('interception_5',54,75),('interception_5',36,75),
                  ('interception_6',36,75),('interception_7',36,75),('interception_8',24,75),
                   ('interception_10',24,75),('interception_11',24,75),('interception_12',24,75),
-                  ('interception_13',26,85)) or
+                  ('interception_13',26,85),('interception_14',51,60)) or
                 any(contract.get(k)!=v for k,v in dict(n_agents=5,action_dim=2).items()) or
-                (contract.get('action_schema')!='normalized_speed_turn_box' if contract.get('version')=='interception_13'
+                (contract.get('action_schema')!='normalized_speed_turn_box' if contract.get('version') in ('interception_13','interception_14')
                  else contract.get('action_schema')!='world_acceleration_disk_si' or
                  not isinstance(contract.get('max_acceleration'),(int,float)) or contract['max_acceleration']<=0)):
             raise ValueError('MADDPG requires a supported interception interface')

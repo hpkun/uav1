@@ -19,7 +19,7 @@ from algorithm.maddpg_config import MADDPGConfig, NormalizedMADDPGConfig
 from algorithm.matd3 import MATD3
 from algorithm.matd3_config import MATD3Config, NormalizedMATD3Config
 from algorithm.dual_critic import DualCritic, DualCriticConfig
-from env import InterceptionConfig, OneVsOneConfig, RadialScaleConfig, JiaHeadingConfig, make_environment
+from env import InterceptionConfig, OneVsOneConfig, RadialScaleConfig, JiaHeadingConfig, JiaHeadingNearestConfig, make_environment
 from env.parallel import ParallelInterceptionEnvs
 from .progress import ProgressLogger
 from .prioritized_replay import PrioritizedReplayBuffer, ReplayConfig
@@ -49,7 +49,7 @@ def digest(path):
 
 
 def _parameter_type(name,config):
-    if isinstance(config,JiaHeadingConfig):
+    if isinstance(config,(JiaHeadingConfig,JiaHeadingNearestConfig)):
         if name=='maddpg':return NormalizedMADDPGConfig
         if name=='matd3':return NormalizedMATD3Config
     return {'mappo':MAPPOConfig,'maddpg':MADDPGConfig,'matd3':MATD3Config,'dual_critic':DualCriticConfig}[name]
@@ -57,10 +57,10 @@ def _parameter_type(name,config):
 
 def read_config(env_path, algorithm_path=None):
     raw=yaml.safe_load(Path(env_path).read_text(encoding='utf-8'))
-    if not isinstance(raw,dict) or set(raw)!={'schema','environment'} or raw['schema'] not in ('Interception/1','Interception/2','Interception/3','Interception/4','Interception/5','Interception/6','Interception/7','Interception/8','Interception/10','Interception/11','Interception/12','Interception/13'):
+    if not isinstance(raw,dict) or set(raw)!={'schema','environment'} or raw['schema'] not in ('Interception/1','Interception/2','Interception/3','Interception/4','Interception/5','Interception/6','Interception/7','Interception/8','Interception/10','Interception/11','Interception/12','Interception/13','Interception/14'):
         raise ValueError('Expected supported interception environment configuration')
     config=({'Interception/10':OneVsOneConfig,'Interception/12':RadialScaleConfig,
-             'Interception/13':JiaHeadingConfig}
+             'Interception/13':JiaHeadingConfig,'Interception/14':JiaHeadingNearestConfig}
             .get(raw['schema'],InterceptionConfig))(**raw['environment'])
     if make_environment(config).contract['schema']!=raw['schema']:
         raise ValueError('Configuration schema and observation layout disagree')
@@ -71,7 +71,7 @@ def read_config(env_path, algorithm_path=None):
     name=learner['algorithm']
     if name not in ('mappo','maddpg','matd3','dual_critic'):
         raise ValueError('Unsupported interception algorithm')
-    if isinstance(config,(OneVsOneConfig,RadialScaleConfig,JiaHeadingConfig)) and name not in ('maddpg','matd3'):
+    if isinstance(config,(OneVsOneConfig,RadialScaleConfig,JiaHeadingConfig,JiaHeadingNearestConfig)) and name not in ('maddpg','matd3'):
         raise ValueError('The isolated reduced-scale experiments support MADDPG/MATD3 only')
     if name=='dual_critic' and make_environment(config).contract['version']!='interception_1':
         raise ValueError('Dual critic supports only Interception/1')
@@ -199,7 +199,7 @@ def load_run(checkpoint,label=None,device='cpu'):
         restored_environment.setdefault('assignment_method','nearest_visible_legacy')
     restored_environment.setdefault('episode_protocol','first_breach')
     config_type={'interception_10':OneVsOneConfig,'interception_12':RadialScaleConfig,
-                 'interception_13':JiaHeadingConfig}.get(
+                 'interception_13':JiaHeadingConfig,'interception_14':JiaHeadingNearestConfig}.get(
         settings.get('environment_contract',{}).get('version'),InterceptionConfig)
     config=replace(config_type(**restored_environment),
                    attack_mode=settings['attack_mode'])

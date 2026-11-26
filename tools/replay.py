@@ -36,7 +36,7 @@ def collect(config,policy,mode,seed):
         events.extend(info['events'])
         if terminated or truncated:
             break
-    trace=dict(schema=('InterceptionReplay/3' if env.contract['version']=='interception_13' else
+    trace=dict(schema=('InterceptionReplay/3' if env.contract['version'] in ('interception_13','interception_14') else
                        'InterceptionReplay/2' if mode=='radial_straight' else 'InterceptionReplay/1'),mode=mode,seed=seed,
                config=env.contract['config'],frames=frames,events=events,summary=info['episode_summary'])
     env.close()
