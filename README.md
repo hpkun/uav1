@@ -46,7 +46,7 @@ python -m experiment.cli report `
   --plot outputs/interception_example_curve.svg
 ```
 
-MAPPO and MADDPG use `configs/mappo_interception.yaml` and `configs/maddpg_interception.yaml`. The dual-critic baseline currently supports `Interception/1` only. `configs/interception_smoke.yaml` limits episodes to 40 steps for interface checks only.
+MAPPO, MADDPG and isolated MATD3 use `configs/mappo_interception.yaml`, `configs/maddpg_interception.yaml` and `configs/matd3_interception.yaml` (for `Interception/13` radial speed-heading, use `configs/maddpg_jia_heading_interval10.yaml` or `configs/matd3_jia_heading_interval10.yaml`). MATD3 keeps its own algorithm name (`matd3`) and checkpoint schema (`interception_matd3_1`) isolated from MADDPG (`interception_maddpg_2`). The dual-critic baseline currently supports `Interception/1` only. `configs/interception_smoke.yaml` limits episodes to 40 steps for interface checks only.
 
 Run each algorithm once with `--attack-mode direct_rush` and again with `--attack-mode split_attack`, using a new output directory each time. Periodic and independent evaluation, as well as replay, use the checkpoint's training mode. A mismatched or unsupported mode is rejected before any output is written.
 

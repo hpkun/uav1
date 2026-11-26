@@ -70,6 +70,10 @@ New MAPPO runs seed PyTorch before network initialization and stochastic action 
 
 Replay stores each defender's local observation, the joint state and action, all five individual rewards, the actual terminal next observation/state, `done`, and active masks. Actor `i` updates through critic `i`, replacing only its own action in the current-policy joint action; the other four actions are detached. This cooperative current-policy choice differs from the original MADDPG replay-other-actions actor gradient. The five critics must not receive a broadcast team reward. Checkpoints using this reward interface have schema `interception_maddpg_2`.
 
+## MATD3 (isolated twin-critic variant)
+
+`matd3` (`algorithm/matd3.py`) keeps the exact same observation, action, reward, and replay interfaces as `maddpg`, while adding clipped double-Q targets (`min(Q1', Q2')` with two independent joint critic ensembles), clipped Gaussian target-action smoothing (projected onto the physical disk or clamped to `[-1, 1]` for `Interception/13`), and delayed actor/target updates (`policy_delay`, updating actors via `Q1` only). It uses dedicated configs (`configs/matd3_interception.yaml`, `configs/matd3_jia_heading_interval10.yaml`) and an isolated checkpoint schema `interception_matd3_1` so MADDPG and MATD3 artifacts never cross-load.
+
 The airbase-interception paper lists both MAPPO and MADDPG as using global plus local rewards, but does not specify how its MAPPO baseline aggregates the local components. The later DT-GAT-MARL paper places capture and breach events in the shared task reward and uses individual distance shaping. The scalar team value above is the conditional value of the shared team reward given the common centralized state; duplicating that same state and target five times would not create distinct agent credit assignment.
 
 ## Dual-critic shared policy

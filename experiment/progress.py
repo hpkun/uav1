@@ -70,11 +70,11 @@ class ProgressLogger:
                                     for row in rows)/n if n else None,
                 capture_efficiency=sum(row['captured_count'] for row in rows)/(self.attacker_count*n) if n else None,
                 mean_team_return=sum(row['team_return'] for row in rows)/n if n else None)}
-        keys=('actor_loss','critic_loss','entropy','approx_kl','td_abs',
+        keys=('actor_loss','critic_loss','critic_1_loss','critic_2_loss','entropy','approx_kl','td_abs',
               'actor_grad_norm','actor_clip_rate','critic_grad_norm','critic_clip_rate','active_critic_count',
               'critic_grad_norm_mean_agent',
               'critic_grad_norm_max_agent','policy_log_std_mean','policy_std_mean',
-              'advantage_raw_mean','advantage_raw_std','q_mean','q_std','target_q_mean',
+              'advantage_raw_mean','advantage_raw_std','q_mean','q_std','q1_mean','q2_mean','q_gap_abs','target_q_mean',
               'explained_variance','clip_fraction','value_norm_std',
               'per_beta','per_is_weight_mean','per_is_weight_min','per_is_ess',
               'per_priority_mean','per_priority_max','per_critic_grad_clipped',
@@ -114,19 +114,19 @@ class ProgressLogger:
             recent+=f" timeout={_percent(value['time_limit_rate'])}"
         learning=row['learning']
         if learning:
-            keys=(('actor_loss','critic_loss','td_abs','q_mean') if row['algorithm']=='maddpg' else
+            keys=(('actor_loss','critic_loss','td_abs','q_mean') if row['algorithm'] in ('maddpg','matd3') else
                   ('actor_loss','critic_loss','entropy','approx_kl','explained_variance'))
             detail='  learn: '+' '.join(f'{key}={_number(learning.get(key),4)}' for key in keys if key in learning)
         else:
             detail='  learn: waiting for first update'
         lines=[header,recent,detail]
-        if row['algorithm']=='maddpg' and learning:
+        if row['algorithm'] in ('maddpg','matd3') and learning:
             lines.append('  diag: actor_grad_norm='+_number(learning.get('actor_grad_norm'),4)+
                          ' actor_clip='+_percent(learning.get('actor_clip_rate'))+
                          ' critic_grad_norm='+_number(learning.get('critic_grad_norm'),4)+
                          ' critic_clip='+_percent(learning.get('critic_clip_rate'))+
                          ' active_critics='+_number(learning.get('active_critic_count'),1))
-        elif row['algorithm']!='maddpg' and learning:
+        elif row['algorithm'] not in ('maddpg','matd3') and learning:
             lines.append('  diag: '+' '.join(f'{key}={_number(learning[key],4)}' for key in
                          ('actor_grad_norm','critic_grad_norm','policy_std_mean','value_norm_std')
                          if key in learning))

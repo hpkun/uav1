@@ -16,6 +16,8 @@ from algorithm.mappo import MAPPO, RolloutBuffer
 from algorithm.mappo_config import MAPPOConfig
 from algorithm.maddpg import MADDPG
 from algorithm.maddpg_config import MADDPGConfig, NormalizedMADDPGConfig
+from algorithm.matd3 import MATD3
+from algorithm.matd3_config import MATD3Config, NormalizedMATD3Config
 from algorithm.dual_critic import DualCritic, DualCriticConfig
 from env import InterceptionConfig, OneVsOneConfig, RadialScaleConfig, JiaHeadingConfig, make_environment
 from env.parallel import ParallelInterceptionEnvs
@@ -46,6 +48,13 @@ def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def _parameter_type(name,config):
+    if isinstance(config,JiaHeadingConfig):
+        if name=='maddpg':return NormalizedMADDPGConfig
+        if name=='matd3':return NormalizedMATD3Config
+    return {'mappo':MAPPOConfig,'maddpg':MADDPGConfig,'matd3':MATD3Config,'dual_critic':DualCriticConfig}[name]
+
+
 def read_config(env_path, algorithm_path=None):
     raw=yaml.safe_load(Path(env_path).read_text(encoding='utf-8'))
     if not isinstance(raw,dict) or set(raw)!={'schema','environment'} or raw['schema'] not in ('Interception/1','Interception/2','Interception/3','Interception/4','Interception/5','Interception/6','Interception/7','Interception/8','Interception/10','Interception/11','Interception/12','Interception/13'):
@@ -60,20 +69,18 @@ def read_config(env_path, algorithm_path=None):
     if not isinstance(learner,dict) or set(learner)!={'algorithm','parameters','training'}:
         raise ValueError('Expected algorithm, parameters and training sections')
     name=learner['algorithm']
-    if name not in ('mappo','maddpg','dual_critic'):
+    if name not in ('mappo','maddpg','matd3','dual_critic'):
         raise ValueError('Unsupported interception algorithm')
-    if isinstance(config,(OneVsOneConfig,RadialScaleConfig,JiaHeadingConfig)) and name!='maddpg':
-        raise ValueError('The isolated reduced-scale experiments support MADDPG only')
+    if isinstance(config,(OneVsOneConfig,RadialScaleConfig,JiaHeadingConfig)) and name not in ('maddpg','matd3'):
+        raise ValueError('The isolated reduced-scale experiments support MADDPG/MATD3 only')
     if name=='dual_critic' and make_environment(config).contract['version']!='interception_1':
         raise ValueError('Dual critic supports only Interception/1')
-    parameter_type=(NormalizedMADDPGConfig if isinstance(config,JiaHeadingConfig) else
-                    {'mappo':MAPPOConfig,'maddpg':MADDPGConfig,'dual_critic':DualCriticConfig}[name])
-    parameters=parameter_type(**learner['parameters'])
+    parameters=_parameter_type(name,config)(**learner['parameters'])
     rollout=int(learner['training']['rollout_length'])
     if rollout<1:raise ValueError('rollout_length must be positive')
     replay_config=ReplayConfig.from_mapping(learner['training'].get('replay'))
-    if name!='maddpg' and replay_config.mode!='uniform':
-        raise ValueError('Prioritized replay supports MADDPG only')
+    if name not in ('maddpg','matd3') and replay_config.mode!='uniform':
+        raise ValueError('Prioritized replay supports MADDPG/MATD3 only')
     if replay_config.mode!='uniform' and config.episode_protocol!='resolve_all_one_penalty_trade':
         raise ValueError('PER event diagnostics require the current one-penalty interception protocol')
     return config,parameters,rollout
@@ -87,6 +94,8 @@ def make_policy(name,config,parameters,device,seed,environment_contract=None,env
         return MAPPO(environment.observation_dim,environment.state_dim,5,parameters,device,seed,environment_config=snapshot,environment_contract=contract)
     if name=='maddpg':
         return MADDPG(parameters,device,seed,environment_config=snapshot,environment_contract=contract)
+    if name=='matd3':
+        return MATD3(parameters,device,seed,environment_config=snapshot,environment_contract=contract)
     if name=='dual_critic':
         if environment.contract['version']!='interception_1':
             raise ValueError('Dual critic supports only Interception/1')
@@ -195,9 +204,7 @@ def load_run(checkpoint,label=None,device='cpu'):
     config=replace(config_type(**restored_environment),
                    attack_mode=settings['attack_mode'])
     name=settings['algorithm']
-    parameter_type=(NormalizedMADDPGConfig if isinstance(config,JiaHeadingConfig) else
-                    {'mappo':MAPPOConfig,'maddpg':MADDPGConfig,'dual_critic':DualCriticConfig}[name])
-    parameters=parameter_type(**settings['parameters'])
+    parameters=_parameter_type(name,config)(**settings['parameters'])
     _,model,_,expected=resolve_checkpoint_entry(checkpoint,label,default_label='Best')
     if expected.get('sha256')!=digest(model):raise ValueError('Checkpoint catalog digest mismatch')
     policy=make_policy(name,config,parameters,device,settings['seed'],
@@ -208,8 +215,8 @@ def load_run(checkpoint,label=None,device='cpu'):
 
 
 def validate_warm_start(run,config,parameters,name,mode,device):
-    if name!='maddpg':
-        raise ValueError('Learner warm start currently supports MADDPG only')
+    if name not in ('maddpg','matd3'):
+        raise ValueError('Learner warm start currently supports MADDPG/MATD3 only')
     source_config,_,source_name,model,source=load_run(run,'Last',device)
     if (source_name!=name or source['attack_mode']!=mode or
             asdict(source_config)!=asdict(config) or source['parameters']!=asdict(parameters) or
@@ -340,9 +347,9 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
     save_eval_checkpoints=bool(save_eval_checkpoints)
     config=replace(config,attack_mode=attack_mode)
     replay_config=replay_config or ReplayConfig()
-    prioritized=name=='maddpg' and replay_config.mode=='critic_per_with_uniform'
+    prioritized=name in ('maddpg','matd3') and replay_config.mode=='critic_per_with_uniform'
     if replay_config.mode!='uniform' and not prioritized:
-        raise ValueError('Prioritized replay supports MADDPG only')
+        raise ValueError('Prioritized replay supports MADDPG/MATD3 only')
     if prioritized and config.episode_protocol!='resolve_all_one_penalty_trade':
         raise ValueError('PER event diagnostics require the current one-penalty interception protocol')
     if prioritized and not 0<round(parameters.batch_size*replay_config.prioritized_fraction)<parameters.batch_size:
@@ -361,7 +368,7 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                   total_sampled_steps=steps,num_envs=num_envs,
                   log_every_steps=log_every_steps,eval_interval=eval_interval,eval_episodes=eval_episodes,
                   save_eval_checkpoints=save_eval_checkpoints,update_log_interval=update_log_interval,
-                  learner_reward_interface=('team_scalar' if name=='mappo' else 'per_defender_vector' if name=='maddpg'
+                  learner_reward_interface=('team_scalar' if name=='mappo' else 'per_defender_vector' if name in ('maddpg','matd3')
                                             else 'global_scalar_and_mean_local_scalar'))
     if prioritized:settings['replay']=asdict(replay_config)
     if warm_start is not None:

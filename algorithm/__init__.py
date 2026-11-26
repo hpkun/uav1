@@ -1,1 +1,1 @@
-"""Interception MAPPO, MADDPG and shared dual-critic learners."""
+"""Interception MAPPO, MADDPG, MATD3 and shared dual-critic learners."""
