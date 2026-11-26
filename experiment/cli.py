@@ -28,13 +28,16 @@ def parser():
         p.add_argument('--eval-interval',type=int,default=None,
                        help='Sampled steps between evaluations; default is 5%% of the training budget')
         p.add_argument('--eval-episodes',type=int,default=10)
+        p.add_argument('--save-eval-checkpoints',action=argparse.BooleanOptionalAction,default=True,
+                       help='Save a checkpoint at each periodic evaluation (default: enabled)')
         p.add_argument('--log-every-steps',type=int,default=10000)
         p.add_argument('--output-dir',type=Path,required=True)
         p.add_argument('--warm-start-run',type=Path,
                        help='MADDPG Last checkpoint learner state; replay and episodes start fresh')
     p=commands.add_parser('evaluate')
     p.add_argument('--checkpoint',type=Path,required=True)
-    p.add_argument('--label',choices=('Best','Last'),default='Best')
+    p.add_argument('--label',default=None,
+                   help='Checkpoint catalog label (e.g. Best, Last, step_100000); defaults to Best for a run directory or auto-resolved for a .pt file')
     p.add_argument('--attack-mode',choices=('direct_rush','split_attack','jia_straight','radial_straight'))
     p.add_argument('--episodes-per-mode',type=int,default=200)
     p.add_argument('--seed',type=int,default=900000)
@@ -77,6 +80,7 @@ def main(argv=None):
                   algorithm=args.algorithm,attack_mode=args.attack_mode,sampled_steps=args.total_sampled_steps,
                   num_envs=args.num_envs,rollout_length=rollout,log_every_steps=args.log_every_steps,
                   eval_interval=eval_interval,eval_episodes=args.eval_episodes,
+                  save_eval_checkpoints=args.save_eval_checkpoints,
                   output=str(args.output_dir.resolve()))
         if warm_start is not None:
             plan['warm_start']=dict(source_checkpoint=str(warm_start[0].resolve()),
@@ -92,7 +96,8 @@ def main(argv=None):
                      seed=args.seed,device=args.device,attack_mode=args.attack_mode,output=args.output_dir,
                      eval_interval=eval_interval,eval_episodes=args.eval_episodes,
                      log_every_steps=args.log_every_steps,replay_config=replay_config,
-                     warm_start_run=args.warm_start_run)
+                     warm_start_run=args.warm_start_run,
+                     save_eval_checkpoints=args.save_eval_checkpoints)
     if args.command=='evaluate':
         if args.output_dir.exists():raise FileExistsError(args.output_dir)
         if args.episodes_per_mode<1 or args.seed<0:raise ValueError('Invalid evaluation count or seed')

@@ -445,3 +445,137 @@ def test_unsupported_checkpoint_mode_is_rejected(tmp_path):
         require_matching_attack_mode({'attack_mode':'unsupported_mode'},'direct_rush')
     with pytest.raises(ValueError,match='Run training attack mode is unsupported'):
         cli_main(['report','--run',str(tmp_path)])
+
+
+@pytest.mark.parametrize('algorithm',('mappo','maddpg'))
+def test_eval_checkpoints_saved_by_default_and_loadable_across_tools(tmp_path,algorithm):
+    import json
+    import shutil
+
+    from algorithm.mappo_config import MAPPOConfig
+    from algorithm.maddpg_config import MADDPGConfig
+    from experiment.cli import main as cli_main
+    from experiment.interception import digest,load_run,train
+    from tools.diagnose import main as diagnose_main
+    from tools.replay import main as replay_main
+
+    config=InterceptionConfig(episode_steps=2,observation_layout='relative_assignment',
+                              assignment_method='distance_matching')
+    parameters=(MAPPOConfig(hidden_size=16,update_epochs=1,minibatch_size=4) if algorithm=='mappo'
+                else MADDPGConfig(hidden_dim=16,batch_size=2,buffer_capacity=4,
+                                  learning_starts=2,update_interval_steps=2,updates_per_interval=1))
+    output=tmp_path/algorithm
+    train(config,parameters,2,algorithm,steps=4,num_envs=2,seed=7,device='cpu',
+          attack_mode='direct_rush',output=output,log_every_steps=4,
+          eval_interval=2,eval_episodes=1)
+    settings=json.loads((output/'settings.json').read_text(encoding='utf-8'))
+    assert settings['save_eval_checkpoints'] is True
+    checkpoint_dir=output/'checkpoints'
+    assert sorted(p.name for p in checkpoint_dir.iterdir())==[
+        'best.pt','index.json','last.pt','step_2.pt','step_4.pt']
+    index=json.loads((checkpoint_dir/'index.json').read_text(encoding='utf-8'))
+    assert index['schema']=='InterceptionCheckpoints/1'
+    catalog=index['checkpoints']
+    assert set(catalog)=={'Best','Last','step_2','step_4'}
+    assert catalog['step_2']['path']=='checkpoints/step_2.pt'
+    assert catalog['step_2']['step']==2
+    assert catalog['step_2']['selection']=='periodic_evaluation_snapshot'
+    assert catalog['step_2']['selection_mode']=='direct_rush'
+    assert catalog['step_2']['sha256']==digest(checkpoint_dir/'step_2.pt')
+    assert catalog['Last']['sha256']==catalog['step_4']['sha256']
+    assert catalog['Best']['sha256']==catalog[f"step_{catalog['Best']['step']}"]['sha256']
+    evaluations=[json.loads(line) for line in (output/'evaluations.jsonl').read_text(encoding='utf-8').splitlines()]
+    assert [set(row) for row in evaluations]==[{'step','modes'},{'step','modes'}]
+
+    _,by_label,_,model_by_label,_=load_run(output,'step_2','cpu')
+    _,by_file,_,model_by_file,_=load_run(checkpoint_dir/'step_2.pt',device='cpu')
+    assert model_by_label==model_by_file==(checkpoint_dir/'step_2.pt').resolve()
+    assert type(by_label) is type(by_file)
+
+    eval_by_label=cli_main(['evaluate','--checkpoint',str(output),'--label','step_2',
+                            '--episodes-per-mode','1','--output-dir',str(tmp_path/'eval_label')])
+    eval_by_file=cli_main(['evaluate','--checkpoint',str(checkpoint_dir/'step_2.pt'),
+                           '--episodes-per-mode','1','--output-dir',str(tmp_path/'eval_file')])
+    assert eval_by_label['checkpoint']==eval_by_file['checkpoint']==str((checkpoint_dir/'step_2.pt').resolve())
+
+    replay_main(['--checkpoint',str(output),'--label','step_2','--attack-mode','direct_rush',
+                 '--output',str(tmp_path/'replay_label')])
+    replay_main(['--checkpoint',str(checkpoint_dir/'step_2.pt'),'--attack-mode','direct_rush',
+                 '--output',str(tmp_path/'replay_file')])
+    assert (tmp_path/'replay_label'/'replay.html').exists()
+    assert (tmp_path/'replay_file'/'replay.html').exists()
+
+    diag_label=diagnose_main(['--checkpoint',str(output),'--label','step_2','--attack-mode','direct_rush',
+                              '--episodes','1','--output',str(tmp_path/'diag_label.json')])
+    diag_file=diagnose_main(['--checkpoint',str(checkpoint_dir/'step_2.pt'),'--attack-mode','direct_rush',
+                             '--episodes','1','--output',str(tmp_path/'diag_file.json')])
+    assert diag_label['label']=='step_2' and diag_file['label']=='step_2'
+    assert diag_label['checkpoint_sha256']==diag_file['checkpoint_sha256']==catalog['step_2']['sha256']
+
+    with pytest.raises(ValueError,match='Unknown checkpoint label'):
+        load_run(output,'step_999','cpu')
+    with pytest.raises(ValueError,match='does not match requested label'):
+        load_run(checkpoint_dir/'step_2.pt','Last','cpu')
+    extra=checkpoint_dir/'unregistered.pt'
+    shutil.copyfile(checkpoint_dir/'step_2.pt',extra)
+    with pytest.raises(ValueError,match='not registered in catalog'):
+        load_run(extra,device='cpu')
+    (checkpoint_dir/'step_2.pt').write_bytes(b'corrupted')
+    with pytest.raises(ValueError,match='Checkpoint catalog digest mismatch'):
+        load_run(output,'step_2','cpu')
+
+
+def test_save_eval_checkpoints_flag_and_mid_training_catalog(tmp_path,monkeypatch):
+    import json
+
+    from algorithm.mappo_config import MAPPOConfig
+    from experiment import interception as exp
+    from experiment.cli import main as cli_main
+
+    default_plan=cli_main(['preflight','--env-config','configs/interception_smoke.yaml',
+                           '--algorithm-config','configs/mappo_interception.yaml',
+                           '--algorithm','mappo','--attack-mode','direct_rush',
+                           '--total-sampled-steps','4','--num-envs','2',
+                           '--output-dir',str(tmp_path/'plan_default')])
+    disabled_plan=cli_main(['preflight','--env-config','configs/interception_smoke.yaml',
+                            '--algorithm-config','configs/mappo_interception.yaml',
+                            '--algorithm','mappo','--attack-mode','direct_rush',
+                            '--total-sampled-steps','4','--num-envs','2',
+                            '--no-save-eval-checkpoints',
+                            '--output-dir',str(tmp_path/'plan_disabled')])
+    assert default_plan['save_eval_checkpoints'] is True
+    assert disabled_plan['save_eval_checkpoints'] is False
+
+    config=InterceptionConfig(episode_steps=2)
+    parameters=MAPPOConfig(hidden_size=16,update_epochs=1,minibatch_size=4)
+    disabled_out=tmp_path/'disabled'
+    exp.train(config,parameters,2,'mappo',steps=4,num_envs=2,seed=7,device='cpu',
+              attack_mode='direct_rush',output=disabled_out,log_every_steps=4,
+              eval_interval=2,eval_episodes=1,save_eval_checkpoints=False)
+    assert sorted(p.name for p in (disabled_out/'checkpoints').iterdir())==['best.pt','index.json','last.pt']
+    disabled_index=json.loads((disabled_out/'checkpoints'/'index.json').read_text(encoding='utf-8'))
+    assert set(disabled_index['checkpoints'])=={'Best','Last'}
+    exp.load_run(disabled_out,'Best','cpu')
+    exp.load_run(disabled_out,'Last','cpu')
+
+    real_evaluate=exp.evaluate_policy
+    calls=0
+    def fail_on_second_eval(*args,**kwargs):
+        nonlocal calls
+        calls+=1
+        if calls==2:
+            raise RuntimeError('simulated interruption')
+        return real_evaluate(*args,**kwargs)
+
+    monkeypatch.setattr(exp,'evaluate_policy',fail_on_second_eval)
+    interrupted=tmp_path/'interrupted'
+    with pytest.raises(RuntimeError,match='simulated interruption'):
+        exp.train(config,parameters,2,'mappo',steps=4,num_envs=2,seed=7,device='cpu',
+                  attack_mode='direct_rush',output=interrupted,log_every_steps=4,
+                  eval_interval=2,eval_episodes=1)
+    partial_index=json.loads((interrupted/'checkpoints'/'index.json').read_text(encoding='utf-8'))
+    assert set(partial_index['checkpoints'])=={'Best','step_2'}
+    assert not any(p.name.endswith('.tmp') for p in (interrupted/'checkpoints').iterdir())
+    exp.load_run(interrupted,'Best','cpu')
+    exp.load_run(interrupted,'step_2','cpu')
+    exp.load_run(interrupted/'checkpoints'/'step_2.pt',device='cpu')

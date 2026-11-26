@@ -4,7 +4,9 @@ from __future__ import annotations
 from dataclasses import asdict, replace
 import hashlib
 import json
+import os
 from pathlib import Path
+import shutil
 
 import numpy as np
 import torch
@@ -22,7 +24,15 @@ from .prioritized_replay import PrioritizedReplayBuffer, ReplayConfig
 
 
 def write_json(path, value):
-    Path(path).write_text(json.dumps(value,ensure_ascii=False,allow_nan=False,indent=2,default=_plain)+'\n',encoding='utf-8')
+    target=Path(path)
+    text=json.dumps(value,ensure_ascii=False,allow_nan=False,indent=2,default=_plain)+'\n'
+    temp=target.with_name(f'.{target.name}.{os.getpid()}.tmp')
+    try:
+        temp.write_text(text,encoding='utf-8')
+        os.replace(temp,target)
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
 
 
 def _plain(value):
@@ -88,9 +98,86 @@ def save_policy(policy,name,path,step,config):
     else:policy.save(path,global_step=step,environment_config=dict(environment=asdict(config)))
 
 
-def load_run(checkpoint,label='Best',device='cpu'):
-    root=Path(checkpoint)
-    if root.is_file():root=root.parent.parent if root.parent.name=='checkpoints' else root.parent
+def _save_policy_atomic(policy,name,path,step,config):
+    target=Path(path)
+    target.parent.mkdir(parents=True,exist_ok=True)
+    temp=target.with_name(f'.{target.name}.{os.getpid()}.tmp')
+    try:
+        save_policy(policy,name,temp,step,config)
+        os.replace(temp,target)
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
+
+
+def _copy_file_atomic(source,destination):
+    target=Path(destination)
+    target.parent.mkdir(parents=True,exist_ok=True)
+    temp=target.with_name(f'.{target.name}.{os.getpid()}.tmp')
+    try:
+        shutil.copyfile(source,temp)
+        os.replace(temp,target)
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
+
+
+def _checkpoint_root(checkpoint):
+    target=Path(checkpoint)
+    if target.is_file():
+        return target.parent.parent if target.parent.name=='checkpoints' else target.parent
+    return target
+
+
+def _catalog_model_path(root,entry):
+    relative=entry.get('path') if isinstance(entry,dict) else None
+    if not isinstance(relative,str) or not relative:
+        raise ValueError('Checkpoint catalog entry missing path')
+    resolved_root=root.resolve()
+    model=(resolved_root/relative).resolve()
+    if not model.is_relative_to(resolved_root):
+        raise ValueError('Checkpoint path escapes run directory')
+    return model
+
+
+def resolve_checkpoint_entry(checkpoint,label=None,*,default_label='Best'):
+    target=Path(checkpoint)
+    is_file=target.is_file()
+    root=_checkpoint_root(target)
+    index=json.loads((root/'checkpoints'/'index.json').read_text(encoding='utf-8'))
+    catalog=index.get('checkpoints',{})
+    if is_file:
+        model=target.resolve()
+        if label is None:
+            matches=[(name,entry) for name,entry in catalog.items()
+                     if isinstance(entry,dict) and isinstance(entry.get('path'),str)
+                     and _catalog_model_path(root,entry)==model]
+            if not matches:
+                raise ValueError('Checkpoint file is not registered in catalog')
+            resolved_label,expected=matches[0]
+        else:
+            resolved_label=label
+            expected=catalog.get(resolved_label)
+            if expected is None:
+                raise ValueError(f'Unknown checkpoint label: {resolved_label}')
+            if _catalog_model_path(root,expected)!=model:
+                raise ValueError('Checkpoint file does not match requested label')
+    else:
+        resolved_label=default_label if label is None else label
+        expected=catalog.get(resolved_label)
+        if expected is None:
+            raise ValueError(f'Unknown checkpoint label: {resolved_label}')
+        model=_catalog_model_path(root,expected)
+    return root,model,resolved_label,expected
+
+
+def resolve_checkpoint_label(checkpoint,label=None,*,default_label='Best'):
+    _,_,resolved_label,_=resolve_checkpoint_entry(checkpoint,label,default_label=default_label)
+    return resolved_label
+
+
+def load_run(checkpoint,label=None,device='cpu'):
+    root=_checkpoint_root(checkpoint)
     settings=json.loads((root/'settings.json').read_text(encoding='utf-8'))
     if settings.get('attack_mode') not in ('direct_rush','split_attack','jia_straight','radial_straight'):
         raise ValueError('Checkpoint training attack mode is unsupported')
@@ -110,10 +197,8 @@ def load_run(checkpoint,label='Best',device='cpu'):
     parameter_type=(NormalizedMADDPGConfig if isinstance(config,JiaHeadingConfig) else
                     {'mappo':MAPPOConfig,'maddpg':MADDPGConfig,'dual_critic':DualCriticConfig}[name])
     parameters=parameter_type(**settings['parameters'])
-    model=(root/'checkpoints'/('best.pt' if label=='Best' else 'last.pt')) if Path(checkpoint).is_dir() else Path(checkpoint)
-    index=json.loads((root/'checkpoints'/'index.json').read_text(encoding='utf-8'))
-    expected=index['checkpoints'].get(label)
-    if expected is None or expected['sha256']!=digest(model):raise ValueError('Checkpoint catalog digest mismatch')
+    _,model,_,expected=resolve_checkpoint_entry(checkpoint,label,default_label='Best')
+    if expected.get('sha256')!=digest(model):raise ValueError('Checkpoint catalog digest mismatch')
     policy=make_policy(name,config,parameters,device,settings['seed'],
                        environment_contract=settings['environment_contract'],
                        environment_config=saved_environment)
@@ -242,13 +327,14 @@ def evaluation_interval_for_budget(steps,num_envs):
 
 def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mode,output,
           eval_interval=None,eval_episodes=10,log_every_steps=10000,replay_config=None,
-          warm_start_run=None):
+          warm_start_run=None,save_eval_checkpoints=True):
     if num_envs<1 or steps<1 or steps%num_envs or log_every_steps<1 or attack_mode not in ('direct_rush','split_attack','jia_straight','radial_straight'):
         raise ValueError('Invalid training budget or attack mode')
     if eval_interval is None:
         eval_interval=evaluation_interval_for_budget(steps,num_envs)
     if eval_interval<0 or eval_episodes<1:
         raise ValueError('Invalid evaluation schedule')
+    save_eval_checkpoints=bool(save_eval_checkpoints)
     config=replace(config,attack_mode=attack_mode)
     replay_config=replay_config or ReplayConfig()
     prioritized=name=='maddpg' and replay_config.mode=='critic_per_with_uniform'
@@ -271,6 +357,7 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                   attack_mode=attack_mode,checkpoint_selection_mode=attack_mode,
                   total_sampled_steps=steps,num_envs=num_envs,
                   log_every_steps=log_every_steps,eval_interval=eval_interval,eval_episodes=eval_episodes,
+                  save_eval_checkpoints=save_eval_checkpoints,
                   learner_reward_interface=('team_scalar' if name=='mappo' else 'per_defender_vector' if name=='maddpg'
                                             else 'global_scalar_and_mean_local_scalar'))
     if prioritized:settings['replay']=asdict(replay_config)
@@ -301,25 +388,50 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                                             1 if isinstance(config,OneVsOneConfig) else 5))
     best_score=None
     best_entry=None
+    eval_entries={}
+    last_eval_snapshot=None
     next_eval=eval_interval if eval_interval else None
     sampled=0
     episodes=0
     reward_component_totals=[{} for _ in range(num_envs)]
     updates=0
+    def write_checkpoint_index(last_entry=None):
+        entries={}
+        if best_entry is not None:entries['Best']=best_entry
+        if last_entry is not None:entries['Last']=last_entry
+        entries.update(eval_entries)
+        write_json(root/'checkpoints'/'index.json',dict(schema='InterceptionCheckpoints/1',checkpoints=entries))
     def record_evaluation(step):
-        nonlocal best_score,best_entry
+        nonlocal best_score,best_entry,last_eval_snapshot
         summaries={attack_mode:summarize(evaluate_policy(config,policy,attack_mode,eval_episodes,600000))}
         evaluation_log.write(json.dumps(dict(step=step,modes=summaries),allow_nan=False)+'\n')
         evaluation_log.flush()
         print(ProgressLogger.evaluation(step,summaries),flush=True)
         own=summaries[attack_mode]
         score=(own['all_capture_rate'],own['capture_efficiency'],-own['failure_rate'])
+        snapshot_model=None
+        snapshot_digest=None
+        if save_eval_checkpoints:
+            label=f'step_{step}'
+            filename=f'{label}.pt'
+            snapshot_model=root/'checkpoints'/filename
+            _save_policy_atomic(policy,name,snapshot_model,step,config)
+            snapshot_digest=digest(snapshot_model)
+            eval_entries[label]=dict(path=f'checkpoints/{filename}',sha256=snapshot_digest,step=step,
+                                     selection='periodic_evaluation_snapshot',selection_mode=attack_mode)
+            last_eval_snapshot=(step,snapshot_model,snapshot_digest)
         if best_score is None or score>best_score:
             model=root/'checkpoints'/'best.pt'
-            save_policy(policy,name,model,step,config)
-            best_entry=dict(path='checkpoints/best.pt',sha256=digest(model),step=step,
+            if snapshot_model is not None:
+                _copy_file_atomic(snapshot_model,model)
+                best_digest=snapshot_digest
+            else:
+                _save_policy_atomic(policy,name,model,step,config)
+                best_digest=digest(model)
+            best_entry=dict(path='checkpoints/best.pt',sha256=best_digest,step=step,
                             selection='periodic_evaluation',selection_mode=attack_mode)
             best_score=score
+        write_checkpoint_index()
     try:
         print(f'[train {name}] attack={attack_mode} workers={num_envs} device={device} '
               f'budget={steps:,} log_every={log_every_steps:,} eval_every={eval_interval:,} '
@@ -405,14 +517,18 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                     progress_log.flush()
                     for line in ProgressLogger.lines(status):print(line,flush=True)
         last=root/'checkpoints'/'last.pt'
-        save_policy(policy,name,last,sampled,config)
+        if last_eval_snapshot is not None and last_eval_snapshot[0]==sampled:
+            _copy_file_atomic(last_eval_snapshot[1],last)
+            last_digest=last_eval_snapshot[2]
+        else:
+            _save_policy_atomic(policy,name,last,sampled,config)
+            last_digest=digest(last)
         if best_entry is None:
             best=root/'checkpoints'/'best.pt'
-            save_policy(policy,name,best,sampled,config)
-            best_entry=dict(path='checkpoints/best.pt',sha256=digest(best),step=sampled,
+            _copy_file_atomic(last,best)
+            best_entry=dict(path='checkpoints/best.pt',sha256=last_digest,step=sampled,
                             selection='final_unvalidated',selection_mode=attack_mode)
-        write_json(root/'checkpoints'/'index.json',dict(schema='InterceptionCheckpoints/1',checkpoints=dict(
-            Best=best_entry,Last=dict(path='checkpoints/last.pt',sha256=digest(last),step=sampled))))
+        write_checkpoint_index(last_entry=dict(path='checkpoints/last.pt',sha256=last_digest,step=sampled))
         result=dict(sampled_steps=sampled,completed_episodes=episodes,
                     episodes_by_attack_mode={attack_mode:episodes},
                     updates=updates,best_score=best_score,best_selection=best_entry['selection'],

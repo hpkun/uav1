@@ -88,7 +88,8 @@ def html(trace,stride):
 def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--checkpoint',type=Path,required=True)
-    p.add_argument('--label',choices=('Best','Last'),default='Best')
+    p.add_argument('--label',default=None,
+                   help='Checkpoint catalog label (e.g. Best, Last, step_100000); defaults to Best for a run directory or auto-resolved for a .pt file')
     p.add_argument('--attack-mode',choices=('direct_rush','split_attack','jia_straight','radial_straight'),required=True)
     p.add_argument('--seed',type=int,default=900001)
     p.add_argument('--device',choices=('cpu','cuda'),default='cpu')

@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from assignment.huang import minimum_travel_time, predict_boundary_point
-from experiment.interception import digest, load_run, require_matching_attack_mode
+from experiment.interception import digest, load_run, require_matching_attack_mode, resolve_checkpoint_label
 from .replay import collect, validate_trace
 
 
@@ -188,7 +188,8 @@ def analyze_trace(trace):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--checkpoint', type=Path, required=True)
-    parser.add_argument('--label', choices=('Best', 'Last'), default='Last')
+    parser.add_argument('--label', default=None,
+                        help='Checkpoint catalog label (e.g. Last, Best, step_100000); defaults to Last for a run directory or auto-resolved for a .pt file')
     parser.add_argument('--attack-mode', choices=('direct_rush', 'split_attack', 'jia_straight', 'radial_straight'), required=True)
     parser.add_argument('--seed', type=int, default=600000)
     parser.add_argument('--episodes', type=int, default=5)
@@ -197,7 +198,9 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.seed < 0 or args.episodes < 1 or args.output.exists():
         raise ValueError('Invalid seed, episode count or existing output')
-    config, policy, algorithm, model, settings = load_run(args.checkpoint, args.label, args.device)
+    requested_label = args.label if args.label is not None else (None if args.checkpoint.is_file() else 'Last')
+    config, policy, algorithm, model, settings = load_run(args.checkpoint, requested_label, args.device)
+    resolved_label = requested_label if requested_label is not None else resolve_checkpoint_label(model)
     require_matching_attack_mode(settings, args.attack_mode)
     episodes = [analyze_trace(collect(config, policy, args.attack_mode, args.seed + offset))
                 for offset in range(args.episodes)]
@@ -222,7 +225,7 @@ def main(argv=None):
                      unassigned_visible_defender_time_s_by_reason=unassigned_times,
                      assignment_loss_reasons=loss_counts)
     result = dict(schema='InterceptionDiagnostics/1', algorithm=algorithm, attack_mode=args.attack_mode,
-                  label=args.label, checkpoint_sha256=digest(model), seed_start=args.seed,
+                  label=resolved_label, checkpoint_sha256=digest(model), seed_start=args.seed,
                   aggregate=aggregate, episodes=episodes)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False) + '\n', encoding='utf-8')
