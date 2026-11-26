@@ -32,6 +32,7 @@ class JiaHeadingConfig(InterceptionConfig):
     scenario: str = 'jia_heading_radial'
     defender_speed_min: float = 6.0
     defender_turn_rate_max: float = 0.5
+    time_penalty_per_step: float = 0.0
 
     def __post_init__(self):
         super().__post_init__()
@@ -42,6 +43,7 @@ class JiaHeadingConfig(InterceptionConfig):
                 c.episode_protocol != 'resolve_all_one_penalty_trade' or
                 c.breach_penalty_mode != 'per_target' or not c.defender_oob_retire or
                 not math.isfinite(c.defender_speed_min) or not math.isfinite(c.defender_turn_rate_max) or
+                not math.isfinite(c.time_penalty_per_step) or c.time_penalty_per_step < 0 or
                 not 0 < c.defender_speed_min <= c.defender_speed_max or
                 c.defender_initial_speed != c.defender_speed_min or c.defender_turn_rate_max <= 0 or
                 c.attacker_initial_speed != c.attacker_speed_max):
@@ -70,6 +72,8 @@ class JiaHeadingEnv(InterceptionEnv):
                       observation_schema=result['observation_schema']+';self_heading_cos_sin',
                       state_schema=result['state_schema']+';defender_heading_cos_sin',
                       implementation_sha256=hashlib.sha256(source).hexdigest(),config=asdict(self.config))
+        if self.config.time_penalty_per_step:
+            result['reward_schema'] += '+fixed_shared_time_cost'
         result.pop('max_acceleration',None)
         return result
 
@@ -100,6 +104,22 @@ class JiaHeadingEnv(InterceptionEnv):
         info['version'] = 'interception_13'
         info['physical_commands'] = self.last_physical_commands.copy()
         return info
+
+    def step(self, defender_actions):
+        if not self.config.time_penalty_per_step:
+            return super().step(defender_actions)
+        active_before = self.defender_alive.copy()
+        observations, rewards, terminated, truncated, info = super().step(defender_actions)
+        penalty = self.config.time_penalty_per_step
+        self.team_return -= penalty
+        info['team_reward'] -= penalty
+        info['reward_components']['time'] = -penalty
+        info['individual_rewards'][active_before] -= penalty
+        if 'episode_summary' in info:
+            info['episode_summary']['team_return'] = self.team_return
+        if not np.isclose(sum(info['reward_components'].values()), info['team_reward'], rtol=0, atol=1e-10):
+            raise AssertionError('Jia heading time reward ledger mismatch')
+        return observations, info['individual_rewards'].astype(np.float32), terminated, truncated, info
 
     def _validate_defender_actions(self, defender_actions):
         actions = np.asarray(defender_actions,dtype=np.float64)

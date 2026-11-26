@@ -145,6 +145,6 @@ class ProgressLogger:
         if row.get('time_limit_rate'):
             status+=f' timeout={_percent(row["time_limit_rate"])}'
         components=row.get('mean_reward_components',{})
-        names=('capture','penetration','approach','heading','boundary','danger')
+        names=('capture','penetration','approach','heading','boundary','time','danger')
         detail=' '.join(f'{name}={_signed(components[name])}' for name in names if name in components)
         return f'{status}\n  reward/ep (undiscounted): {detail}'
