@@ -1,0 +1,27 @@
+algorithm: intent_matd3
+parameters:
+  hidden_dim: 128
+  actor_learning_rate: 0.0003
+  critic_learning_rate: 0.001
+  gamma: 0.99
+  tau: 0.005
+  batch_size: 128
+  buffer_capacity: 200000
+  learning_starts: 1024
+  update_interval_steps: 10
+  updates_per_interval: 1
+  exploration_std_mps2: 0.0
+  exploration_std_speed: 0.3
+  exploration_std_turn: 0.3
+  actor_max_grad_norm: 0.5
+  critic_max_grad_norm: 10.0
+  policy_delay: 2
+  target_noise_std_speed: 0.2
+  target_noise_std_turn: 0.2
+  target_noise_clip_speed: 0.5
+  target_noise_clip_turn: 0.5
+  intent_embed_dim: 64
+  prediction_horizons: [5, 10, 20]
+  prediction_loss_weight: 1.0
+training:
+  rollout_length: 128

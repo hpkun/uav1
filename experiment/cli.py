@@ -20,7 +20,7 @@ def parser():
         p=commands.add_parser(command)
         p.add_argument('--env-config',type=Path,required=True)
         p.add_argument('--algorithm-config',type=Path,required=True)
-        p.add_argument('--algorithm',choices=('mappo','maddpg','matd3','dual_critic'),required=True)
+        p.add_argument('--algorithm',choices=('mappo','maddpg','matd3','intent_matd3','dual_critic'),required=True)
         p.add_argument('--attack-mode',choices=('direct_rush','split_attack','jia_straight','radial_straight'),required=True)
         p.add_argument('--total-sampled-steps',type=int,required=True)
         p.add_argument('--num-envs',type=int,default=1)
@@ -61,7 +61,7 @@ def main(argv=None):
         data=yaml.safe_load(args.algorithm_config.read_text(encoding='utf-8'))
         if data['algorithm']!=args.algorithm:raise ValueError('Algorithm config mismatch')
         replay_config=ReplayConfig.from_mapping(data['training'].get('replay'))
-        if args.algorithm not in ('maddpg','matd3') and replay_config.mode!='uniform':
+        if args.algorithm not in ('maddpg','matd3','intent_matd3') and replay_config.mode!='uniform':
             raise ValueError('Prioritized replay supports MADDPG/MATD3 only')
         if (replay_config.mode!='uniform' and not
                 0<round(parameters.batch_size*replay_config.prioritized_fraction)<parameters.batch_size):

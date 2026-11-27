@@ -74,6 +74,14 @@ Replay stores each defender's local observation, the joint state and action, all
 
 `matd3` (`algorithm/matd3.py`) keeps the exact same observation, action, reward, and replay interfaces as `maddpg`, while adding clipped double-Q targets (`min(Q1', Q2')` with two independent joint critic ensembles), clipped Gaussian target-action smoothing (projected onto the physical disk or clamped to `[-1, 1]` for `Interception/13` and `Interception/14`), and delayed actor/target updates (`policy_delay`, updating actors via `Q1` only). It uses dedicated configs (`configs/matd3_interception.yaml`, `configs/matd3_jia_heading_interval10.yaml`) and an isolated checkpoint schema `interception_matd3_1` so MADDPG and MATD3 artifacts never cross-load.
 
+## IntentMATD3 (isolated short-horizon enemy trajectory-guided variant)
+
+`intent_matd3` (`algorithm/intent_matd3.py`, config `configs/intent_matd3_jia_heading_interval10.yaml`, checkpoint schema `interception_intent_matd3_1`) extends `matd3` strictly for `Interception/14` (5v5) and `Interception/15` (5v3) without modifying environments, critics, or historical algorithms:
+
+- **Single-step multi-horizon enemy trajectory predictor**: each defender's `IntentActor` predicts future attacker positions anchored at defender `i`'s current time-`t` position `(att_pos(t+h) - def_pos(t)) / (2 * arena_half_extent)` for `prediction_horizons` (default `[5, 10, 20]` steps = `0.5s / 1.0s / 2.0s`) from `[own(6), enemy_j(5)]`, supervised with masked `SmoothL1` loss against targets derived from `central_state` via a bounded `max(prediction_horizons)`-step rolling delay queue (no cross-episode lookahead). Per-horizon valid-label fractions (`pred_valid_h*`) are recorded in update logs.
+- **Single-layer prediction-guided focus**: `detach(pred)` is concatenated with enemy features and attended by a query projected from `[own(6), allies(20)]` (with an always-valid `null` token fallback for 0 visible enemies), producing an `intent_embed_dim` (`64`) context appended to `obs_i` for the standard 2-layer `hidden_dim=128` `tanh` policy head.
+- **Gradient isolation & critics**: `pred.detach()` strictly decouples auxiliary trajectory supervision from RL policy gradients; policy and predictor parameter groups are gradient-clipped independently; critics remain identical to `matd3`'s twin centralized `JointCritic` ensembles. Target actors include both policy and predictor weights and receive full soft updates.
+
 ## Interception/14: radial speed-heading with fixed-ID entity observations and nearest-target shaping
 
 `env/jia_heading_nearest.py` (`JiaHeadingNearestEnv`, schema `Interception/14`, version `interception_14`) isolates the assignment-free full-entity radial speed-heading interface without modifying `Interception/1`–`Interception/13`. Configs: `configs/interception_radial_5v5_jia_heading_nearest_time01.yaml` and `configs/interception_radial_5v5_jia_heading_nearest_d08_h003_time0015.yaml`.

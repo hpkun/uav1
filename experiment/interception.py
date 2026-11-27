@@ -18,6 +18,8 @@ from algorithm.maddpg import MADDPG
 from algorithm.maddpg_config import MADDPGConfig, NormalizedMADDPGConfig
 from algorithm.matd3 import MATD3
 from algorithm.matd3_config import MATD3Config, NormalizedMATD3Config
+from algorithm.intent_matd3 import FutureTargetDelayQueue, IntentMATD3
+from algorithm.intent_matd3_config import IntentMATD3Config
 from algorithm.dual_critic import DualCritic, DualCriticConfig
 from env import InterceptionConfig, OneVsOneConfig, RadialScaleConfig, JiaHeadingConfig, JiaHeadingNearestConfig, JiaHeadingNearest5v3Config, make_environment
 from env.parallel import ParallelInterceptionEnvs
@@ -49,6 +51,8 @@ def digest(path):
 
 
 def _parameter_type(name,config):
+    if name=='intent_matd3':
+        return IntentMATD3Config
     if isinstance(config,(JiaHeadingConfig,JiaHeadingNearestConfig,JiaHeadingNearest5v3Config)):
         if name=='maddpg':return NormalizedMADDPGConfig
         if name=='matd3':return NormalizedMATD3Config
@@ -70,17 +74,19 @@ def read_config(env_path, algorithm_path=None):
     if not isinstance(learner,dict) or set(learner)!={'algorithm','parameters','training'}:
         raise ValueError('Expected algorithm, parameters and training sections')
     name=learner['algorithm']
-    if name not in ('mappo','maddpg','matd3','dual_critic'):
+    if name not in ('mappo','maddpg','matd3','intent_matd3','dual_critic'):
         raise ValueError('Unsupported interception algorithm')
-    if isinstance(config,(OneVsOneConfig,RadialScaleConfig,JiaHeadingConfig,JiaHeadingNearestConfig,JiaHeadingNearest5v3Config)) and name not in ('maddpg','matd3'):
+    if isinstance(config,(OneVsOneConfig,RadialScaleConfig,JiaHeadingConfig,JiaHeadingNearestConfig,JiaHeadingNearest5v3Config)) and name not in ('maddpg','matd3','intent_matd3'):
         raise ValueError('The isolated reduced-scale experiments support MADDPG/MATD3 only')
+    if name=='intent_matd3' and not isinstance(config,(JiaHeadingNearestConfig,JiaHeadingNearest5v3Config)):
+        raise ValueError('IntentMATD3 supports Interception/14 and Interception/15 only')
     if name=='dual_critic' and make_environment(config).contract['version']!='interception_1':
         raise ValueError('Dual critic supports only Interception/1')
     parameters=_parameter_type(name,config)(**learner['parameters'])
     rollout=int(learner['training']['rollout_length'])
     if rollout<1:raise ValueError('rollout_length must be positive')
     replay_config=ReplayConfig.from_mapping(learner['training'].get('replay'))
-    if name not in ('maddpg','matd3') and replay_config.mode!='uniform':
+    if name not in ('maddpg','matd3','intent_matd3') and replay_config.mode!='uniform':
         raise ValueError('Prioritized replay supports MADDPG/MATD3 only')
     if replay_config.mode!='uniform' and config.episode_protocol!='resolve_all_one_penalty_trade':
         raise ValueError('PER event diagnostics require the current one-penalty interception protocol')
@@ -97,6 +103,8 @@ def make_policy(name,config,parameters,device,seed,environment_contract=None,env
         return MADDPG(parameters,device,seed,environment_config=snapshot,environment_contract=contract)
     if name=='matd3':
         return MATD3(parameters,device,seed,environment_config=snapshot,environment_contract=contract)
+    if name=='intent_matd3':
+        return IntentMATD3(parameters,device,seed,environment_config=snapshot,environment_contract=contract)
     if name=='dual_critic':
         if environment.contract['version']!='interception_1':
             raise ValueError('Dual critic supports only Interception/1')
@@ -217,7 +225,7 @@ def load_run(checkpoint,label=None,device='cpu'):
 
 
 def validate_warm_start(run,config,parameters,name,mode,device):
-    if name not in ('maddpg','matd3'):
+    if name not in ('maddpg','matd3','intent_matd3'):
         raise ValueError('Learner warm start currently supports MADDPG/MATD3 only')
     source_config,_,source_name,model,source=load_run(run,'Last',device)
     if (source_name!=name or source['attack_mode']!=mode or
@@ -349,7 +357,7 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
     save_eval_checkpoints=bool(save_eval_checkpoints)
     config=replace(config,attack_mode=attack_mode)
     replay_config=replay_config or ReplayConfig()
-    prioritized=name in ('maddpg','matd3') and replay_config.mode=='critic_per_with_uniform'
+    prioritized=name in ('maddpg','matd3','intent_matd3') and replay_config.mode=='critic_per_with_uniform'
     if replay_config.mode!='uniform' and not prioritized:
         raise ValueError('Prioritized replay supports MADDPG/MATD3 only')
     if prioritized and config.episode_protocol!='resolve_all_one_penalty_trade':
@@ -370,7 +378,7 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                   total_sampled_steps=steps,num_envs=num_envs,
                   log_every_steps=log_every_steps,eval_interval=eval_interval,eval_episodes=eval_episodes,
                   save_eval_checkpoints=save_eval_checkpoints,update_log_interval=update_log_interval,
-                  learner_reward_interface=('team_scalar' if name=='mappo' else 'per_defender_vector' if name in ('maddpg','matd3')
+                  learner_reward_interface=('team_scalar' if name=='mappo' else 'per_defender_vector' if name in ('maddpg','matd3','intent_matd3')
                                             else 'global_scalar_and_mean_local_scalar'))
     if prioritized:settings['replay']=asdict(replay_config)
     if warm_start is not None:
@@ -406,6 +414,8 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
     sampled=0
     episodes=0
     reward_component_totals=[{} for _ in range(num_envs)]
+    intent_queues=([FutureTargetDelayQueue(n_attackers=config.n_attackers,horizons=parameters.prediction_horizons)
+                    for _ in range(num_envs)] if name=='intent_matd3' else None)
     updates=0
     def write_checkpoint_index(last_entry=None):
         entries={}
@@ -477,6 +487,13 @@ def train(config,parameters,rollout,name,*,steps,num_envs,seed,device,attack_mod
                                 metadata=dict(capture=sum(event['type']=='capture' for event in events),
                                               first_breach=int(result.infos[i]['reward_components']['penetration']<0),
                                               boundary=sum(event['type']=='defender_oob' for event in events))
+                            else:metadata=None
+                            if intent_queues is not None:
+                                ready=intent_queues[i].push(item,metadata,done=bool(result.dones[i]))
+                                for staged_item,staged_meta in ready:
+                                    if prioritized:replay.add(event_metadata=staged_meta,**staged_item)
+                                    else:replay.add(**staged_item)
+                            elif prioritized:
                                 replay.add(event_metadata=metadata,**item)
                             else:replay.add(**item)
                     for i,info in enumerate(result.infos):
