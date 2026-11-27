@@ -11,6 +11,14 @@ from env import make_environment
 from experiment.interception import digest,load_run,require_matching_attack_mode
 
 
+def _serialize_sides(value):
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple)):
+        return [np.asarray(side).tolist() for side in value]
+    return np.asarray(value).tolist()
+
+
 def collect(config,policy,mode,seed):
     if mode!=config.attack_mode:
         raise ValueError('Replay mode differs from checkpoint training mode')
@@ -20,13 +28,13 @@ def collect(config,policy,mode,seed):
     events=[]
 
     def frame(step,actions=None,physical=None):
-        return dict(step=step,time_s=step*config.dt,positions=env.positions.tolist(),
-                    velocities=env.velocities.tolist(),attacker_alive=env.attacker_alive.tolist(),
+        return dict(step=step,time_s=step*config.dt,positions=_serialize_sides(env.positions),
+                    velocities=_serialize_sides(env.velocities),attacker_alive=env.attacker_alive.tolist(),
                     defender_alive=env.defender_alive.tolist(),
-                    headings=(env.headings.tolist() if hasattr(env,'headings') else None),
+                    headings=(_serialize_sides(env.headings) if hasattr(env,'headings') else None),
                     assigned_target_ids=(env.assignment.targets.tolist() if env.assignment is not None else None),
                     defender_actions=None if actions is None else np.asarray(actions).tolist(),
-                    physical_commands=None if physical is None else np.asarray(physical).tolist())
+                    physical_commands=_serialize_sides(physical))
 
     frames.append(frame(0))
     while True:
@@ -36,7 +44,7 @@ def collect(config,policy,mode,seed):
         events.extend(info['events'])
         if terminated or truncated:
             break
-    trace=dict(schema=('InterceptionReplay/3' if env.contract['version'] in ('interception_13','interception_14') else
+    trace=dict(schema=('InterceptionReplay/3' if env.contract['version'] in ('interception_13','interception_14','interception_15') else
                        'InterceptionReplay/2' if mode=='radial_straight' else 'InterceptionReplay/1'),mode=mode,seed=seed,
                config=env.contract['config'],frames=frames,events=events,summary=info['episode_summary'])
     env.close()
@@ -45,8 +53,14 @@ def collect(config,policy,mode,seed):
 
 def validate_trace(trace):
     frames=trace['frames'];events=trace['events'];summary=trace['summary']
-    pairs=trace['config'].get('active_pairs') if trace['config'].get('scenario')=='radial_scale' else None
-    attackers=defenders=pairs if pairs is not None else 1 if trace['config'].get('scenario')=='one_vs_one' else 5
+    cfg=trace['config']
+    if cfg.get('scenario')=='radial_scale':
+        defenders=attackers=int(cfg['active_pairs'])
+    elif cfg.get('scenario')=='one_vs_one':
+        defenders=attackers=1
+    else:
+        defenders=int(cfg.get('n_defenders',5))
+        attackers=int(cfg.get('n_attackers',5))
     if len(frames)!=summary['steps']+1 or [row['step'] for row in frames]!=list(range(len(frames))):
         raise ValueError('Replay frame count or order mismatch')
     if any(not 1<=event['step']<=summary['steps'] for event in events):
@@ -55,19 +69,29 @@ def validate_trace(trace):
         raise ValueError('Replay capture events disagree with episode')
     if sum(event['type']=='penetration' for event in events)!=summary['penetrated_count']:
         raise ValueError('Replay penetration events disagree with episode')
+    if summary.get('n_attackers',attackers)!=attackers:
+        raise ValueError('Replay attacker count disagrees with episode summary')
     if summary['outcome']=='penetrated' and not summary['penetrated_count']:
         raise ValueError('Penetration outcome has no event')
     if summary['outcome']=='all_captured' and summary['captured_count']!=attackers:
         raise ValueError('All-capture outcome has incomplete captures')
-    if trace['config'].get('episode_protocol') in ('resolve_all','resolve_all_one_penalty','resolve_all_one_penalty_trade') and summary['captured_count']+summary['penetrated_count']!=attackers:
+    if cfg.get('episode_protocol') in ('resolve_all','resolve_all_one_penalty','resolve_all_one_penalty_trade') and summary['captured_count']+summary['penetrated_count']!=attackers:
         raise ValueError('Resolved episode does not account for all attackers')
-    if trace['config'].get('episode_protocol')=='resolve_all_one_penalty_trade':
+    if any('attacker_alive' in row for row in frames):
+        if any('attacker_alive' not in row for row in frames):
+            raise ValueError('Replay attacker status is incomplete')
+        attacker_slots=len(frames[0]['attacker_alive'])
+        if attacker_slots<attackers or any(len(row['attacker_alive'])!=attacker_slots for row in frames):
+            raise ValueError('Replay attacker status is incomplete')
+        if sum(frames[0]['attacker_alive'])!=attackers:
+            raise ValueError('Initial active attacker count disagrees with scenario')
+    if cfg.get('episode_protocol')=='resolve_all_one_penalty_trade':
         if any(len(row['defender_alive'])!=5 for row in frames):
             raise ValueError('Replay defender status is incomplete')
         if len({event['defender'] for event in events if event['type']=='capture'})!=summary['captured_count']:
             raise ValueError('A defender captured more than one attacker')
         expected_retired = summary['captured_count'] + (summary['defender_oob_count']
-                            if trace['config'].get('defender_oob_retire') else 0)
+                            if cfg.get('defender_oob_retire') else 0)
         if defenders-sum(frames[-1]['defender_alive'])!=expected_retired:
             raise ValueError('Retired defenders disagree with captures')
     return trace

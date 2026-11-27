@@ -147,7 +147,6 @@ class JiaHeadingNearestEnv:
             'shared_capture_and_per_target_breach+nearest_visible_approach'
             + ('+nearest_visible_heading' if c.heading_weight else '')
             + '+boundary_retirement'
-            + ('+fixed_shared_time_cost' if c.time_penalty_per_step else '')
             + '; team=global+sum(local_i)'
             + ('+fixed_shared_time_cost' if c.time_penalty_per_step else '')
         )

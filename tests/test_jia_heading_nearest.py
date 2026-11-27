@@ -12,7 +12,7 @@ from env import JiaHeadingNearestConfig, make_environment
 from env.jia_heading import wrap_heading
 from experiment.cli import main as cli_main
 from experiment.interception import evaluate_policy, load_run, make_policy, read_config, train
-from tools.replay import collect, validate_trace
+from tools.replay import collect, html, validate_trace
 
 ENV_TIME01 = 'configs/interception_radial_5v5_jia_heading_nearest_time01.yaml'
 ENV_D08 = 'configs/interception_radial_5v5_jia_heading_nearest_d08_h003_time0015.yaml'
@@ -37,6 +37,8 @@ def test_config_contract_and_historical_13_preservation():
     assert contract['action_dim'] == 2
     assert contract['action_schema'] == 'normalized_speed_turn_box'
     assert contract['assignment_schema'] is None
+    assert contract['reward_schema'].count('fixed_shared_time_cost') == 1
+    assert make_environment(replace(cfg1, time_penalty_per_step=0.0)).contract['reward_schema'].count('fixed_shared_time_cost') == 0
 
     with pytest.raises(ValueError):
         JiaHeadingNearestConfig(assignment_method='ideal_global_distance_matching')
@@ -331,3 +333,5 @@ def test_short_train_preflight_load_eval_and_replay(tmp_path, algorithm, param_c
     assert trace['schema'] == 'InterceptionReplay/3'
     assert trace['frames'][0]['assigned_target_ids'] is None
     assert trace['frames'][1]['physical_commands'] is not None
+    rendered = html(trace, 1)
+    assert "cfg.observation_layout==='relative_nearest_entities'&&cfg.communication_radius!=null" in rendered

@@ -222,6 +222,51 @@
 - 最后约 1,000 次 Critic 更新：Actor loss +38.36（仅延迟 Actor 更新时记录）、Actor 裁剪前梯度范数 0.327、Actor 更新裁剪比例 73.8%；两组 Critic loss 分别为 14.57/14.63，总和 29.21，双 Critic 平均 TD 绝对误差 0.881，双 Critic 有效网络平均梯度范数 19.79，99.2% 的 Critic 更新至少有一个网络超出裁剪阈值 10；Q1/Q2 平均绝对差 0.448，Q/target Q 均值约 −44.64/−44.57。首约 1,000 次 TD 误差 1.392。近乎持续裁剪提示更新压力，但 1.9M→2M 间 TD 误差略降仍伴随全歼率下滑，不能单凭 TD 或裁剪比例确定策略退化的根因。
 - 与[同环境、同奖励的 MADDPG 对照](runs/maddpg_radial_5v5_jia_heading_time01_seed7_2m/evaluations.jsonl)核对：环境配置与实现哈希、共同训练超参数、seed 和评估种子设置一致。MADDPG Best 为 2/30 全歼、74.0% 目标捕获；Last 为 0/30、19.3%。MATD3 在这一次固定种子评估的 Best/Last 均更好，但它同时改变双 Critic、目标平滑和 Actor 延迟更新，不能归因于单个机制；也需要新的独立评估种子和重复训练种子验证泛化与稳定性。MADDPG 单 Critic loss 与 MATD3 双 Critic loss 总和不能直接比较。
 
+### 2026-11-27 · 无显式分配、最近目标塑形：MATD3，d0.2 / h0.3 / time−0.1，2M
+
+- [配置](runs/matd3_radial_5v5_jia_heading_nearest_time01_seed7_2m/settings.json)、[汇总](runs/matd3_radial_5v5_jia_heading_nearest_time01_seed7_2m/summary.json)、[评估](runs/matd3_radial_5v5_jia_heading_nearest_time01_seed7_2m/evaluations.jsonl)、[更新汇总](runs/matd3_radial_5v5_jia_heading_nearest_time01_seed7_2m/updates_summary.jsonl)、[训练回合](runs/matd3_radial_5v5_jia_heading_nearest_time01_seed7_2m/episodes.jsonl)：独立 `Interception/14`，Actor 51 维、Critic 状态 60 维；`assignment_method=none`，距离与航向塑形参照每步最近的可见目标。2M 步、8,260 局、199,898 次 Critic 更新、99,949 次 Actor 更新；单环境、seed 7、评估每 100k 步固定 30 局。
+- 20 次周期评估均为 0/30 全歼。Best 在 600k：捕获率 49.3%、Return +171.32；Last 2M：捕获率 14.7%、Return +59.25，分量为捕获 +14.67、突防 −213.33、距离 +96.95、航向 +185.29、时间 −24.32。末五次评估平均捕获率 27.6%。探索训练 19/8,260 局全歼，最后 100 局全歼 0、捕获率 41.8%、Return +126.04；训练指标与确定性评估差异大。
+- 末尾约 1,000 次 Critic 更新：双 Critic loss 合计 23.62、TD 绝对误差 0.855、Q/target Q 均值约 −35.49/−35.43；Actor 梯度范数 0.425、发生裁剪的 Actor 更新约 79.0%；Critic 梯度范数 16.11、至少一个 Critic 被裁剪的更新约 95.8%。TD 误差低于最初 1,000 次的 1.612，但确定性捕获率从峰值明显退化。Last 航向累计奖励高于捕获奖励，并不能据 Return 为正判断任务成功。
+
+### 2026-11-27 · 无显式分配、最近目标塑形：MADDPG，d0.2 / h0.3 / time−0.1，2M
+
+- [配置](runs/maddpg_radial_5v5_jia_heading_nearest_time01_seed7_2m/settings.json)、[汇总](runs/maddpg_radial_5v5_jia_heading_nearest_time01_seed7_2m/summary.json)、[评估](runs/maddpg_radial_5v5_jia_heading_nearest_time01_seed7_2m/evaluations.jsonl)、[更新汇总](runs/maddpg_radial_5v5_jia_heading_nearest_time01_seed7_2m/updates_summary.jsonl)、[训练回合](runs/maddpg_radial_5v5_jia_heading_nearest_time01_seed7_2m/episodes.jsonl)：与上组使用相同环境配置、实现哈希和基础学习参数；2M 步、8,280 局、199,898 次 Actor/Critic 更新。
+- Best 在 400k：1/30 全歼、捕获率 66.0%、Return +173.38；Last：0/30 全歼、捕获率 26.0%、Return +89.11，分量为捕获 +26、突防 −185、距离 +86.80、航向 +185.59、时间 −24.28。20 次固定评估合计只出现 1 局全歼；末五次捕获率均值 40.9%。探索训练 37/8,280 局全歼；最后 100 局全歼 0、捕获率 41.0%。
+- 末尾约 1,000 次更新：Critic loss 10.58、TD 误差 0.839、Q/target Q 均值 −26.73/−26.66；Actor 梯度范数 0.281、裁剪比例约 29.4%；Critic 梯度范数 15.21、至少一个 Critic 被裁剪的更新约 89.1%。最初 1,000 次 TD 误差 1.646。与同奖励 MATD3 相比，Best 曾有 1 局全歼、Last 捕获率较高，但两组后期都未稳定形成全歼能力；双 Critic loss 与单 Critic loss 不能直接比大小。
+
+### 2026-11-27 · 无显式分配、最近目标塑形：MATD3，d0.8 / h0.03 / time−0.015，2M
+
+- [配置](runs/matd3_radial_5v5_jia_heading_nearest_d08_h003_time0015_seed7_2m/settings.json)、[汇总](runs/matd3_radial_5v5_jia_heading_nearest_d08_h003_time0015_seed7_2m/summary.json)、[评估](runs/matd3_radial_5v5_jia_heading_nearest_d08_h003_time0015_seed7_2m/evaluations.jsonl)、[更新汇总](runs/matd3_radial_5v5_jia_heading_nearest_d08_h003_time0015_seed7_2m/updates_summary.jsonl)、[训练回合](runs/matd3_radial_5v5_jia_heading_nearest_d08_h003_time0015_seed7_2m/episodes.jsonl)：与上两组相同的 `Interception/14` 环境实现和 51/60 维观测/状态；同时调整三项奖励系数。2M 步、8,471 局、199,898 次 Critic 更新及 99,949 次 Actor 更新。
+- Best 在 1.6M：10/30 全歼、捕获率 82.0%、Return +498.06；Last：0/30 全歼、捕获率 66.0%、Return +439.69，分量为捕获 +66、突防 −85、距离 +449.12、航向 +13.14、时间 −3.56。末五次评估平均捕获率 66.1%，但 1.6M 的 10/30 后连续四次为 0/30，未稳定保持全歼。探索训练 404/8,471 局全歼，最后 100 局 10/100、捕获率 58.4%、Return +413.41。
+- 末尾约 1,000 次 Critic 更新：双 Critic loss 合计 29.45、TD 误差 1.167、Q/target Q 均值约 +2.00/+2.07；Actor 梯度范数 0.652、裁剪比例约 97.8%；Critic 梯度范数 31.67、裁剪比例 100%。832 局零捕获训练回合中，约 51.2% 的团队 Return 仍为正，说明高距离系数下 Return 尤其不能代替捕获指标。
+
+### 2026-11-27 · 无显式分配、最近目标塑形：MADDPG，d0.8 / h0.03 / time−0.015，2M
+
+- [配置](runs/maddpg_radial_5v5_jia_heading_nearest_d08_h003_time0015_seed7_2m/settings.json)、[汇总](runs/maddpg_radial_5v5_jia_heading_nearest_d08_h003_time0015_seed7_2m/summary.json)、[评估](runs/maddpg_radial_5v5_jia_heading_nearest_d08_h003_time0015_seed7_2m/evaluations.jsonl)、[更新汇总](runs/maddpg_radial_5v5_jia_heading_nearest_d08_h003_time0015_seed7_2m/updates_summary.jsonl)、[训练回合](runs/maddpg_radial_5v5_jia_heading_nearest_d08_h003_time0015_seed7_2m/episodes.jsonl)：与上组环境配置、实现哈希、奖励一致；2M 步、8,340 局、199,898 次 Actor/Critic 更新。用户的第三份粘贴日志连续包含本次及上述 d0.2 的 MADDPG 运行。
+- Best 在 800k：13/30 全歼、捕获率 82.0%、Return +493.40；Last：3/30 全歼、捕获率 62.0%、Return +410.33，分量为捕获 +62、突防 −95、距离 +434.54、航向 +12.26、时间 −3.47。末五次评估平均捕获率 50.7%；800k 峰值后 1.1M 仅 10.7% 捕获，性能大幅波动。探索训练 141/8,340 局全歼，最后 100 局 4/100、捕获率 51.4%。
+- 末尾约 1,000 次更新：Critic loss 13.32、TD 误差 1.036、Q/target Q 均值 +0.14/+0.21；Actor 梯度范数 0.360、裁剪比例约 53.1%；Critic 梯度范数 16.39、裁剪比例约 96.2%。771 局零捕获训练回合中约 58.2% Return 为正。与同奖励 MATD3 相比，Best 全歼率略高、Last 仍有 3/30，MATD3 的末五次平均捕获率和探索训练全歼局数较高；单一随机种子不能确定算法整体优劣。
+
+### 2026-11-27 · 理想全局一对一分配：MATD3，d0.8 / h0.03 / time−0.015，2M
+
+- [配置](runs/matd3_radial_5v5_jia_heading_d08_h003_time0015_seed7_2m/settings.json)、[汇总](runs/matd3_radial_5v5_jia_heading_d08_h003_time0015_seed7_2m/summary.json)、[评估](runs/matd3_radial_5v5_jia_heading_d08_h003_time0015_seed7_2m/evaluations.jsonl)、[更新汇总](runs/matd3_radial_5v5_jia_heading_d08_h003_time0015_seed7_2m/updates_summary.jsonl)、[训练回合](runs/matd3_radial_5v5_jia_heading_d08_h003_time0015_seed7_2m/episodes.jsonl)：`Interception/13`、Actor 26 维、Critic 状态 85 维、理想全局距离一对一分配；2M 步、8,320 局、199,898 次 Critic 更新及 99,949 次 Actor 更新；奖励与上述 d0.8 最近目标组同系数，但观测、Critic 状态、分配及塑形目标语义同时不同。
+- Best 在 1.8M：3/30 全歼、捕获率 71.3%、Return +450.41；Last：0/30 全歼、捕获率 48.0%、Return +332.96，分量为捕获 +48、突防 −130、距离 +404.79、航向 +13.77、时间 −3.61。末五次评估平均捕获率 57.3%，20 次重复固定评估合计 11 局全歼；探索训练 131/8,320 局全歼，最后 100 局 0/100、捕获率 40.4%。
+- 末尾约 1,000 次 Critic 更新：双 Critic loss 合计 46.63、TD 误差 1.289、Q/target Q 均值约 −18.97/−18.88；Actor 梯度范数 0.625、裁剪比例约 98.0%；Critic 梯度范数 31.48、裁剪比例 100%。对比同系数最近目标 MATD3 的 Best 10/30、Last 0/30，只能说本次种子下最近目标方案的评估峰值更高；接口同时变化，不可将差异全归于分配器。
+
+### 2026-11-27 · 五组对比口径
+
+- 五组均为 seed 7、单环境、2M 步、每 100k 用相同 30 个种子确定性评估、uniform replay 200k、batch 128、`γ=0.99`、`τ=0.005`、Actor/Critic LR `0.0003/0.001`、每 10 步更新。MATD3 使用双 Critic、目标动作平滑及 Actor 每两次 Critic 更新一次；其 `critic_loss` 是两个网络损失之和。所有训练回合的奖励分量与团队 Return 对账，时间分量与负系数乘回合步数对账，最大误差约 `5e−12`。
+- 51/60 维的最近目标场景不进行显式目标分配：每步根据可见目标的最近距离计算距离/航向塑形；26/85 维理想场景按分配目标塑形。两者均保留一架防御机最多捕获一架的物理规则。`d0.8` 组大额 Return 主要来自距离塑形；零捕获也可能有正 Return。`d0.2` 与 `d0.8` 同时改变距离、航向、时间三项，不构成单一系数消融。
+- 五组均有明显的 Best/Last 差距和周期评估波动。重复使用相同 30 个种子选 Best，所有周期评估合计不能当成独立样本量；确定性评估与带噪探索训练也不能直接等同。单次 seed 7 结果不足以判定最近目标优于理想分配，或 MATD3 整体优于 MADDPG。
+
+### 2026-11-27 · 最近目标 B：MATD3 与 MADDPG 同条件对照
+
+- 数据：[MATD3 配置](runs/matd3_radial_5v5_jia_heading_nearest_d08_h003_time0015_seed7_2m/settings.json)、[MATD3 评估](runs/matd3_radial_5v5_jia_heading_nearest_d08_h003_time0015_seed7_2m/evaluations.jsonl)、[MATD3 训练回合](runs/matd3_radial_5v5_jia_heading_nearest_d08_h003_time0015_seed7_2m/episodes.jsonl)、[MATD3 更新](runs/matd3_radial_5v5_jia_heading_nearest_d08_h003_time0015_seed7_2m/updates_summary.jsonl)；[MADDPG 配置](runs/maddpg_radial_5v5_jia_heading_nearest_d08_h003_time0015_seed7_2m/settings.json)、[MADDPG 评估](runs/maddpg_radial_5v5_jia_heading_nearest_d08_h003_time0015_seed7_2m/evaluations.jsonl)、[MADDPG 训练回合](runs/maddpg_radial_5v5_jia_heading_nearest_d08_h003_time0015_seed7_2m/episodes.jsonl)、[MADDPG 更新](runs/maddpg_radial_5v5_jia_heading_nearest_d08_h003_time0015_seed7_2m/updates_summary.jsonl)。[固定评估对照图](reports/matd3_vs_maddpg_nearest_b_seed7_eval.png)。两组环境配置和实现哈希相同，均为 51 维 Actor、60 维 Critic 状态、无显式分配，`d/h/time=0.8/0.03/−0.015`；seed 7、单环境、2M、uniform replay、同一批 30 个评估种子。MATD3 另外使用双 Critic、目标动作平滑和每两次 Critic 更新一次 Actor。
+- 固定评估：MADDPG 在 800k 达到 13/30 全歼、82% 捕获，MATD3 当时 0/30、25.3% 捕获；MATD3 在 1.6M 达到 10/30、82%，MADDPG 当时 0/30、38%。MATD3 最后 10 次评估平均捕获率 61.2%，MADDPG 为 41.5%；Last 分别为 0/30、66% 与 3/30、62%。最后五次评估平均捕获率为 66.1%/50.7%。相同平均捕获率不保证相同全歼率，部分捕获与完整任务必须分开报告。20 个检查点中，MATD3 在 13 个点的捕获率高于 MADDPG、7 个点较低；同一 30 种子反复用于选 Best，不能将这些点当独立试验。
+- 探索训练：MATD3 共 404/8,471 局全歼、目标捕获率 47.5%；MADDPG 共 141/8,340 局、42.5%。最后 500 局分别 46/500 全歼、60.4% 捕获与 6/500、45.2%；最后 100 局分别 10/100、58.4% 与 4/100、51.4%。训练局带动作噪声且两次训练的回合种子序列不能逐局配对，但后期 MATD3 的探索训练表现更好。
+- Last 奖励账本：MATD3 捕获 +66、突防 −85、距离 +449.12、航向 +13.14、时间 −3.56、团队 Return +439.69；MADDPG 分别 +62、−95、+434.54、+12.26、−3.47、+410.33。MATD3 多捕获 0.2 架/局，事件净额高约 14，距离奖励高约 14.57；两者 Last 固定评估仍有 30/30 与 27/30 失败，高 Return 受距离塑形主导。Last 500 训练局的距离项均值为 +445.44/+425.50，不能代替成功指标。
+- 末尾约 1,000 次 Critic 更新：MATD3 `td_abs=1.167`、双 Critic loss 总和 29.45（两个网络组约 14.71/14.74）、Actor 梯度范数 0.652、Actor 裁剪更新比例 97.8%、Critic 梯度范数 31.67、至少一个 Critic 被裁剪比例 100%；MADDPG 分别 `td_abs=1.036`、单 Critic loss 13.32、0.360、53.1%、16.39、96.2%。MATD3 的 Critic 更新 199,898 次但 Actor/target 各 99,949 次；MADDPG Actor/Critic/target 各 199,898 次。双 Critic loss 不宜直接与单 Critic loss 比大小；MATD3 有 10 个 Critic 网络，“任一个被裁剪”比例也不与 5 个 Critic 的 MADDPG 完全同口径。
+- 结论：MATD3 后半程的平均部分捕获与探索训练全歼更多；MADDPG 的单次固定评估峰值全歼及 Last 全歼更高。两组均出现剧烈检查点波动，尚不能认定谁稳定学会 5/5。只用一个训练 seed 和反复使用的 30 个评估种子，不足以判定算法总体优劣；新评估种子与重复训练 seed 才能验证泛化。
+
 ## 后续追加格式
 
 每次用户要求分析一次训练，就在“已分析训练记录”末尾新增日期与运行目录的小节，记录：实际配置与完成状态、评估峰值和末次的全歼/捕获/团队回报、主要奖励分量、Actor/Critic 学习指标、训练趋势、可比性限制、`settings.json`/`summary.json`/`evaluations.jsonl` 证据链接。未完成训练明确标注快照，不写成最终结论。
